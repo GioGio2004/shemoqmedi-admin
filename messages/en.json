@@ -1,0 +1,16 @@
+{
+  "common": {
+    "signIn": "Sign In",
+    "signUp": "Sign Up",
+    "signOut": "Sign Out",
+    "dashboard": "Dashboard",
+    "loading": "Loading..."
+  },
+  "home": {
+    "title": "Shemoqmedi Admin",
+    "description": "Manage your store efficiently",
+    "signInPrompt": "Please sign in to access the dashboard.",
+    "goToDashboard": "Go to Dashboard",
+    "signedIn": "You are signed in"
+  }
+}

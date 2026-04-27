@@ -1,0 +1,16 @@
+{
+  "common": {
+    "signIn": "Giriş Yap",
+    "signUp": "Kayıt Ol",
+    "signOut": "Çıkış Yap",
+    "dashboard": "Gösterge Paneli",
+    "loading": "Yükleniyor..."
+  },
+  "home": {
+    "title": "Shemoqmedi Yönetici",
+    "description": "Mağazanızı verimli bir şekilde yönetin",
+    "signInPrompt": "Gösterge paneline erişmek için lütfen giriş yapın.",
+    "goToDashboard": "Panele Git",
+    "signedIn": "Giriş yaptınız"
+  }
+}
