@@ -33,6 +33,7 @@ export const upsertFromClerk = internalMutation({
       console.log("✅ Creating new organization:", orgAttributes.name);
       await ctx.db.insert("organizations", {
         ...orgAttributes,
+        isActive: true,
         createdAt: Date.now(),
       });
     } else {

@@ -54,7 +54,7 @@ export default defineSchema({
     stripeCustomerId: v.optional(v.string()),
     billingCycleEnd: v.optional(v.number()),
 
-    isActive: v.boolean(),
+    isActive: v.optional(v.boolean()), // Always set to true on insert; optional to handle documents created before this field was added
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_clerk_id", ["clerkId"]),
@@ -232,6 +232,7 @@ export default defineSchema({
     providerCustomerId: v.optional(v.string()), // Flitt's saved customer/card ID
 
     // Billing Cycle
+
     currentPeriodStart: v.number(),
     currentPeriodEnd: v.number(),
     cancelAtPeriodEnd: v.boolean(), // If they cancel, keep active until the month ends

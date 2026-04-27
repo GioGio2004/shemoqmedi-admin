@@ -46,6 +46,22 @@ http.route({
             clerkId: event.data.id!,
           });
           break;
+
+        // --- MEMBERSHIP EVENTS ---
+        case "organizationMembership.created":
+        case "organizationMembership.updated":
+          await ctx.runMutation(internal.memberships.upsertFromClerk, {
+            clerkUserId: event.data.public_user_data.user_id,
+            orgId: event.data.organization.id,
+            role: event.data.role,
+          });
+          break;
+        case "organizationMembership.deleted":
+          await ctx.runMutation(internal.memberships.deleteFromClerk, {
+            clerkUserId: event.data.public_user_data.user_id,
+            orgId: event.data.organization.id,
+          });
+          break;
       }
 
       return new Response("OK", { status: 200 });
