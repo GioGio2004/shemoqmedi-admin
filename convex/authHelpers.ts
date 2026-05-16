@@ -46,6 +46,22 @@ export async function requireUser(ctx: AnyCtx) {
 export async function verifyOrgAccess(ctx: AnyCtx, orgId: string) {
   const user = await requireUser(ctx);
 
+  // ── Super-admin bypass ───────────────────────────────────────────────────
+  // Users with the platform-level "super_admin" role have unrestricted access
+  // to every organization's data. They are not required to have a membership
+  // row in the `memberships` table for the target org.
+  if (user.role === "super_admin") {
+    // Return a synthetic membership object so callers don't need to null-check
+    const syntheticMembership = {
+      _id: "synthetic" as unknown as import("./_generated/dataModel").Id<"memberships">,
+      _creationTime: 0,
+      userId: user._id,
+      orgId,
+      role: "org:admin", // Super admin gets full org permissions
+    };
+    return { user, membership: syntheticMembership };
+  }
+
   const membership = await ctx.db
     .query("memberships")
     .withIndex("by_user_and_org", (q) =>

@@ -9,13 +9,20 @@
  */
 
 import type * as authHelpers from "../authHelpers.js";
+import type * as backfill from "../backfill.js";
 import type * as categories from "../categories.js";
+import type * as chat from "../chat.js";
 import type * as http from "../http.js";
 import type * as lib_utils from "../lib/utils.js";
 import type * as memberships from "../memberships.js";
 import type * as menuItems from "../menuItems.js";
+import type * as orders from "../orders.js";
 import type * as organizations from "../organizations.js";
+import type * as publicMenu from "../publicMenu.js";
 import type * as users from "../users.js";
+import type * as volooAi from "../volooAi.js";
+import type * as volootags from "../volootags.js";
+import type * as volootagsAdmin from "../volootagsAdmin.js";
 
 import type {
   ApiFromModules,
@@ -25,13 +32,20 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   authHelpers: typeof authHelpers;
+  backfill: typeof backfill;
   categories: typeof categories;
+  chat: typeof chat;
   http: typeof http;
   "lib/utils": typeof lib_utils;
   memberships: typeof memberships;
   menuItems: typeof menuItems;
+  orders: typeof orders;
   organizations: typeof organizations;
+  publicMenu: typeof publicMenu;
   users: typeof users;
+  volooAi: typeof volooAi;
+  volootags: typeof volootags;
+  volootagsAdmin: typeof volootagsAdmin;
 }>;
 
 /**

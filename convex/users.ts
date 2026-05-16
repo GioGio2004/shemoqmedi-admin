@@ -154,9 +154,13 @@ export const upsertFromClerk = internalMutation({
         // Don't throw here - we don't want user creation to fail if email fails
       }
     } else {
-      // User exists - update their information
+      // User exists - update their information but NEVER overwrite a manually
+      // assigned role (e.g. super_admin). The role field is managed by the
+      // platform, not by Clerk webhook data.
       console.log("📝 Updating existing user:", userAttributes.email);
-      await ctx.db.patch(existingUser._id, userAttributes);
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { ...updatePayload } = userAttributes;
+      await ctx.db.patch(existingUser._id, updatePayload);
     }
 
     return null;

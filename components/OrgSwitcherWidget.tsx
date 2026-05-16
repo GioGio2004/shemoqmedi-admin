@@ -24,8 +24,8 @@ export function OrgSwitcherWidget() {
         },
       }}
       hidePersonal
-      afterSelectOrganizationUrl="/super-admin"
-      afterCreateOrganizationUrl="/super-admin"
+      afterSelectOrganizationUrl="/dashboard"
+      afterCreateOrganizationUrl="/dashboard"
     />
   );
 }

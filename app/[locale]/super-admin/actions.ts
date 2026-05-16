@@ -45,11 +45,10 @@ async function assertSuperAdmin() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// INVITE ADMIN ACTION
-// Sends a Clerk organization invitation to the provided email, assigning them
-// the "org:admin" role so they can manage their cafe's menu and orders.
+// INVITE USER ACTION
+// Sends a Clerk organization invitation to the provided email with a custom role
 // ─────────────────────────────────────────────────────────────────────────────
-export async function inviteAdminAction(formData: FormData) {
+export async function inviteUserToOrganizationAction(formData: FormData) {
   const { userId, client } = await assertSuperAdmin();
 
   const organizationId = formData.get("organizationId") as string;
@@ -59,7 +58,6 @@ export async function inviteAdminAction(formData: FormData) {
     throw new Error("Organization and email address are required.");
   }
 
-  // Basic email format check — Clerk will validate further server-side
   if (!emailAddress.includes("@")) {
     throw new Error("Invalid email address format.");
   }
@@ -69,8 +67,7 @@ export async function inviteAdminAction(formData: FormData) {
       organizationId,
       emailAddress,
       inviterUserId: userId,
-      role: "org:admin",
-      // Redirect to the dashboard after the invitee signs up/in
+      role: "org:member", // Only use standard Clerk roles for pure access control
       redirectUrl: `${process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"}/dashboard`,
     });
 
@@ -78,7 +75,32 @@ export async function inviteAdminAction(formData: FormData) {
     revalidatePath("/super-admin");
   } catch (error: any) {
     console.error("Failed to send invitation:", error);
-    // Surface Clerk's message (e.g. "already a member", "already invited")
+    throw new Error(error.errors?.[0]?.message ?? error.message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IMPERSONATE USER ACTION
+// Generates an actor token to securely log in as the target user.
+// ─────────────────────────────────────────────────────────────────────────────
+export async function impersonateUserAction(formData: FormData) {
+  const { userId: superAdminId, client } = await assertSuperAdmin();
+  
+  const targetUserId = formData.get("targetUserId") as string;
+  if (!targetUserId) throw new Error("Target user ID is required");
+
+  try {
+    // We use actorTokens which allows the session to know it's being impersonated
+    const actorToken = await client.actorTokens.create({
+      actor: { sub: superAdminId },
+      userId: targetUserId,
+      expiresInSeconds: 600, // 10 minutes to click the link
+    });
+
+    console.log(`✅ Actor token generated for super admin ${superAdminId} to impersonate ${targetUserId}`);
+    return { url: actorToken.url };
+  } catch (error: any) {
+    console.error("Failed to create impersonation token:", error);
     throw new Error(error.errors?.[0]?.message ?? error.message);
   }
 }

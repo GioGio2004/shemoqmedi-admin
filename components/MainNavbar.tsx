@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { Authenticated, Unauthenticated, AuthLoading } from "convex/react";
 import { UserButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
@@ -13,9 +14,14 @@ export function Navbar() {
             <div className="container mx-auto px-4 h-16 flex items-center justify-between">
                 {/* Brand */}
                 <Link href="/" className="flex items-center gap-2 transition-opacity hover:opacity-80">
-                    <div className="w-8 h-8 rounded-lg bg-[#FF8C00] flex items-center justify-center shadow-[0_0_15px_rgba(255,140,0,0.3)]">
-                        <span className="text-zinc-950 font-bold text-lg leading-none">V</span>
-                    </div>
+                    <Image
+                        src="/logo.png"
+                        alt="Shemoqmedi logo"
+                        width={32}
+                        height={32}
+                        className="rounded-lg drop-shadow-[0_0_8px_rgba(255,140,0,0.3)]"
+                        priority
+                    />
                     <span className="text-lg font-light tracking-[0.2em] uppercase text-zinc-100 hidden sm:block">
                         shemoqmedi
                     </span>
@@ -39,7 +45,7 @@ export function Navbar() {
                             <Button variant="ghost" asChild className="hidden sm:flex text-zinc-300 hover:text-zinc-50 hover:bg-zinc-900">
                                 <Link href="/sign-in">Sign In</Link>
                             </Button>
-                            <Button asChild className="bg-[#FF8C00] text-black hover:bg-[#e67e00] shadow-[0_0_10px_rgba(255,140,0,0.2)] transition-all">
+                            <Button asChild className="bg-white text-black hover:bg-zinc-200 transition-all font-medium">
                                 <Link href="/sign-up">Get Started</Link>
                             </Button>
                         </div>

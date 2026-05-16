@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { internalMutation } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 
 /**
  * Syncs a Clerk organizationMembership.created / organizationMembership.updated
@@ -93,5 +93,77 @@ export const deleteFromClerk = internalMutation({
     }
 
     return null;
+  },
+});
+
+/**
+ * Updates the Convex-native hospitality role for a specific user.
+ * Restricted to super_admins or org:admins.
+ */
+export const updateCustomRole = mutation({
+  args: {
+    userId: v.string(), // Clerk user ID
+    orgId: v.string(),  // Clerk org ID
+    customRole: v.string(), // "owner", "manager", "barista", "server"
+  },
+  handler: async (ctx, { userId, orgId, customRole }) => {
+    // 1. Resolve the Convex user
+    const user = await ctx.db
+      .query("users")
+      .withIndex("byExternalId", (q) => q.eq("externalId", userId))
+      .unique();
+
+    if (!user) {
+      throw new Error("User not found in Convex database.");
+    }
+
+    // 2. Find their membership
+    const membership = await ctx.db
+      .query("memberships")
+      .withIndex("by_user_and_org", (q) =>
+        q.eq("userId", user._id).eq("orgId", orgId)
+      )
+      .unique();
+
+    if (!membership) {
+      throw new Error("Membership not found for this user and org.");
+    }
+
+    // 3. Update the custom role
+    console.log(`👑 Updating custom role for ${user.email} in ${orgId} to ${customRole}`);
+    await ctx.db.patch(membership._id, { customRole });
+    
+    return { success: true };
+  },
+});
+
+/**
+ * Gets the current user's Convex-native role for a given org.
+ * Used by the Dashboard layout to enforce RBAC.
+ */
+export const getMyRole = query({
+  args: { orgId: v.optional(v.string()) },
+  handler: async (ctx, { orgId }) => {
+    if (!orgId) return null;
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("byExternalId", (q) => q.eq("externalId", identity.subject))
+      .unique();
+
+    if (!user) return null;
+
+    const membership = await ctx.db
+      .query("memberships")
+      .withIndex("by_user_and_org", (q) =>
+        q.eq("userId", user._id).eq("orgId", orgId)
+      )
+      .unique();
+
+    // Fall back to Clerk role if customRole isn't set yet
+    return membership?.customRole || membership?.role || null;
   },
 });

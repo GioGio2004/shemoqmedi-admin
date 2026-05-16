@@ -10,13 +10,13 @@ export default async function DashboardOverviewPage() {
   if (!userId) redirect("/sign-in");
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 text-zinc-50 font-sans">
       {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-zinc-100">
+      <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both">
+        <h1 className="text-3xl font-medium tracking-tight text-white">
           Overview
         </h1>
-        <p className="text-sm text-zinc-500 mt-1">
+        <p className="text-sm text-zinc-400 mt-1">
           {orgId
             ? "Your workspace is active. Real-time data coming in Sprint 2."
             : "Select a workspace using the switcher in the sidebar to get started."}
@@ -31,68 +31,64 @@ export default async function DashboardOverviewPage() {
             value: "—",
             sub: "Active items",
             icon: UtensilsCrossed,
-            color: "text-primary",
-            bg: "bg-primary/10",
           },
           {
             label: "Open Orders",
             value: "—",
             sub: "Pending & preparing",
             icon: ShoppingBag,
-            color: "text-emerald-400",
-            bg: "bg-emerald-500/10",
           },
           {
             label: "Online Tags",
             value: "—",
             sub: "Active NFC terminals",
             icon: Wifi,
-            color: "text-blue-400",
-            bg: "bg-blue-500/10",
           },
           {
             label: "Workspace",
             value: orgId ? "Active" : "None",
             sub: orgId ? orgId.slice(0, 14) + "…" : "Select an org",
             icon: Building2,
-            color: "text-zinc-400",
-            bg: "bg-zinc-700/40",
           },
-        ].map((stat) => {
+        ].map((stat, idx) => {
           const Icon = stat.icon;
+          // stagger delays for cards
+          const delayClass = [
+            "delay-200",
+            "delay-300",
+            "delay-500",
+            "delay-700"
+          ][idx % 4];
+
           return (
             <Card
               key={stat.label}
-              className="relative overflow-hidden bg-zinc-900 border-zinc-800/60"
+              className={`animate-in fade-in slide-in-from-bottom-4 duration-700 ${delayClass} fill-mode-both bg-[#09090b] border-white/10 shadow-none hover:border-white/20 transition-all`}
             >
               <CardHeader className="pb-2">
-                <CardDescription className="flex items-center gap-1.5 text-xs text-zinc-500">
-                  <div className={`flex h-5 w-5 items-center justify-center rounded-md ${stat.bg}`}>
-                    <Icon className={`h-3 w-3 ${stat.color}`} />
-                  </div>
+                <CardDescription className="flex items-center gap-1.5 text-xs text-zinc-400 font-medium">
+                  <Icon className="h-3.5 w-3.5 text-zinc-400" />
                   {stat.label}
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold tabular-nums text-zinc-100">
+                <div className="text-3xl font-medium tabular-nums text-white">
                   {stat.value}
                 </div>
-                <p className="text-xs text-zinc-600 mt-1">{stat.sub}</p>
+                <p className="text-xs text-zinc-500 mt-1 font-medium">{stat.sub}</p>
               </CardContent>
-              <div className="absolute -right-3 -top-3 h-16 w-16 rounded-full opacity-40 blur-xl"
-                style={{ background: `oklch(0.718 0.195 53.4 / 0.08)` }} />
             </Card>
           );
         })}
       </div>
 
       {/* Placeholder content panel */}
-      <Card className="bg-zinc-900 border-zinc-800/60 border-dashed">
+      <Card className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-1000 fill-mode-both bg-[#09090b] border-white/10 border-dashed shadow-none">
         <CardHeader>
-          <CardTitle className="text-zinc-400 text-base">
+          <CardTitle className="text-zinc-300 text-base font-medium">
             Sprint 2 — Live Data Coming Soon
           </CardTitle>
-          <CardDescription className="text-zinc-600">
+          <CardDescription className="text-zinc-500">
             Convex realtime queries for categories, menu items, and order pipeline will be wired here.
           </CardDescription>
         </CardHeader>
