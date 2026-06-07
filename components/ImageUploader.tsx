@@ -9,6 +9,7 @@ import {
   ImageKitUploadNetworkError,
 } from "@imagekit/next";
 import type { UploadResponse } from "@imagekit/next";
+import { Check } from "lucide-react";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -17,10 +18,10 @@ function slugify(str: string): string {
   return str
     .toLowerCase()
     .trim()
-    .replace(/[^\w\s-]/g, "")   // remove non-alphanumeric (except - and space)
-    .replace(/[\s_]+/g, "-")    // collapse spaces/underscores to single hyphen
-    .replace(/--+/g, "-")       // collapse repeated hyphens
-    .replace(/^-+|-+$/g, "");   // trim leading/trailing hyphens
+    .replace(/[^\w\s-]/g, "") // remove non-alphanumeric (except - and space)
+    .replace(/[\s_]+/g, "-") // collapse spaces/underscores to single hyphen
+    .replace(/--+/g, "-") // collapse repeated hyphens
+    .replace(/^-+|-+$/g, ""); // trim leading/trailing hyphens
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -34,9 +35,15 @@ export interface ImageUploaderProps {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ImageUploader({ itemName, cafeName, onSuccess }: ImageUploaderProps) {
+export function ImageUploader({
+  itemName,
+  cafeName,
+  onSuccess,
+}: ImageUploaderProps) {
   const [progress, setProgress] = useState<number>(0);
-  const [status, setStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
+  const [status, setStatus] = useState<
+    "idle" | "uploading" | "success" | "error"
+  >("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [uploadedUrl, setUploadedUrl] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -44,6 +51,7 @@ export function ImageUploader({ itemName, cafeName, onSuccess }: ImageUploaderPr
 
   async function handleUpload(file: File) {
     setStatus("uploading");
+
     setProgress(0);
     setErrorMessage(null);
 
@@ -66,8 +74,8 @@ export function ImageUploader({ itemName, cafeName, onSuccess }: ImageUploaderPr
         publicKey,
         fileName,
         folder: "/menu-items",
-        useUniqueFileName: true,    // true ensures fresh URL and bypasses CDN cache
-        overwriteFile: false,       // no need to overwrite since we use unique names
+        useUniqueFileName: true, // true ensures fresh URL and bypasses CDN cache
+        overwriteFile: false, // no need to overwrite since we use unique names
         // Removed urlEndpoint here to satisfy TS UploadOptions
         abortSignal: abortControllerRef.current.signal,
         onProgress(event) {
@@ -88,7 +96,9 @@ export function ImageUploader({ itemName, cafeName, onSuccess }: ImageUploaderPr
         setStatus("idle");
         setProgress(0);
       } else if (err instanceof ImageKitUploadNetworkError) {
-        setErrorMessage("Network error — please check your connection and try again.");
+        setErrorMessage(
+          "Network error — please check your connection and try again.",
+        );
         setStatus("error");
       } else if (err instanceof ImageKitInvalidRequestError) {
         setErrorMessage(`Invalid request: ${(err as Error).message}`);
@@ -157,18 +167,11 @@ export function ImageUploader({ itemName, cafeName, onSuccess }: ImageUploaderPr
         </div>
       )}
 
-      {/* Success preview */}
-      {status === "success" && uploadedUrl && (
-        <p className="text-xs text-zinc-400 truncate">
-          ✓ Uploaded:{" "}
-          <a
-            href={uploadedUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-white underline underline-offset-2 hover:text-zinc-300"
-          >
-            {uploadedUrl}
-          </a>
+      {/* Success indicator */}
+      {status === "success" && (
+        <p className="text-xs text-emerald-400 flex items-center gap-1.5">
+          <Check className="h-3.5 w-3.5" />
+          Image uploaded successfully
         </p>
       )}
 

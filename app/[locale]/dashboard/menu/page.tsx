@@ -270,15 +270,20 @@ function MenuItemDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-lg bg-[#09090b] border-white/10 text-white max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-white">
-            {existing ? "Edit Item" : "New Menu Item"}
+      {/* OPTIMIZED FOR DESKTOP:
+        Increased max-width to md:max-w-2xl lg:max-w-3xl. 
+        Added p-6 for better breathing room on larger displays.
+      */}
+      <DialogContent className="w-[95vw] sm:w-full md:max-w-2xl lg:max-w-3xl bg-[#09090b] border-white/10 text-white max-h-[90dvh] overflow-y-auto p-4 md:p-6 lg:p-8">
+        <DialogHeader className="mb-2">
+          <DialogTitle className="text-white text-xl">
+            {existing ? "Edit Menu Item" : "New Menu Item"}
           </DialogTitle>
         </DialogHeader>
-        <div className="space-y-5 py-2">
+
+        <div className="space-y-6 py-2">
           {/* Names */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label className="text-zinc-300 text-xs font-medium">
                 Name (EN) *
@@ -304,7 +309,7 @@ function MenuItemDialog({
           </div>
 
           {/* Descriptions */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label className="text-zinc-300 text-xs font-medium">
                 Description (EN)
@@ -313,7 +318,7 @@ function MenuItemDialog({
                 value={descEn}
                 onChange={(e) => setDescEn(e.target.value)}
                 placeholder="Smooth espresso with steamed milk."
-                rows={2}
+                rows={3}
                 className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30 resize-none"
               />
             </div>
@@ -325,83 +330,84 @@ function MenuItemDialog({
                 value={descKa}
                 onChange={(e) => setDescKa(e.target.value)}
                 placeholder="გლუვი ესპრესო ორთქლიანი რძით."
-                rows={2}
+                rows={3}
                 className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30 resize-none"
               />
             </div>
           </div>
 
-          {/* Price */}
-          <div className="space-y-1.5">
-            <Label className="text-zinc-300 text-xs font-medium">
-              Price (GEL) *
-            </Label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm font-medium">
-                ₾
-              </span>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={priceGel}
-                onChange={(e) => setPriceGel(e.target.value)}
-                placeholder="5.50"
-                className="pl-7 bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
-              />
-            </div>
-          </div>
-
-          {/* Tags */}
-          <div className="space-y-1.5">
-            <Label className="text-zinc-300 text-xs font-medium">Tags</Label>
-            <div className="flex gap-2">
-              <Input
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) =>
-                  e.key === "Enter" && (e.preventDefault(), addTag())
-                }
-                placeholder="vegan, spicy, popular…"
-                className="flex-1 bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={addTag}
-                className="border-white/20 text-zinc-300 hover:text-white hover:bg-white/5"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-            {tags.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {tags.map((t) => (
-                  <Badge
-                    key={t}
-                    variant="secondary"
-                    className="gap-1 bg-white/10 text-white border-white/20 text-xs font-medium"
-                  >
-                    {t}
-                    <button
-                      type="button"
-                      onClick={() => setTags(tags.filter((x) => x !== t))}
-                      className="ml-0.5 text-zinc-400 hover:text-white"
-                    >
-                      <X className="h-2.5 w-2.5" />
-                    </button>
-                  </Badge>
-                ))}
+          {/* Price & Tags (Side by side on desktop) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label className="text-zinc-300 text-xs font-medium">
+                Price (GEL) *
+              </Label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm font-medium">
+                  ₾
+                </span>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={priceGel}
+                  onChange={(e) => setPriceGel(e.target.value)}
+                  placeholder="5.50"
+                  className="pl-7 bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+                />
               </div>
-            )}
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-zinc-300 text-xs font-medium">Tags</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && (e.preventDefault(), addTag())
+                  }
+                  placeholder="vegan, spicy, popular…"
+                  className="flex-1 bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addTag}
+                  className="border-white/20 text-zinc-300 hover:text-white hover:bg-white/5 h-9"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              {tags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {tags.map((t) => (
+                    <Badge
+                      key={t}
+                      variant="secondary"
+                      className="gap-1 bg-white/10 text-white border-white/20 text-xs font-medium py-1 px-2"
+                    >
+                      {t}
+                      <button
+                        type="button"
+                        onClick={() => setTags(tags.filter((x) => x !== t))}
+                        className="ml-0.5 text-zinc-400 hover:text-white"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Image */}
-          <div className="space-y-2 border border-white/10 rounded-xl p-4 bg-white/[0.02]">
-            <Label className="text-zinc-300 text-xs font-medium flex items-center gap-1.5">
-              <ImageIcon className="h-3.5 w-3.5" />
-              Photo
+          {/* Image Upload Area */}
+          <div className="space-y-2 border border-white/10 rounded-xl p-5 bg-white/[0.02]">
+            <Label className="text-zinc-300 text-xs font-medium flex items-center gap-1.5 mb-2">
+              <ImageIcon className="h-4 w-4" />
+              Product Photo
             </Label>
             <ImageUploader
               cafeName={cafeName}
@@ -409,22 +415,23 @@ function MenuItemDialog({
               onSuccess={(res) => setImageUrl(res.url ?? "")}
             />
             {imageUrl && (
-              <div className="mt-2 rounded-lg overflow-hidden border border-white/10 w-24 h-24 relative">
+              <div className="mt-4 rounded-xl overflow-hidden border border-white/10 w-32 h-32 relative shadow-xl shadow-black/50">
                 <MenuImage
                   src={imageUrl.replace(
                     process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT ?? "",
                     "",
                   )}
                   alt={nameEn}
-                  width={96}
-                  height={96}
+                  width={128}
+                  height={128}
                   className="object-cover w-full h-full"
                 />
               </div>
             )}
           </div>
         </div>
-        <DialogFooter>
+
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:gap-2 pt-4 border-t border-white/10 mt-4">
           <Button
             variant="ghost"
             onClick={onClose}
@@ -435,7 +442,7 @@ function MenuItemDialog({
           <Button
             onClick={handleSave}
             disabled={saving || !nameEn.trim() || !priceGel}
-            className="bg-white text-black hover:bg-zinc-200 font-medium"
+            className="bg-white text-black hover:bg-zinc-200 font-medium px-8"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             {existing ? "Save Changes" : "Add Item"}
@@ -588,7 +595,6 @@ function MenuItemCard({
 function CategorySection({
   category,
   orgId,
-
   cafeName,
   defaultExpanded = false,
 }: {
