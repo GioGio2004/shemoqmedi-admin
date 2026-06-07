@@ -22,6 +22,8 @@ import {
   ToggleLeft,
   ToggleRight,
   ExternalLink,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -30,11 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -88,7 +86,8 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
       <div>
         <p className="font-medium text-foreground text-lg">No categories yet</p>
         <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">
-          Create your first category (e.g. "Coffee", "Food") to start building your menu.
+          Create your first category (e.g. "Coffee", "Food") to start building
+          your menu.
         </p>
       </div>
       <Button
@@ -149,7 +148,9 @@ function CategoryDialog({
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <Label className="text-zinc-300 text-xs font-medium">Name (English) *</Label>
+            <Label className="text-zinc-300 text-xs font-medium">
+              Name (English) *
+            </Label>
             <Input
               value={nameEn}
               onChange={(e) => setNameEn(e.target.value)}
@@ -158,7 +159,9 @@ function CategoryDialog({
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-zinc-300 text-xs font-medium">Name (Georgian)</Label>
+            <Label className="text-zinc-300 text-xs font-medium">
+              Name (Georgian)
+            </Label>
             <Input
               value={nameKa}
               onChange={(e) => setNameKa(e.target.value)}
@@ -168,10 +171,18 @@ function CategoryDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} className="text-zinc-400 hover:text-white hover:bg-white/5">
+          <Button
+            variant="ghost"
+            onClick={onClose}
+            className="text-zinc-400 hover:text-white hover:bg-white/5"
+          >
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={saving || !nameEn.trim()} className="bg-white text-black hover:bg-zinc-200 font-medium">
+          <Button
+            onClick={handleSave}
+            disabled={saving || !nameEn.trim()}
+            className="bg-white text-black hover:bg-zinc-200 font-medium"
+          >
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             {existing ? "Save Changes" : "Create"}
           </Button>
@@ -205,7 +216,9 @@ function MenuItemDialog({
   const [nameKa, setNameKa] = useState(existing?.name?.ka ?? "");
   const [descEn, setDescEn] = useState(existing?.description?.en ?? "");
   const [descKa, setDescKa] = useState(existing?.description?.ka ?? "");
-  const [priceGel, setPriceGel] = useState(existing ? tetriToGel(existing.price) : "");
+  const [priceGel, setPriceGel] = useState(
+    existing ? tetriToGel(existing.price) : "",
+  );
   const [tags, setTags] = useState<string[]>(existing?.tags ?? []);
   const [tagInput, setTagInput] = useState("");
   const [imageUrl, setImageUrl] = useState(existing?.imageUrl ?? "");
@@ -223,8 +236,9 @@ function MenuItemDialog({
     try {
       const name: Record<string, string> = { en: nameEn.trim() };
       if (nameKa.trim()) name.ka = nameKa.trim();
-      const description: Record<string, string> | undefined =
-        descEn.trim() ? { en: descEn.trim(), ...(descKa.trim() ? { ka: descKa.trim() } : {}) } : undefined;
+      const description: Record<string, string> | undefined = descEn.trim()
+        ? { en: descEn.trim(), ...(descKa.trim() ? { ka: descKa.trim() } : {}) }
+        : undefined;
       const price = gelToTetri(priceGel);
 
       if (existing) {
@@ -266,32 +280,66 @@ function MenuItemDialog({
           {/* Names */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label className="text-zinc-300 text-xs font-medium">Name (EN) *</Label>
-              <Input value={nameEn} onChange={(e) => setNameEn(e.target.value)} placeholder="Flat White" className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30" />
+              <Label className="text-zinc-300 text-xs font-medium">
+                Name (EN) *
+              </Label>
+              <Input
+                value={nameEn}
+                onChange={(e) => setNameEn(e.target.value)}
+                placeholder="Flat White"
+                className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+              />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-zinc-300 text-xs font-medium">Name (KA)</Label>
-              <Input value={nameKa} onChange={(e) => setNameKa(e.target.value)} placeholder="ფლეთ ვაითი" className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30" />
+              <Label className="text-zinc-300 text-xs font-medium">
+                Name (KA)
+              </Label>
+              <Input
+                value={nameKa}
+                onChange={(e) => setNameKa(e.target.value)}
+                placeholder="ფლეთ ვაითი"
+                className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+              />
             </div>
           </div>
 
           {/* Descriptions */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label className="text-zinc-300 text-xs font-medium">Description (EN)</Label>
-              <Textarea value={descEn} onChange={(e) => setDescEn(e.target.value)} placeholder="Smooth espresso with steamed milk." rows={2} className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30 resize-none" />
+              <Label className="text-zinc-300 text-xs font-medium">
+                Description (EN)
+              </Label>
+              <Textarea
+                value={descEn}
+                onChange={(e) => setDescEn(e.target.value)}
+                placeholder="Smooth espresso with steamed milk."
+                rows={2}
+                className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30 resize-none"
+              />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-zinc-300 text-xs font-medium">Description (KA)</Label>
-              <Textarea value={descKa} onChange={(e) => setDescKa(e.target.value)} placeholder="გლუვი ესპრესო ორთქლიანი რძით." rows={2} className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30 resize-none" />
+              <Label className="text-zinc-300 text-xs font-medium">
+                Description (KA)
+              </Label>
+              <Textarea
+                value={descKa}
+                onChange={(e) => setDescKa(e.target.value)}
+                placeholder="გლუვი ესპრესო ორთქლიანი რძით."
+                rows={2}
+                className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30 resize-none"
+              />
             </div>
           </div>
 
           {/* Price */}
           <div className="space-y-1.5">
-            <Label className="text-zinc-300 text-xs font-medium">Price (GEL) *</Label>
+            <Label className="text-zinc-300 text-xs font-medium">
+              Price (GEL) *
+            </Label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm font-medium">₾</span>
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 text-sm font-medium">
+                ₾
+              </span>
               <Input
                 type="number"
                 step="0.01"
@@ -311,20 +359,36 @@ function MenuItemDialog({
               <Input
                 value={tagInput}
                 onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addTag())}
+                onKeyDown={(e) =>
+                  e.key === "Enter" && (e.preventDefault(), addTag())
+                }
                 placeholder="vegan, spicy, popular…"
                 className="flex-1 bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
               />
-              <Button type="button" variant="outline" size="sm" onClick={addTag} className="border-white/20 text-zinc-300 hover:text-white hover:bg-white/5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addTag}
+                className="border-white/20 text-zinc-300 hover:text-white hover:bg-white/5"
+              >
                 <Plus className="h-3.5 w-3.5" />
               </Button>
             </div>
             {tags.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {tags.map((t) => (
-                  <Badge key={t} variant="secondary" className="gap-1 bg-white/10 text-white border-white/20 text-xs font-medium">
+                  <Badge
+                    key={t}
+                    variant="secondary"
+                    className="gap-1 bg-white/10 text-white border-white/20 text-xs font-medium"
+                  >
                     {t}
-                    <button type="button" onClick={() => setTags(tags.filter((x) => x !== t))} className="ml-0.5 text-zinc-400 hover:text-white">
+                    <button
+                      type="button"
+                      onClick={() => setTags(tags.filter((x) => x !== t))}
+                      className="ml-0.5 text-zinc-400 hover:text-white"
+                    >
                       <X className="h-2.5 w-2.5" />
                     </button>
                   </Badge>
@@ -347,7 +411,10 @@ function MenuItemDialog({
             {imageUrl && (
               <div className="mt-2 rounded-lg overflow-hidden border border-white/10 w-24 h-24 relative">
                 <MenuImage
-                  src={imageUrl.replace(process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT ?? "", "")}
+                  src={imageUrl.replace(
+                    process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT ?? "",
+                    "",
+                  )}
                   alt={nameEn}
                   width={96}
                   height={96}
@@ -358,10 +425,18 @@ function MenuItemDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} className="text-zinc-400 hover:text-white hover:bg-white/5">
+          <Button
+            variant="ghost"
+            onClick={onClose}
+            className="text-zinc-400 hover:text-white hover:bg-white/5"
+          >
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={saving || !nameEn.trim() || !priceGel} className="bg-white text-black hover:bg-zinc-200 font-medium">
+          <Button
+            onClick={handleSave}
+            disabled={saving || !nameEn.trim() || !priceGel}
+            className="bg-white text-black hover:bg-zinc-200 font-medium"
+          >
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             {existing ? "Save Changes" : "Add Item"}
           </Button>
@@ -390,7 +465,11 @@ function MenuItemCard({
   async function handleToggle() {
     setToggling(true);
     try {
-      await toggleAvailable({ orgId, menuItemId: item._id, isAvailable: !item.isAvailable });
+      await toggleAvailable({
+        orgId,
+        menuItemId: item._id,
+        isAvailable: !item.isAvailable,
+      });
     } finally {
       setToggling(false);
     }
@@ -398,17 +477,22 @@ function MenuItemCard({
 
   return (
     <>
-      <div className={cn(
-        "group flex items-center gap-4 p-4 rounded-xl border transition-all",
-        item.isAvailable
-          ? "border-white/10 bg-white/[0.02] hover:bg-white/[0.04]"
-          : "border-white/5 bg-transparent opacity-50 hover:opacity-70"
-      )}>
+      <div
+        className={cn(
+          "group flex items-center gap-4 p-4 rounded-xl border transition-all",
+          item.isAvailable
+            ? "border-white/10 bg-white/[0.02] hover:bg-white/[0.04]"
+            : "border-white/5 bg-transparent opacity-50 hover:opacity-70",
+        )}
+      >
         {/* Image */}
         <div className="h-14 w-14 rounded-lg overflow-hidden border border-white/10 shrink-0 bg-white/5 flex items-center justify-center">
           {item.imageUrl ? (
             <MenuImage
-              src={item.imageUrl.replace(process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT ?? "", "")}
+              src={item.imageUrl.replace(
+                process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT ?? "",
+                "",
+              )}
               alt={item.name?.en ?? ""}
               width={56}
               height={56}
@@ -422,37 +506,52 @@ function MenuItemCard({
         {/* Details */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-medium text-white text-sm truncate">{item.name?.en}</p>
+            <p className="font-medium text-white text-sm truncate">
+              {item.name?.en}
+            </p>
             {item.name?.ka && (
-              <span className="text-xs text-zinc-500 truncate">{item.name.ka}</span>
+              <span className="text-xs text-zinc-500 truncate">
+                {item.name.ka}
+              </span>
             )}
           </div>
           {item.description?.en && (
-            <p className="text-xs text-zinc-500 mt-0.5 truncate">{item.description.en}</p>
+            <p className="text-xs text-zinc-500 mt-0.5 truncate">
+              {item.description.en}
+            </p>
           )}
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-            <span className="text-sm font-medium text-white tabular-nums">₾ {tetriToGel(item.price)}</span>
+            <span className="text-sm font-medium text-white tabular-nums">
+              ₾ {tetriToGel(item.price)}
+            </span>
             {item.tags?.map((tag) => (
-              <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0 border-white/15 text-zinc-400">
-                <Tag className="h-2.5 w-2.5 mr-1" />{tag}
+              <Badge
+                key={tag}
+                variant="outline"
+                className="text-[10px] px-1.5 py-0 border-white/15 text-zinc-400"
+              >
+                <Tag className="h-2.5 w-2.5 mr-1" />
+                {tag}
               </Badge>
             ))}
           </div>
         </div>
 
         {/* Actions */}
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+        <div className="flex items-center gap-1 transition-opacity shrink-0">
           <button
             onClick={handleToggle}
             disabled={toggling}
             title={item.isAvailable ? "Mark unavailable" : "Mark available"}
             className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-all"
           >
-            {toggling
-              ? <Loader2 className="h-4 w-4 animate-spin" />
-              : item.isAvailable
-                ? <ToggleRight className="h-4 w-4 text-white" />
-                : <ToggleLeft className="h-4 w-4" />}
+            {toggling ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : item.isAvailable ? (
+              <ToggleRight className="h-4 w-4 text-white" />
+            ) : (
+              <ToggleLeft className="h-4 w-4" />
+            )}
           </button>
           <button
             onClick={() => setEditing(true)}
@@ -489,15 +588,21 @@ function MenuItemCard({
 function CategorySection({
   category,
   orgId,
+
   cafeName,
+  defaultExpanded = false,
 }: {
   category: Category;
   orgId: string;
   cafeName: string;
+  defaultExpanded?: boolean;
 }) {
-  const items = useQuery(api.menuItems.listByCategory, { orgId, categoryId: category._id });
+  const items = useQuery(api.menuItems.listByCategory, {
+    orgId,
+    categoryId: category._id,
+  });
   const archiveCategory = useMutation(api.categories.archive);
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const [addingItem, setAddingItem] = useState(false);
   const [editingCategory, setEditingCategory] = useState(false);
 
@@ -514,14 +619,20 @@ function CategorySection({
               onClick={() => setExpanded(!expanded)}
               className="flex items-center gap-3 flex-1 min-w-0 text-left"
             >
-              {expanded
-                ? <ChevronDown className="h-4 w-4 text-zinc-400 shrink-0" />
-                : <ChevronRight className="h-4 w-4 text-zinc-400 shrink-0" />}
+              {expanded ? (
+                <ChevronDown className="h-4 w-4 text-zinc-400 shrink-0" />
+              ) : (
+                <ChevronRight className="h-4 w-4 text-zinc-400 shrink-0" />
+              )}
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h3 className="font-medium text-white text-sm">{category.name?.en}</h3>
+                  <h3 className="font-medium text-white text-sm">
+                    {category.name?.en}
+                  </h3>
                   {category.name?.ka && (
-                    <span className="text-xs text-zinc-500">· {category.name.ka}</span>
+                    <span className="text-xs text-zinc-500">
+                      · {category.name.ka}
+                    </span>
                   )}
                 </div>
                 <p className="text-[11px] text-zinc-500 mt-0.5">
@@ -546,7 +657,9 @@ function CategorySection({
                 <Pencil className="h-3.5 w-3.5" />
               </button>
               <button
-                onClick={() => archiveCategory({ orgId, categoryId: category._id })}
+                onClick={() =>
+                  archiveCategory({ orgId, categoryId: category._id })
+                }
                 className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
               >
                 <Archive className="h-3.5 w-3.5" />
@@ -621,12 +734,44 @@ export default function MenuPage() {
   // Build the public menu preview URL using the org's Clerk slug
   const previewUrl = orgSlug ? `/en/test-menu/${orgSlug}` : null;
 
-  const categories = useQuery(
-    api.categories.list,
-    orgId ? { orgId } : "skip"
-  );
+  const categories = useQuery(api.categories.list, orgId ? { orgId } : "skip");
 
   const [addingCategory, setAddingCategory] = useState(false);
+  const [expandKey, setExpandKey] = useState(0);
+  const [globalExpanded, setGlobalExpanded] = useState(false);
+  const [storefrontToggling, setStorefrontToggling] = useState(false);
+
+  const setAllAvailability = useMutation(api.menuItems.setAllAvailability);
+
+  async function hideAllFromStorefront() {
+    if (!orgId) return;
+    setStorefrontToggling(true);
+    try {
+      await setAllAvailability({ orgId, isAvailable: false });
+    } finally {
+      setStorefrontToggling(false);
+    }
+  }
+
+  async function showAllOnStorefront() {
+    if (!orgId) return;
+    setStorefrontToggling(true);
+    try {
+      await setAllAvailability({ orgId, isAvailable: true });
+    } finally {
+      setStorefrontToggling(false);
+    }
+  }
+
+  function expandAll() {
+    setGlobalExpanded(true);
+    setExpandKey((k) => k + 1);
+  }
+
+  function collapseAll() {
+    setGlobalExpanded(false);
+    setExpandKey((k) => k + 1);
+  }
 
   if (!isLoaded) {
     return (
@@ -654,17 +799,24 @@ export default function MenuPage() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <UtensilsCrossed className="h-4 w-4 text-white" />
-            <h1 className="text-3xl font-medium tracking-tight text-white">Menu</h1>
-            <Badge variant="outline" className="text-[10px] text-zinc-400 border-white/10 bg-white/5 font-medium ml-1">
+            <h1 className="text-3xl font-medium tracking-tight text-white">
+              Menu
+            </h1>
+            <Badge
+              variant="outline"
+              className="text-[10px] text-zinc-400 border-white/10 bg-white/5 font-medium ml-1"
+            >
               {categories?.length ?? 0} categories
             </Badge>
           </div>
           <p className="text-sm text-zinc-400">
-            Manage categories and items for <span className="text-white font-medium">{cafeName}</span>. Photos are served via ImageKit CDN.
+            Manage categories and items for{" "}
+            <span className="text-white font-medium">{cafeName}</span>. Photos
+            are served via ImageKit CDN.
           </p>
         </div>
         {/* Action buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {previewUrl && (
             <Link
               href={previewUrl}
@@ -676,6 +828,48 @@ export default function MenuPage() {
               View Menu
             </Link>
           )}
+          <Button
+            variant="outline"
+            onClick={hideAllFromStorefront}
+            disabled={storefrontToggling}
+            className="border-red-500/30 text-red-400 bg-red-500/[0.05] hover:bg-red-500/[0.15] hover:text-red-300 hover:border-red-500/50 font-medium rounded-lg shadow-none transition-all"
+          >
+            {storefrontToggling ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <EyeOff className="h-4 w-4 mr-2" />
+            )}
+            Hide All
+          </Button>
+          <Button
+            variant="outline"
+            onClick={showAllOnStorefront}
+            disabled={storefrontToggling}
+            className="border-emerald-500/30 text-emerald-400 bg-emerald-500/[0.05] hover:bg-emerald-500/[0.15] hover:text-emerald-300 hover:border-emerald-500/50 font-medium rounded-lg shadow-none transition-all"
+          >
+            {storefrontToggling ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Eye className="h-4 w-4 mr-2" />
+            )}
+            Show All
+          </Button>
+          <Button
+            variant="outline"
+            onClick={collapseAll}
+            className="border-white/15 text-zinc-300 bg-white/[0.03] hover:bg-white/[0.08] hover:text-white hover:border-white/30 font-medium rounded-lg shadow-none"
+          >
+            <ChevronRight className="h-4 w-4 mr-2" />
+            Collapse All
+          </Button>
+          <Button
+            variant="outline"
+            onClick={expandAll}
+            className="border-white/15 text-zinc-300 bg-white/[0.03] hover:bg-white/[0.08] hover:text-white hover:border-white/30 font-medium rounded-lg shadow-none"
+          >
+            <ChevronDown className="h-4 w-4 mr-2" />
+            Expand All
+          </Button>
           <Button
             onClick={() => setAddingCategory(true)}
             className="bg-white text-black hover:bg-zinc-200 font-medium rounded-lg shadow-none"
@@ -697,10 +891,11 @@ export default function MenuPage() {
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both space-y-4">
           {categories.map((cat) => (
             <CategorySection
-              key={cat._id}
+              key={`${cat._id}-${expandKey}`}
               category={cat as Category}
               orgId={orgId}
               cafeName={cafeName}
+              defaultExpanded={globalExpanded}
             />
           ))}
         </div>

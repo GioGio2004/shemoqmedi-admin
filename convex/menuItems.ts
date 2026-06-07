@@ -225,3 +225,32 @@ export const updateSort = mutation({
     console.log(`🔀 Reordered ${orderedIds.length} items for org ${orgId}`);
   },
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SET_ALL_AVAILABILITY — bulk set isAvailable for every item in the org
+//
+// Used by the "Hide All from Storefront" / "Show All on Storefront" buttons.
+// ─────────────────────────────────────────────────────────────────────────────
+export const setAllAvailability = mutation({
+  args: {
+    orgId: v.string(),
+    isAvailable: v.boolean(),
+  },
+  handler: async (ctx, { orgId, isAvailable }) => {
+    await verifyOrgAccess(ctx, orgId);
+
+    const items = await ctx.db
+      .query("menuItems")
+      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .collect();
+
+    await Promise.all(
+      items.map((item) => ctx.db.patch(item._id, { isAvailable }))
+    );
+
+    console.log(
+      `🌐 Bulk availability update: ${items.length} items → isAvailable=${isAvailable} for org ${orgId}`
+    );
+    return items.length;
+  },
+});
