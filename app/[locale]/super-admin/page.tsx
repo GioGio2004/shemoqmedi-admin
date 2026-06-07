@@ -10,19 +10,19 @@ export default async function SuperAdminPage() {
   if (metadata?.role !== "super_admin") redirect("/");
 
   const organizations = await fetchQuery(
-    api.organizations.getAllOrganizationsWithMembers
+    api.organizations.getAllOrganizationsWithMembers,
   );
 
   const totalMembers = organizations.reduce(
     (sum: number, org: any) => sum + (org.members?.length ?? 0),
-    0
+    0,
   );
   const allOrgsEmpty = organizations.every(
-    (org: any) => (org.members?.length ?? 0) === 0
+    (org: any) => (org.members?.length ?? 0) === 0,
   );
 
   return (
-    <SuperAdminClient 
+    <SuperAdminClient
       organizations={organizations}
       totalMembers={totalMembers}
       allOrgsEmpty={allOrgsEmpty}
