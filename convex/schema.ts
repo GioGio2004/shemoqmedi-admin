@@ -319,6 +319,25 @@ export default defineSchema({
   // ==========================================
   // 7. AI CHAT (VolooAI Widget)
   // ==========================================
+  
+  aiChatThemes: defineTable({
+    orgId: v.string(), // Clerk Org ID
+    botName: v.optional(v.string()), // e.g. "Shemoqmedi Assistant"
+    botAvatarUrl: v.optional(v.string()), // URL for bot avatar
+    primaryColor: v.string(), // Main accent
+    backgroundColor: v.string(), // Chat container background
+    textColor: v.string(), // General text color
+    userMessageBg: v.string(), // User message bubble color
+    userMessageText: v.string(), // User message text color
+    botMessageBg: v.string(), // Bot message bubble color
+    botMessageText: v.string(), // Bot message text color
+    fontFamily: v.string(),
+    backgroundTemplate: v.optional(v.string()), // Identifier for specific animation/template (e.g. template_1)
+    greetingMessage: v.optional(v.string()), // Welcome message
+    isActive: v.boolean(),
+    updatedAt: v.number(),
+  }).index("by_org", ["orgId"]),
+
   // These tables power the per-cafe AI assistant that lives on every
   // customer-facing digital menu page. Sessions are anonymous (UUID from
   // localStorage) and scoped to a cafeId (the org's slug) so two different

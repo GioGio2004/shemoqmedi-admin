@@ -8,7 +8,7 @@ import { api } from "@/convex/_generated/api";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, UtensilsCrossed, ShoppingBag,
-  Menu, X, Store, Nfc, Bot, ChevronLeft, ChevronRight,
+  Menu, X, Store, Nfc, Bot, ChevronLeft, ChevronRight, MessageSquare
 } from "lucide-react";
 import { useState, createContext, useContext } from "react";
 
@@ -22,6 +22,7 @@ const NAV_ITEMS = [
   { label: "Orders",     href: "/dashboard/orders",       icon: ShoppingBag,     exact: false },
   { label: "NFC",        href: "/dashboard/nfc",          icon: Nfc,             exact: false },
   { label: "VolooAI",   href: "/dashboard/ai-manager",   icon: Bot,             exact: false },
+  { label: "Chat Theme", href: "/dashboard/chat-theme",  icon: MessageSquare,   exact: false },
 ] as const;
 
 // ── Active path helper ─────────────────────────────────────────────────────────
