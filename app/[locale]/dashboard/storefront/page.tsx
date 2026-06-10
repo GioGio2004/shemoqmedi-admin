@@ -18,6 +18,7 @@ import {
   MessageCircle,
   Mail,
   ChevronDown,
+  Bell,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ImageUploader } from "@/components/ImageUploader";
@@ -88,13 +89,14 @@ const DEFAULT_THEME: ThemeSettings = {
 
 // ─── Tab Config ───────────────────────────────────────────────────────────────
 
-type TabId = "hero" | "hours" | "socials" | "theme";
+type TabId = "hero" | "hours" | "socials" | "theme" | "announcements";
 
 const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: "hero", label: "Hero & Location", icon: Store },
   { id: "hours", label: "Hours", icon: Clock },
   { id: "socials", label: "Socials", icon: Share2 },
   { id: "theme", label: "Theme", icon: Palette },
+  { id: "announcements", label: "Announcements", icon: Bell },
 ];
 
 const FONT_OPTIONS = ["Inter", "Roboto", "Playfair Display", "DM Sans", "Space Grotesk"];
@@ -629,6 +631,33 @@ function ThemeTab({
   );
 }
 
+function AnnouncementsTab({
+  alert,
+  onChange,
+}: {
+  alert: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-5">
+      <Field label="Storefront Announcement" hint="This message will be displayed as a popup banner to all visitors.">
+        <TextArea
+          value={alert}
+          onChange={(e) => onChange(e.target.value)}
+          rows={3}
+          placeholder="e.g. We are closed for renovation this weekend."
+        />
+      </Field>
+      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 flex flex-col gap-2">
+         <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">Note</p>
+         <p className="text-xs text-zinc-400">
+           To remove the announcement, simply clear the text box and click "Save Changes". The AI agent can also update this automatically if instructed.
+         </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function StorefrontPage() {
@@ -648,6 +677,7 @@ export default function StorefrontPage() {
   const [hours, setHours] = useState<OperatingHour[]>(DEFAULT_HOURS);
   const [socials, setSocials] = useState<SocialLinks>(DEFAULT_SOCIALS);
   const [theme, setTheme] = useState<ThemeSettings>(DEFAULT_THEME);
+  const [storefrontAlert, setStorefrontAlert] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -658,6 +688,7 @@ export default function StorefrontPage() {
     if (config.operatingHours) setHours(config.operatingHours);
     if (config.socialLinks) setSocials({ whatsapp: "", instagram: "", email: "", ...config.socialLinks });
     if (config.themeSettings) setTheme(config.themeSettings);
+    if (config.storefrontAlert !== undefined) setStorefrontAlert(config.storefrontAlert || "");
   }, [config]);
 
   async function handleSave() {
@@ -670,6 +701,7 @@ export default function StorefrontPage() {
         operatingHours: hours,
         socialLinks: { whatsapp: socials.whatsapp || undefined, instagram: socials.instagram || undefined, email: socials.email || undefined },
         themeSettings: theme,
+        storefrontAlert: storefrontAlert || undefined,
       });
 
       // ── Wire up to Convex ────────────────────────────────────
@@ -683,6 +715,7 @@ export default function StorefrontPage() {
           email: socials.email || undefined,
         },
         themeSettings: theme,
+        storefrontAlert: storefrontAlert || undefined,
       });
 
       setSaved(true);
@@ -791,6 +824,9 @@ export default function StorefrontPage() {
         )}
         {activeTab === "theme" && (
           <ThemeTab data={theme} onChange={setTheme} />
+        )}
+        {activeTab === "announcements" && (
+          <AnnouncementsTab alert={storefrontAlert} onChange={setStorefrontAlert} />
         )}
       </div>
 

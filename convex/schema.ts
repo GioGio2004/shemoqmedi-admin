@@ -390,7 +390,7 @@ export default defineSchema({
     seatNumber: v.number(),
     items: v.array(
       v.object({
-        productId: v.number(), // djb2 hash ID from the frontend
+        productId: v.union(v.number(), v.string()), // djb2 hash ID or convex string ID from the frontend
         name: v.string(),
         price: v.number(),
         quantity: v.number(),

@@ -7,7 +7,7 @@ export const placeOrder = mutation({
     seatNumber: v.number(),
     items: v.array(
       v.object({
-        productId: v.number(),
+        productId: v.union(v.number(), v.string()),
         name: v.string(),
         price: v.number(),
         quantity: v.number(),

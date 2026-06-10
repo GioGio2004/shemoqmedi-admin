@@ -232,6 +232,8 @@ export const updateStorefrontConfig = mutation({
         buttonRadius: v.string(), // e.g. "0.5rem" | "9999px"
       }),
     ),
+
+    storefrontAlert: v.optional(v.string()),
   },
 
   handler: async (ctx, { orgId, ...fields }) => {
@@ -280,6 +282,7 @@ export const getStorefrontConfig = query({
       operatingHours: org.operatingHours ?? null,
       socialLinks: org.socialLinks ?? null,
       themeSettings: org.themeSettings ?? null,
+      storefrontAlert: org.storefrontAlert ?? null,
     };
   },
 });
