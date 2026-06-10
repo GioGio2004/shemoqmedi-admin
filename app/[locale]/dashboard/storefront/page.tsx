@@ -55,6 +55,12 @@ interface ThemeSettings {
   buttonRadius: string;
 }
 
+interface Announcement {
+  id: string;
+  message: string;
+  isActive: boolean;
+}
+
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_STOREFRONT: StorefrontConfig = {
@@ -632,28 +638,92 @@ function ThemeTab({
 }
 
 function AnnouncementsTab({
-  alert,
+  data,
   onChange,
 }: {
-  alert: string;
-  onChange: (v: string) => void;
+  data: Announcement[];
+  onChange: (d: Announcement[]) => void;
 }) {
+  function addRow() {
+    if (data.length >= 5) return;
+    onChange([{ id: crypto.randomUUID(), message: "", isActive: true }, ...data]);
+  }
+
+  function removeRow(id: string) {
+    onChange(data.filter((a) => a.id !== id));
+  }
+
+  function updateRow(id: string, key: keyof Announcement, val: any) {
+    onChange(data.map((a) => (a.id === id ? { ...a, [key]: val } : a)));
+  }
+
   return (
     <div className="space-y-5">
-      <Field label="Storefront Announcement" hint="This message will be displayed as a popup banner to all visitors.">
-        <TextArea
-          value={alert}
-          onChange={(e) => onChange(e.target.value)}
-          rows={3}
-          placeholder="e.g. We are closed for renovation this weekend."
-        />
-      </Field>
-      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 flex flex-col gap-2">
-         <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">Note</p>
-         <p className="text-xs text-zinc-400">
-           To remove the announcement, simply clear the text box and click "Save Changes". The AI agent can also update this automatically if instructed.
-         </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-zinc-500">
+          Create up to 5 announcements. Toggle them live to show as popup banners.
+        </p>
+        <span className="text-xs font-medium text-zinc-500">
+          {data.length} / 5
+        </span>
       </div>
+
+      <div className="space-y-3">
+        {data.map((row, idx) => (
+          <div
+            key={row.id}
+            className="flex flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.02] p-4"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                Announcement {idx + 1}
+              </span>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <span className={cn("text-[10px] uppercase tracking-widest font-bold", row.isActive ? "text-emerald-400" : "text-zinc-500")}>
+                    {row.isActive ? "Live" : "Closed"}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={row.isActive}
+                    onChange={(e) => updateRow(row.id, "isActive", e.target.checked)}
+                    className="h-4 w-4 rounded border-white/20 bg-white/10 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0 cursor-pointer"
+                  />
+                </label>
+                <button
+                  onClick={() => removeRow(row.id)}
+                  className="text-zinc-500 hover:text-red-400 transition-colors"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <TextArea
+              value={row.message}
+              onChange={(e) => updateRow(row.id, "message", e.target.value)}
+              rows={2}
+              placeholder="e.g. We are closed for renovation this weekend."
+              className="text-sm"
+            />
+          </div>
+        ))}
+
+        {data.length === 0 && (
+          <div className="p-8 text-center border border-dashed border-white/10 rounded-xl">
+            <p className="text-sm text-zinc-500">No announcements created yet.</p>
+          </div>
+        )}
+      </div>
+
+      {data.length < 5 && (
+        <button
+          onClick={addRow}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/15 py-3 text-xs font-medium text-zinc-500 hover:border-white/30 hover:text-white hover:bg-white/[0.03] transition-all"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add Announcement
+        </button>
+      )}
     </div>
   );
 }
@@ -677,7 +747,7 @@ export default function StorefrontPage() {
   const [hours, setHours] = useState<OperatingHour[]>(DEFAULT_HOURS);
   const [socials, setSocials] = useState<SocialLinks>(DEFAULT_SOCIALS);
   const [theme, setTheme] = useState<ThemeSettings>(DEFAULT_THEME);
-  const [storefrontAlert, setStorefrontAlert] = useState<string>("");
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -688,7 +758,7 @@ export default function StorefrontPage() {
     if (config.operatingHours) setHours(config.operatingHours);
     if (config.socialLinks) setSocials({ whatsapp: "", instagram: "", email: "", ...config.socialLinks });
     if (config.themeSettings) setTheme(config.themeSettings);
-    if (config.storefrontAlert !== undefined) setStorefrontAlert(config.storefrontAlert || "");
+    if (config.announcements) setAnnouncements(config.announcements);
   }, [config]);
 
   async function handleSave() {
@@ -701,7 +771,7 @@ export default function StorefrontPage() {
         operatingHours: hours,
         socialLinks: { whatsapp: socials.whatsapp || undefined, instagram: socials.instagram || undefined, email: socials.email || undefined },
         themeSettings: theme,
-        storefrontAlert: storefrontAlert || undefined,
+        announcements,
       });
 
       // ── Wire up to Convex ────────────────────────────────────
@@ -715,7 +785,7 @@ export default function StorefrontPage() {
           email: socials.email || undefined,
         },
         themeSettings: theme,
-        storefrontAlert: storefrontAlert || undefined,
+        announcements,
       });
 
       setSaved(true);
@@ -826,7 +896,7 @@ export default function StorefrontPage() {
           <ThemeTab data={theme} onChange={setTheme} />
         )}
         {activeTab === "announcements" && (
-          <AnnouncementsTab alert={storefrontAlert} onChange={setStorefrontAlert} />
+          <AnnouncementsTab data={announcements} onChange={setAnnouncements} />
         )}
       </div>
 

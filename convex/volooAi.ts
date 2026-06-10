@@ -380,22 +380,43 @@ export const broadcastStorefrontAlert = mutation({
       return { success: false, message: "Organization not found." };
     }
 
-    // Store null when clearing so the field is cleanly absent rather than ""
+    const isClear = !alertMessage.trim();
+    let currentAnnouncements = org.announcements || [];
+
+    if (isClear) {
+      // Clear = mark all as inactive
+      currentAnnouncements = currentAnnouncements.map((a) => ({ ...a, isActive: false }));
+    } else {
+      // Add new active announcement at the top
+      const newAnnouncement = {
+        id: crypto.randomUUID(),
+        message: alertMessage.trim(),
+        isActive: true,
+      };
+      
+      currentAnnouncements = [newAnnouncement, ...currentAnnouncements];
+      
+      // Limit to 5
+      if (currentAnnouncements.length > 5) {
+        currentAnnouncements = currentAnnouncements.slice(0, 5);
+      }
+    }
+
     await ctx.db.patch(org._id, {
-      storefrontAlert: alertMessage.trim() || undefined,
+      announcements: currentAnnouncements,
       updatedAt: Date.now(),
     });
 
-    const action = alertMessage.trim() ? "broadcast" : "cleared";
+    const action = isClear ? "cleared" : "broadcast";
     console.log(
-      `📢 [VolooAI] Alert ${action} for org "${orgId}": "${alertMessage.slice(0, 80)}"`,
+      `📢 [VolooAI] Alert ${action} for org "${orgId}"`,
     );
 
     return {
       success: true,
-      message: alertMessage.trim()
-        ? `Alert broadcasted: "${alertMessage}" — visible to all customers now.`
-        : "Alert cleared. The banner has been removed from the customer menu.",
+      message: isClear
+        ? "All announcements set to inactive. The banner has been removed from the customer menu."
+        : `Announcement added and set to active: "${alertMessage}"`,
     };
   },
 });

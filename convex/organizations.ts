@@ -233,7 +233,15 @@ export const updateStorefrontConfig = mutation({
       }),
     ),
 
-    storefrontAlert: v.optional(v.string()),
+    announcements: v.optional(
+      v.array(
+        v.object({
+          id: v.string(),
+          message: v.string(),
+          isActive: v.boolean(),
+        })
+      )
+    ),
   },
 
   handler: async (ctx, { orgId, ...fields }) => {
@@ -282,7 +290,7 @@ export const getStorefrontConfig = query({
       operatingHours: org.operatingHours ?? null,
       socialLinks: org.socialLinks ?? null,
       themeSettings: org.themeSettings ?? null,
-      storefrontAlert: org.storefrontAlert ?? null,
+      announcements: org.announcements ?? [],
     };
   },
 });

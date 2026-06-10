@@ -76,6 +76,7 @@ export const get = query({
         storefrontConfig: org.storefrontConfig ?? null,
         operatingHours: org.operatingHours ?? [],
         socialLinks: org.socialLinks ?? null,
+        announcements: org.announcements ?? [],
         storefrontAlert: org.storefrontAlert ?? null,
       },
       categories,

@@ -112,6 +112,17 @@ export default defineSchema({
     ),
 
     // VolooAI Megaphone — real-time alert broadcast to all customers
+    announcements: v.optional(
+      v.array(
+        v.object({
+          id: v.string(),
+          message: v.string(),
+          isActive: v.boolean(),
+        })
+      )
+    ),
+    
+    // Legacy field - keep for backwards compatibility with existing records
     storefrontAlert: v.optional(v.string()),
 
     // The Liquid UI
