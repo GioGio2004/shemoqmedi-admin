@@ -82,6 +82,7 @@ export default defineSchema({
         textColor: v.optional(v.string()),
         fontFamily: v.string(),
         buttonRadius: v.string(),
+        menuType: v.optional(v.union(v.literal("basic"), v.literal("dragable"))),
       }),
     ),
     // Custom branding for the end-user's glassy mobile PWA

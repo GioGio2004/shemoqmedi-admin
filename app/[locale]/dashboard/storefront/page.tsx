@@ -53,6 +53,7 @@ interface ThemeSettings {
   textColor?: string;
   fontFamily: string;
   buttonRadius: string;
+  menuType?: "basic" | "dragable";
 }
 
 interface Announcement {
@@ -91,6 +92,7 @@ const DEFAULT_THEME: ThemeSettings = {
   textColor: "#ffffff",
   fontFamily: "Inter",
   buttonRadius: "0.5rem",
+  menuType: "basic",
 };
 
 // ─── Tab Config ───────────────────────────────────────────────────────────────
@@ -616,6 +618,58 @@ function ThemeTab({
               {opt.label}
             </button>
           ))}
+        </div>
+      </Field>
+
+      <Field label="Menu Layout" hint="Choose the navigation style for your public menu.">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+          {/* Basic Layout Card */}
+          <button
+            onClick={() => onChange({ ...data, menuType: "basic" })}
+            className={cn(
+              "flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all relative overflow-hidden group",
+              (!data.menuType || data.menuType === "basic")
+                ? "border-emerald-500/50 bg-emerald-500/10 ring-1 ring-emerald-500/30"
+                : "border-white/10 bg-white/[0.02] hover:bg-white/5 hover:border-white/20"
+            )}
+          >
+            <div className="flex items-center justify-between w-full">
+              <span className={cn(
+                "text-sm font-semibold",
+                (!data.menuType || data.menuType === "basic") ? "text-emerald-400" : "text-white"
+              )}>
+                Classic Scroll
+              </span>
+              {(!data.menuType || data.menuType === "basic") && (
+                <Check className="h-4 w-4 text-emerald-400" />
+              )}
+            </div>
+            <p className="text-xs text-zinc-400">Traditional vertical scrolling list with category tabs.</p>
+          </button>
+
+          {/* Dragable Map Layout Card */}
+          <button
+            onClick={() => onChange({ ...data, menuType: "dragable" })}
+            className={cn(
+              "flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all relative overflow-hidden group",
+              data.menuType === "dragable"
+                ? "border-emerald-500/50 bg-emerald-500/10 ring-1 ring-emerald-500/30"
+                : "border-white/10 bg-white/[0.02] hover:bg-white/5 hover:border-white/20"
+            )}
+          >
+            <div className="flex items-center justify-between w-full">
+              <span className={cn(
+                "text-sm font-semibold",
+                data.menuType === "dragable" ? "text-emerald-400" : "text-white"
+              )}>
+                Spatial Map
+              </span>
+              {data.menuType === "dragable" && (
+                <Check className="h-4 w-4 text-emerald-400" />
+              )}
+            </div>
+            <p className="text-xs text-zinc-400">Interactive 2D drag-to-explore canvas experience.</p>
+          </button>
         </div>
       </Field>
 

@@ -13,6 +13,8 @@ import type * as authHelpers from "../authHelpers.js";
 import type * as backfill from "../backfill.js";
 import type * as categories from "../categories.js";
 import type * as chat from "../chat.js";
+import type * as cleanup from "../cleanup.js";
+import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as lib_utils from "../lib/utils.js";
 import type * as memberships from "../memberships.js";
@@ -37,6 +39,8 @@ declare const fullApi: ApiFromModules<{
   backfill: typeof backfill;
   categories: typeof categories;
   chat: typeof chat;
+  cleanup: typeof cleanup;
+  crons: typeof crons;
   http: typeof http;
   "lib/utils": typeof lib_utils;
   memberships: typeof memberships;

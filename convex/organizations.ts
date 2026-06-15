@@ -230,6 +230,7 @@ export const updateStorefrontConfig = mutation({
         textColor: v.optional(v.string()), // e.g. "#111827"
         fontFamily: v.string(), // e.g. "Inter"
         buttonRadius: v.string(), // e.g. "0.5rem" | "9999px"
+        menuType: v.optional(v.union(v.literal("basic"), v.literal("dragable"))),
       }),
     ),
 
