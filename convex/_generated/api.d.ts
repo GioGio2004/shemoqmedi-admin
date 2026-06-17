@@ -9,6 +9,7 @@
  */
 
 import type * as aiChatThemes from "../aiChatThemes.js";
+import type * as analytics from "../analytics.js";
 import type * as authHelpers from "../authHelpers.js";
 import type * as backfill from "../backfill.js";
 import type * as categories from "../categories.js";
@@ -35,6 +36,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   aiChatThemes: typeof aiChatThemes;
+  analytics: typeof analytics;
   authHelpers: typeof authHelpers;
   backfill: typeof backfill;
   categories: typeof categories;
