@@ -181,6 +181,7 @@ export default defineSchema({
 
     // Local Identity
     tableName: v.optional(v.string()), // e.g., "Table 12", "Patio-A"
+    seatNumber: v.optional(v.number()), // Exact integer seat number for AI auto-fill
     isActive: v.boolean(), // Hardware lockout switch
 
     // Analytics & Realtime Activation

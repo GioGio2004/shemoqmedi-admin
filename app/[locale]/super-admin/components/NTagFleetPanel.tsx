@@ -40,6 +40,7 @@ function ProvisionForm({
 }) {
   const [uuid, setUuid] = useState(generateUUID());
   const [tableName, setTableName] = useState("");
+  const [seatNumber, setSeatNumber] = useState("");
   const [orgId, setOrgId] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -61,11 +62,13 @@ function ProvisionForm({
       await provisionTag({
         volooTagsUUID: uuid.trim(),
         tableName: tableName.trim() || undefined,
+        seatNumber: seatNumber.trim() ? parseInt(seatNumber.trim()) : undefined,
         orgId: orgId || undefined,
       });
       toast.success("Tag provisioned — write this UUID to the NFC chip.");
       setUuid(generateUUID());
       setTableName("");
+      setSeatNumber("");
       onSuccess();
     } catch (err: unknown) {
       toast.error((err as Error).message ?? "Provisioning failed");
@@ -115,7 +118,7 @@ function ProvisionForm({
       </div>
 
       {/* Table + org row */}
-      <div className="grid sm:grid-cols-2 gap-3">
+      <div className="grid sm:grid-cols-3 gap-3">
         <div>
           <p className="text-[10px] uppercase tracking-widest font-semibold text-zinc-600 mb-1.5">
             Table / Location
@@ -123,7 +126,19 @@ function ProvisionForm({
           <input
             value={tableName}
             onChange={(e) => setTableName(e.target.value)}
-            placeholder="e.g. Table 7, Bar Seat 2 (optional)"
+            placeholder="e.g. Table 7, Bar"
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-white/25"
+          />
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-semibold text-zinc-600 mb-1.5">
+            Seat Number
+          </p>
+          <input
+            type="number"
+            value={seatNumber}
+            onChange={(e) => setSeatNumber(e.target.value)}
+            placeholder="e.g. 7"
             className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-white/25"
           />
         </div>
@@ -210,6 +225,7 @@ function TagRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [tableName, setTableName] = useState(tag.tableName ?? "");
+  const [seatNumber, setSeatNumber] = useState(tag.seatNumber?.toString() ?? "");
   const [orgId, setOrgId] = useState(tag.orgId ?? "");
   const [busy, setBusy] = useState(false);
 
@@ -224,6 +240,7 @@ function TagRow({
       await updateTag({
         tagId: tag._id as Id<"physicalTags">,
         tableName: tableName || undefined,
+        seatNumber: seatNumber.trim() ? parseInt(seatNumber.trim()) : undefined,
         orgId: orgId || undefined,
       });
       toast.success("Tag updated");
@@ -280,6 +297,7 @@ function TagRow({
           {tag.tableName ?? (
             <span className="text-zinc-600 italic">no table</span>
           )}
+          {tag.seatNumber !== undefined && ` (Seat ${tag.seatNumber})`}
         </span>
 
         <span
@@ -338,6 +356,13 @@ function TagRow({
             onChange={(e) => setTableName(e.target.value)}
             placeholder="Table name…"
             className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-white/25"
+          />
+          <input
+            type="number"
+            value={seatNumber}
+            onChange={(e) => setSeatNumber(e.target.value)}
+            placeholder="Seat number…"
+            className="w-32 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-white/25"
           />
           <select
             value={orgId}

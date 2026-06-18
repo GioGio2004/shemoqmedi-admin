@@ -63,6 +63,7 @@ export const provisionPhysicalTag = mutation({
   args: {
     volooTagsUUID: v.string(),
     tableName: v.optional(v.string()), // e.g. "Table 1" — can be set later
+    seatNumber: v.optional(v.number()), // Exact integer seat number
     orgId: v.optional(v.string()),     // Clerk org ID — can be set later
   },
   handler: async (ctx, args) => {
@@ -81,6 +82,7 @@ export const provisionPhysicalTag = mutation({
     const id = await ctx.db.insert("physicalTags", {
       volooTagsUUID: args.volooTagsUUID,
       tableName: args.tableName,
+      seatNumber: args.seatNumber,
       orgId: args.orgId,
       isActive: true,
       tapCount: 0,
@@ -100,6 +102,7 @@ export const updatePhysicalTag = mutation({
     tagId: v.id("physicalTags"),
     orgId: v.optional(v.string()),
     tableName: v.optional(v.string()),
+    seatNumber: v.optional(v.number()),
     isActive: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -111,6 +114,7 @@ export const updatePhysicalTag = mutation({
     const patch: Record<string, unknown> = { updatedAt: Date.now() };
     if (args.orgId !== undefined) patch.orgId = args.orgId;
     if (args.tableName !== undefined) patch.tableName = args.tableName;
+    if (args.seatNumber !== undefined) patch.seatNumber = args.seatNumber;
     if (args.isActive !== undefined) patch.isActive = args.isActive;
 
     await ctx.db.patch(args.tagId, patch);
@@ -187,6 +191,7 @@ export const getPhysicalTagByUUID = query({
       volooTagsUUID: tag.volooTagsUUID,
       isActive: tag.isActive,
       tableName: tag.tableName ?? null,
+      seatNumber: tag.seatNumber ?? null,
       orgId: tag.orgId ?? null,
       orgSlug,
       tapCount: tag.tapCount,

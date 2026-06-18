@@ -219,7 +219,7 @@ function OrderCard({
             {order.items.length} item{order.items.length !== 1 ? "s" : ""}
           </p>
           <p className="text-lg font-black font-mono text-white tabular-nums">
-            ${order.totalPrice.toFixed(2)}
+            ${(order.totalPrice / 100).toFixed(2)}
           </p>
         </div>
       </div>
@@ -245,11 +245,11 @@ function OrderCard({
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-white truncate">{item.name}</p>
                   <p className="text-sm font-mono text-zinc-300 font-medium shrink-0 tabular-nums">
-                    ${(item.price * item.quantity).toFixed(2)}
+                    ${((item.price * item.quantity) / 100).toFixed(2)}
                   </p>
                 </div>
                 <p className="text-[11px] text-zinc-500 mt-0.5">
-                  ${item.price.toFixed(2)} each
+                  ${(item.price / 100).toFixed(2)} each
                   {item.quantity > 1 && (
                     <span className="text-zinc-600"> · {item.quantity}×</span>
                   )}
@@ -263,7 +263,7 @@ function OrderCard({
         <div className="mt-4 pt-3 border-t border-white/[0.06] flex items-center justify-between">
           <span className="text-xs font-bold uppercase tracking-widest text-zinc-600">Order Total</span>
           <span className="text-base font-black font-mono text-white tabular-nums">
-            ${order.totalPrice.toFixed(2)}
+            ${(order.totalPrice / 100).toFixed(2)}
           </span>
         </div>
       </div>
