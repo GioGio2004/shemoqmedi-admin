@@ -181,26 +181,9 @@ function ImpersonationBanner() {
 }
 
 // ── Sidebar content (desktop) ──────────────────────────────────────────────────
-function SidebarContent({ onNavClick }: { onNavClick?: () => void }) {
-  const { organization, membership, isLoaded } = useOrganization();
+function SidebarContent({ onNavClick, allowedNavItems }: { onNavClick?: () => void, allowedNavItems: any[] }) {
+  const { organization, isLoaded } = useOrganization();
   const collapsed = useContext(SidebarCtx);
-  const convexRole = useQuery(api.memberships.getMyRole, {
-    orgId: organization?.id,
-  });
-  const role = convexRole || membership?.role;
-
-  const allowedNavItems = NAV_ITEMS.filter((item) => {
-    if (!isLoaded || !role) return true;
-    if (role === "org:owner" || role === "org:admin" || role === "owner")
-      return true;
-    if (role === "org:manager" || role === "manager") return true;
-    if (role === "org:barista" || role === "barista")
-      return ["Overview", "Orders", "Menu"].includes(item.label);
-    if (role === "org:server" || role === "server")
-      return ["Overview", "Orders"].includes(item.label);
-    return true;
-  });
-
   return (
     <div className="flex h-full flex-col">
       {/* Logo / brand */}
@@ -276,6 +259,34 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const isAiManager = pathname.includes("ai-manager");
 
+  const { organization, membership, isLoaded } = useOrganization();
+  const convexRole = useQuery(api.memberships.getMyRole, organization ? { orgId: organization.id } : "skip");
+  const orgSettings = useQuery(api.organizations.getOrgSettings, organization ? { orgId: organization.id } : "skip");
+  
+  const role = convexRole || membership?.role;
+  const showAiManager = orgSettings?.features?.hasAiManager !== false;
+  const showNfc = orgSettings?.features?.hasNfcHardware !== false;
+  const showLiveOrdering = orgSettings?.features?.hasLiveOrdering !== false;
+  const showDigitalMenu = orgSettings?.features?.hasDigitalMenu !== false;
+
+  const allowedNavItems = NAV_ITEMS.filter((item) => {
+    if (!showAiManager && (item.label === "VolooAI" || item.label === "Chat")) return false;
+    if (!showNfc && item.label === "NFC") return false;
+    if (!showLiveOrdering && item.label === "Orders") return false;
+    if (!showDigitalMenu && (item.label === "Menu" || item.label === "Storefront")) return false;
+
+    if (!isLoaded || !role) return true;
+    if (role === "org:owner" || role === "org:admin" || role === "owner") return true;
+    if (role === "org:manager" || role === "manager") return true;
+    if (role === "org:barista" || role === "barista") return ["Overview", "Orders", "Menu"].includes(item.label);
+    if (role === "org:server" || role === "server") return ["Overview", "Orders"].includes(item.label);
+    return true;
+  });
+
+  const bare = pathname.replace(/^\/[a-z]{2}(\/|$)/, "/");
+  const currentNavItem = NAV_ITEMS.find(item => item.exact ? bare === item.href : bare.startsWith(item.href));
+  const isAllowed = !currentNavItem || allowedNavItems.includes(currentNavItem);
+
   return (
     <SidebarCtx.Provider value={sidebarCollapsed}>
       <div className="flex h-[100dvh] flex-col overflow-hidden bg-black">
@@ -304,7 +315,7 @@ export default function DashboardLayout({
                 <ChevronLeft className="h-3 w-3" />
               )}
             </button>
-            <SidebarContent />
+            <SidebarContent allowedNavItems={allowedNavItems} />
           </aside>
 
           {/* ── Mobile slide-out sidebar ─────────────────────────────────────── */}
@@ -326,7 +337,7 @@ export default function DashboardLayout({
                 >
                   <X className="h-4 w-4" />
                 </button>
-                <SidebarContent onNavClick={() => setMobileOpen(false)} />
+                <SidebarContent onNavClick={() => setMobileOpen(false)} allowedNavItems={allowedNavItems} />
               </aside>
             </div>
           )}
@@ -380,12 +391,27 @@ export default function DashboardLayout({
                 isAiManager ? "overflow-hidden" : "overflow-y-auto bg-black",
               )}
             >
-              {isAiManager ? (
-                // AI Manager gets full height, no padding wrapper
-                children
+              {isAllowed ? (
+                isAiManager ? (
+                  // AI Manager gets full height, no padding wrapper
+                  children
+                ) : (
+                  <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 pb-28 lg:pb-8 bg-black min-h-full">
+                    {children}
+                  </div>
+                )
               ) : (
-                <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 pb-28 lg:pb-8 bg-black min-h-full">
-                  {children}
+                <div className="flex flex-col items-center justify-center h-full pt-32 text-center px-4">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/5 border border-white/10 mb-6">
+                    <X className="h-8 w-8 text-zinc-500" />
+                  </div>
+                  <h2 className="text-xl font-medium text-white mb-2">Feature Disabled</h2>
+                  <p className="text-zinc-400 text-sm max-w-md">
+                    This module has been deactivated by the platform administrator.
+                  </p>
+                  <Link href="/dashboard" className="mt-8 px-4 py-2 bg-white text-black font-medium text-sm rounded-lg hover:bg-zinc-200 transition-colors">
+                    Return to Overview
+                  </Link>
                 </div>
               )}
             </main>
@@ -399,7 +425,7 @@ export default function DashboardLayout({
         >
           <div className="w-full border-t border-white/10 bg-black/90 backdrop-blur-xl px-2 pt-1">
             <div className="flex items-center justify-around">
-              {NAV_ITEMS.map((item) => (
+              {allowedNavItems.map((item) => (
                 <BottomTab key={item.href} item={item} />
               ))}
             </div>

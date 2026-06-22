@@ -78,6 +78,7 @@ export const get = query({
         socialLinks: org.socialLinks ?? null,
         announcements: org.announcements ?? [],
         storefrontAlert: org.storefrontAlert ?? null,
+        features: org.features ?? null,
       },
       categories,
     };

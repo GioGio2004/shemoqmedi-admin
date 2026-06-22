@@ -15,6 +15,10 @@ export const placeOrder = mutation({
   args: {
     cafeId: v.string(),
     seatNumber: v.number(),
+    // REQUIRED: prevents remote kitchen spam — only dine-in guests with a
+    // valid NFC-generated session can place orders.
+    sessionId: v.id("tableSessions"),
+    guestId: v.string(),
     items: v.array(
       v.object({
         productId: v.union(v.number(), v.string()),
@@ -26,6 +30,19 @@ export const placeOrder = mutation({
     totalPrice: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    // ── Validate session ──────────────────────────────────────────────────────
+    // The session must exist and be active. This is the backend enforcement
+    // of the Zero-URL handshake — no session = no order.
+    const session = await ctx.db.get(args.sessionId);
+    if (!session || session.status !== "active") {
+      throw new Error("Invalid or expired table session. Please tap the NFC tag again.");
+    }
+
+    // Verify the guest is actually part of this session
+    if (!session.activeGuestIds.includes(args.guestId)) {
+      throw new Error("Guest not registered in this table session.");
+    }
+
     // Lookup the organization to get the internal clerkId (orgId)
     const org = await ctx.db
       .query("organizations")
@@ -64,19 +81,26 @@ export const placeOrder = mutation({
         name: item.name || "Unknown Item",
         price: actualPrice,
         quantity: item.quantity,
+        guestId: args.guestId,
       });
 
       calculatedTotalPrice += actualPrice * item.quantity;
     }
 
-    return await ctx.db.insert("tableOrders", {
+    const newOrderId = await ctx.db.insert("tableOrders", {
       cafeId: args.cafeId,
       seatNumber: args.seatNumber,
+      sessionId: args.sessionId,
       items: verifiedItems,
       totalPrice: calculatedTotalPrice,
       status: "pending",
       createdAt: Date.now(),
     });
+
+    // Clear the cart for the table now that the order is sent to the kitchen
+    await ctx.db.patch(args.sessionId, { cartItems: [] });
+
+    return newOrderId;
   },
 });
 

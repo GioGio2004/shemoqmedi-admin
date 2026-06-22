@@ -58,6 +58,7 @@ function tetriToGel(tetri: number): string {
 type Category = {
   _id: Id<"categories">;
   name: Record<string, string>;
+  imageUrl?: string;
   sortOrder: number;
   isActive: boolean;
 };
@@ -107,17 +108,20 @@ function CategoryDialog({
   open,
   onClose,
   orgId,
+  cafeName,
   existing,
 }: {
   open: boolean;
   onClose: () => void;
   orgId: string;
+  cafeName: string;
   existing?: Category;
 }) {
   const createCategory = useMutation(api.categories.create);
   const updateCategory = useMutation(api.categories.update);
   const [nameEn, setNameEn] = useState(existing?.name?.en ?? "");
   const [nameKa, setNameKa] = useState(existing?.name?.ka ?? "");
+  const [imageUrl, setImageUrl] = useState(existing?.imageUrl ?? "");
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
@@ -128,9 +132,9 @@ function CategoryDialog({
       if (nameKa.trim()) name.ka = nameKa.trim();
 
       if (existing) {
-        await updateCategory({ orgId, categoryId: existing._id, name });
+        await updateCategory({ orgId, categoryId: existing._id, name, imageUrl: imageUrl || undefined });
       } else {
-        await createCategory({ orgId, name });
+        await createCategory({ orgId, name, imageUrl: imageUrl || undefined });
       }
       onClose();
     } finally {
@@ -168,6 +172,31 @@ function CategoryDialog({
               placeholder="e.g. ცხელი სასმელები"
               className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
             />
+          </div>
+          <div className="space-y-2 border border-white/10 rounded-xl p-5 bg-white/[0.02]">
+            <Label className="text-zinc-300 text-xs font-medium flex items-center gap-1.5 mb-2">
+              <ImageIcon className="h-4 w-4" />
+              Category Cover
+            </Label>
+            <ImageUploader
+              cafeName={cafeName}
+              itemName={nameEn || "category"}
+              onSuccess={(res) => setImageUrl(res.url ?? "")}
+            />
+            {imageUrl && (
+              <div className="mt-4 rounded-xl overflow-hidden border border-white/10 w-32 h-32 relative shadow-xl shadow-black/50">
+                <MenuImage
+                  src={imageUrl.replace(
+                    process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT ?? "",
+                    "",
+                  )}
+                  alt={nameEn}
+                  width={128}
+                  height={128}
+                  className="object-cover w-full h-full"
+                />
+              </div>
+            )}
           </div>
         </div>
         <DialogFooter>
@@ -722,6 +751,7 @@ function CategorySection({
           open={editingCategory}
           onClose={() => setEditingCategory(false)}
           orgId={orgId}
+          cafeName={cafeName}
           existing={category}
         />
       )}
@@ -913,6 +943,7 @@ export default function MenuPage() {
           open={addingCategory}
           onClose={() => setAddingCategory(false)}
           orgId={orgId}
+          cafeName={cafeName}
         />
       )}
     </div>

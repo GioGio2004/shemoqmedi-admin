@@ -23,6 +23,7 @@ import type * as menuItems from "../menuItems.js";
 import type * as orders from "../orders.js";
 import type * as organizations from "../organizations.js";
 import type * as publicMenu from "../publicMenu.js";
+import type * as tableSessions from "../tableSessions.js";
 import type * as users from "../users.js";
 import type * as volooAi from "../volooAi.js";
 import type * as volootags from "../volootags.js";
@@ -50,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   orders: typeof orders;
   organizations: typeof organizations;
   publicMenu: typeof publicMenu;
+  tableSessions: typeof tableSessions;
   users: typeof users;
   volooAi: typeof volooAi;
   volootags: typeof volootags;

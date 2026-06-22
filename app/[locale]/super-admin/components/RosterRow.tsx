@@ -1,209 +1,273 @@
 "use client";
 
 import { useState } from "react";
-import { TableRow, TableCell } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Users, ChevronDown, ChevronRight, UserCircle, LogIn, Mail } from "lucide-react";
-import { impersonateUserAction } from "../actions";
-import { motion, AnimatePresence } from "framer-motion";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { motion, AnimatePresence } from "framer-motion";
+import { ChevronDown, LogIn, Mail, UserCircle, Loader2 } from "lucide-react";
+import { impersonateUserAction } from "../actions";
+import { toast } from "sonner";
 
-export function RosterRow({ org }: { org: any }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [isLoading, setIsLoading] = useState<string | null>(null);
-  const [isUpdatingRole, setIsUpdatingRole] = useState<string | null>(null);
+// ── Feature metadata ──────────────────────────────────────────────────────────
+const FEATURES = [
+  { key: "hasAiManager",    label: "AI Manager" },
+  { key: "hasDigitalMenu",  label: "Digital Menu" },
+  { key: "hasLiveOrdering", label: "Live Ordering" },
+  { key: "hasNfcHardware",  label: "NFC Hardware" },
+  { key: "hasCustomDomain", label: "Custom Domain" },
+] as const;
+
+type FeatureKey = (typeof FEATURES)[number]["key"];
+
+// ── Role badge color ──────────────────────────────────────────────────────────
+function roleClass(role: string) {
+  const r = role?.replace("org:", "") || "";
+  if (r === "owner") return "text-white bg-white/10 border-white/20";
+  if (r === "manager") return "text-zinc-300 bg-white/5 border-white/10";
+  return "text-zinc-500 bg-transparent border-white/8";
+}
+
+// ── Toggle switch ─────────────────────────────────────────────────────────────
+function Toggle({
+  enabled,
+  onChange,
+  disabled,
+}: {
+  enabled: boolean;
+  onChange: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onChange(); }}
+      disabled={disabled}
+      className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none disabled:opacity-40 ${
+        enabled ? "bg-white" : "bg-white/15"
+      }`}
+    >
+      <span
+        className={`inline-block h-3 w-3 transform rounded-full bg-black transition-transform duration-200 ${
+          enabled ? "translate-x-3.5" : "translate-x-0.5"
+        }`}
+      />
+    </button>
+  );
+}
+
+// ── Member card ───────────────────────────────────────────────────────────────
+function MemberCard({
+  member,
+  orgClerkId,
+}: {
+  member: any;
+  orgClerkId: string;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [updatingRole, setUpdatingRole] = useState(false);
   const updateCustomRole = useMutation(api.memberships.updateCustomRole);
 
-  const handleImpersonate = async (userId: string) => {
-    setIsLoading(userId);
+  const handleImpersonate = async () => {
+    setLoading(true);
     try {
-      const formData = new FormData();
-      formData.append("targetUserId", userId);
-      const { url } = await impersonateUserAction(formData);
-      if (url) {
-        window.location.href = url;
-      }
-    } catch (error) {
-      console.error("Failed to impersonate:", error);
-      alert("Failed to impersonate user.");
+      const fd = new FormData();
+      fd.append("targetUserId", member.externalId);
+      const { url } = await impersonateUserAction(fd);
+      if (url) window.location.href = url;
+    } catch {
+      toast.error("Failed to impersonate user.");
     } finally {
-      setIsLoading(null);
+      setLoading(false);
     }
   };
 
-  const getRoleColor = (role: string) => {
-    const cleanRole = role?.replace('org:', '') || '';
-    switch (cleanRole) {
-      case "owner": return "border-primary/30 text-primary bg-primary/10";
-      case "manager": return "border-muted-foreground/40 text-muted-foreground bg-muted/30";
-      case "barista": return "border-border text-muted-foreground bg-muted/20";
-      case "server": return "border-border/50 text-muted-foreground bg-background";
-      default: return "border-muted-foreground/30 text-muted-foreground bg-muted-foreground/10";
+  const currentRole = member.customRole || member.membershipRole || "";
+
+  return (
+    <div className="p-3 rounded-lg border border-white/8 bg-white/[0.02] space-y-2.5">
+      <div className="flex items-center gap-2.5">
+        {member.profilePicture ? (
+          <img
+            src={member.profilePicture}
+            alt={member.name}
+            className="h-8 w-8 rounded-full object-cover border border-white/10 shrink-0"
+          />
+        ) : (
+          <div className="h-8 w-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+            <UserCircle className="h-4 w-4 text-zinc-600" />
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-white truncate">
+            {member.name} {member.lastname}
+          </p>
+          <div className="flex items-center gap-1 mt-0.5 text-[10px] text-zinc-500">
+            <Mail className="h-2.5 w-2.5 shrink-0" />
+            <span className="truncate">{member.email}</span>
+          </div>
+        </div>
+        <select
+          value={currentRole}
+          onClick={(e) => e.stopPropagation()}
+          onChange={async (e) => {
+            e.stopPropagation();
+            setUpdatingRole(true);
+            try {
+              await updateCustomRole({
+                userId: member.externalId,
+                orgId: orgClerkId,
+                customRole: e.target.value,
+              });
+            } catch {
+              toast.error("Failed to update role.");
+            } finally {
+              setUpdatingRole(false);
+            }
+          }}
+          disabled={updatingRole}
+          className={`text-[10px] uppercase font-mono tracking-wider px-2 py-1 rounded-md border appearance-none cursor-pointer focus:outline-none transition-all disabled:opacity-50 ${roleClass(currentRole)}`}
+          style={{ textAlignLast: "center" }}
+        >
+          <option value="" disabled>Role</option>
+          <option value="owner">Owner</option>
+          <option value="manager">Manager</option>
+          <option value="barista">Barista</option>
+          <option value="server">Server</option>
+        </select>
+      </div>
+
+      <button
+        onClick={(e) => { e.stopPropagation(); handleImpersonate(); }}
+        disabled={loading}
+        className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[11px] font-medium text-zinc-400 hover:text-white hover:bg-white/5 border border-white/8 hover:border-white/15 transition-all"
+      >
+        {loading ? (
+          <Loader2 className="h-3 w-3 animate-spin" />
+        ) : (
+          <LogIn className="h-3 w-3" />
+        )}
+        Impersonate
+      </button>
+    </div>
+  );
+}
+
+// ── Main row ──────────────────────────────────────────────────────────────────
+export function RosterRow({ org }: { org: any }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [savingFeature, setSavingFeature] = useState<FeatureKey | null>(null);
+  const updateFeatures = useMutation(api.organizations.updateFeatures);
+
+  // Compute current feature state from the live org prop
+  const features: Record<FeatureKey, boolean> = {
+    hasAiManager:    org.features?.hasAiManager    ?? true,
+    hasDigitalMenu:  org.features?.hasDigitalMenu  ?? false,
+    hasLiveOrdering: org.features?.hasLiveOrdering ?? false,
+    hasNfcHardware:  org.features?.hasNfcHardware  ?? false,
+    hasCustomDomain: org.features?.hasCustomDomain ?? false,
+  };
+
+  const toggleFeature = async (key: FeatureKey) => {
+    if (savingFeature) return;
+    setSavingFeature(key);
+    try {
+      await updateFeatures({
+        orgId: org.clerkId,
+        features: { ...features, [key]: !features[key] },
+      });
+    } catch {
+      toast.error("Failed to update feature.");
+    } finally {
+      setSavingFeature(null);
     }
   };
 
   return (
     <>
-      <TableRow 
-        className={`border-border transition-all duration-300 cursor-pointer ${isExpanded ? 'bg-primary/5 hover:bg-primary/5' : 'hover:bg-muted/30'}`}
-        onClick={() => setIsExpanded(!isExpanded)}
+      {/* ── Org row ── */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-white/[0.02] transition-colors select-none"
+        onClick={() => setIsExpanded((v) => !v)}
       >
-        <TableCell className="relative">
-          {isExpanded && (
-            <motion.div 
-              layoutId="active-indicator"
-              className="absolute left-0 top-0 bottom-0 w-0.5 bg-primary rounded-r-full" 
-            />
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/5 border border-white/10 text-xs font-bold text-white">
+          {org.name.charAt(0).toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-white truncate">{org.name}</p>
+          {org.slug && (
+            <p className="text-[10px] font-mono text-zinc-600 mt-0.5 truncate">/{org.slug}</p>
           )}
-          <div className="flex items-center gap-3">
-            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-bold text-sm ring-1 shadow-sm transition-all duration-300 ${isExpanded ? 'bg-primary text-primary-foreground ring-primary/50 shadow-primary/20' : 'bg-primary/10 text-primary ring-primary/20'}`}>
-              {org.name.charAt(0).toUpperCase()}
-            </div>
-            <div>
-              <p className="font-semibold text-foreground tracking-tight">{org.name}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground sm:hidden">{org.slug || "—"}</p>
-            </div>
-          </div>
-        </TableCell>
-        <TableCell className="hidden sm:table-cell">
-          {org.slug
-            ? <Badge variant="outline" className="font-mono text-xs border-border/50 text-muted-foreground bg-background/50 backdrop-blur-sm">/{org.slug}</Badge>
-            : <span className="text-muted-foreground/30">—</span>}
-        </TableCell>
-        <TableCell className="text-right">
-          <div className="flex items-center justify-end gap-3">
-            <Badge variant="secondary" className="flex items-center gap-1.5 bg-muted/50 border-border/50">
-              <Users className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="font-semibold text-foreground tabular-nums">
-                {org.members?.length ?? 0}
-              </span>
-            </Badge>
-            <div className={`flex h-6 w-6 items-center justify-center rounded-md transition-colors ${isExpanded ? 'bg-primary/20 text-primary' : 'bg-transparent text-muted-foreground'}`}>
-              <motion.div
-                animate={{ rotate: isExpanded ? 180 : 0 }}
-                transition={{ duration: 0.2, ease: "easeInOut" }}
-              >
-                <ChevronDown className="h-4 w-4" />
-              </motion.div>
-            </div>
-          </div>
-        </TableCell>
-      </TableRow>
-      
+        </div>
+        <span className="text-xs text-zinc-500 tabular-nums shrink-0">
+          {org.members?.length ?? 0}
+        </span>
+        <motion.div
+          animate={{ rotate: isExpanded ? 180 : 0 }}
+          transition={{ duration: 0.2, ease: "easeInOut" }}
+          className="shrink-0 text-zinc-600"
+        >
+          <ChevronDown className="h-3.5 w-3.5" />
+        </motion.div>
+      </div>
+
+      {/* ── Expanded panel ── */}
       <AnimatePresence initial={false}>
-        {isExpanded && org.members && (
-          <TableRow className="bg-muted/5 hover:bg-muted/5 border-none">
-            <TableCell colSpan={3} className="p-0">
-              <motion.div 
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.3, ease: [0.25, 0.1, 0.25, 1] }}
-                className="overflow-hidden"
-              >
-                <div className="p-4 pl-16 space-y-4 shadow-inner">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="h-px flex-1 bg-gradient-to-r from-border/80 to-transparent" />
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-2">Workspace Roster</p>
-                    <div className="h-px flex-1 bg-gradient-to-l from-border/80 to-transparent" />
+        {isExpanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="px-4 pb-4 pt-2 space-y-4 border-t border-white/8 bg-white/[0.01]">
+
+              {/* Members grid */}
+              {org.members && org.members.length > 0 ? (
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600 mb-2">
+                    Staff
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {org.members.map((member: any) => (
+                      <MemberCard
+                        key={member.externalId}
+                        member={member}
+                        orgClerkId={org.clerkId}
+                      />
+                    ))}
                   </div>
-                  
-                  {org.members.length === 0 ? (
-                    <div className="text-center py-4 text-sm text-muted-foreground">No members found.</div>
-                  ) : (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {org.members.map((member: any, idx: number) => (
-                        <motion.div 
-                          key={member.externalId} 
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: idx * 0.05 + 0.1, duration: 0.3 }}
-                          className="flex flex-col gap-3 p-3 rounded-xl border border-border/60 bg-background/50 backdrop-blur-sm shadow-sm hover:border-primary/30 hover:bg-primary/[0.02] transition-colors"
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="relative">
-                                {member.profilePicture ? (
-                                  <img src={member.profilePicture} alt={member.name} className="h-10 w-10 rounded-full border border-border/80 shadow-sm object-cover" />
-                                ) : (
-                                  <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center border border-border/80 shadow-sm">
-                                    <UserCircle className="h-5 w-5 text-muted-foreground" />
-                                  </div>
-                                )}
-                                <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background bg-emerald-500" />
-                              </div>
-                              <div>
-                                <p className="text-sm font-bold text-foreground leading-tight">{member.name} {member.lastname}</p>
-                                <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground">
-                                  <Mail className="h-3 w-3" />
-                                  <span className="truncate max-w-[120px]">{member.email}</span>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex flex-col items-end gap-1">
-                              <select 
-                                value={member.customRole || ""}
-                                onChange={async (e) => {
-                                  e.stopPropagation();
-                                  setIsUpdatingRole(member.externalId);
-                                  try {
-                                    await updateCustomRole({
-                                      userId: member.externalId,
-                                      orgId: org.clerkId,
-                                      customRole: e.target.value
-                                    });
-                                  } catch (error) {
-                                    console.error("Failed to update role:", error);
-                                    alert("Failed to update role.");
-                                  } finally {
-                                    setIsUpdatingRole(null);
-                                  }
-                                }}
-                                disabled={isUpdatingRole === member.externalId}
-                                className={`text-[10px] uppercase font-mono tracking-wider px-2 py-1 rounded-md border appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all ${getRoleColor(member.customRole || member.membershipRole)}`}
-                                style={{ textAlignLast: "center" }}
-                              >
-                                <option value="" disabled>Select Role</option>
-                                <option value="owner">Owner</option>
-                                <option value="manager">Manager</option>
-                                <option value="barista">Barista</option>
-                                <option value="server">Server</option>
-                              </select>
-                              {isUpdatingRole === member.externalId && (
-                                <span className="text-[9px] text-muted-foreground/60 animate-pulse">Updating...</span>
-                              )}
-                            </div>
-                          </div>
-                          
-                          <div className="mt-1">
-                            <Button 
-                              size="sm" 
-                              variant="secondary" 
-                              className="w-full h-8 gap-1.5 text-xs font-semibold bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-all duration-300"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleImpersonate(member.externalId);
-                              }}
-                              disabled={isLoading === member.externalId}
-                            >
-                              {isLoading === member.externalId ? (
-                                <span className="animate-spin h-3.5 w-3.5 border-2 border-current border-t-transparent rounded-full" />
-                              ) : (
-                                <LogIn className="h-3.5 w-3.5" />
-                              )}
-                              Impersonate Dashboard
-                            </Button>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </div>
-                  )}
                 </div>
-              </motion.div>
-            </TableCell>
-          </TableRow>
+              ) : (
+                <p className="text-xs text-zinc-600">No members in this workspace.</p>
+              )}
+
+              {/* Features */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600 mb-2">
+                  Features
+                </p>
+                <div className="grid gap-px grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 border border-white/8 rounded-lg overflow-hidden">
+                  {FEATURES.map((feat, idx) => (
+                    <div
+                      key={feat.key}
+                      className={`flex items-center justify-between px-3 py-2.5 bg-black hover:bg-white/[0.02] transition-colors ${
+                        idx !== FEATURES.length - 1 ? "border-b border-white/8 sm:border-b-0 sm:border-r" : ""
+                      }`}
+                      style={{ borderColor: "rgba(255,255,255,0.06)" }}
+                    >
+                      <span className="text-xs text-zinc-300">{feat.label}</span>
+                      <Toggle
+                        enabled={features[feat.key]}
+                        onChange={() => toggleFeature(feat.key)}
+                        disabled={savingFeature === feat.key}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </>

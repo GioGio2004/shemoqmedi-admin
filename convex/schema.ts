@@ -188,6 +188,9 @@ export default defineSchema({
     tapCount: v.number(),
     pendingActivationAlert: v.optional(v.boolean()), // Triggers your AirPods popup
 
+    // NEW: Multiplayer Table Session Lock
+    currentSessionId: v.optional(v.id("tableSessions")),
+
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -202,6 +205,7 @@ export default defineSchema({
   categories: defineTable({
     orgId: v.string(),
     name: translatedText,
+    imageUrl: v.optional(v.string()),
     sortOrder: v.number(),
     isActive: v.boolean(),
   })
@@ -398,15 +402,37 @@ export default defineSchema({
   // ==========================================
   // 8. ORDERS (Basket)
   // ==========================================
+  
+  tableSessions: defineTable({
+    orgId: v.string(),
+    tagId: v.id("physicalTags"),
+    status: v.union(v.literal("active"), v.literal("closed")),
+    activeGuestIds: v.array(v.string()),
+    cartItems: v.optional(v.array(v.any())),
+    latestSuggestion: v.optional(
+      v.object({
+        itemName: v.string(),
+        suggestedBy: v.string(),
+        timestamp: v.number(),
+      })
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_org", ["orgId"])
+    .index("by_tag_and_status", ["tagId", "status"]),
+
   tableOrders: defineTable({
     cafeId: v.string(), // org slug
     seatNumber: v.number(),
+    sessionId: v.optional(v.id("tableSessions")),
     items: v.array(
       v.object({
         productId: v.union(v.number(), v.string()), // djb2 hash ID or convex string ID from the frontend
         name: v.string(),
         price: v.number(),
         quantity: v.number(),
+        guestId: v.optional(v.string()), // UUID of the guest who added this item
       }),
     ),
     totalPrice: v.number(),

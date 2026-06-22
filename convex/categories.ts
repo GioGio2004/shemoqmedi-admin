@@ -34,8 +34,9 @@ export const create = mutation({
   args: {
     orgId: v.string(),
     name: translatedTextArg,
+    imageUrl: v.optional(v.string()),
   },
-  handler: async (ctx, { orgId, name }) => {
+  handler: async (ctx, { orgId, name, imageUrl }) => {
     await verifyOrgAccess(ctx, orgId);
 
     // Find the current highest sortOrder so the new category lands at the bottom
@@ -52,6 +53,7 @@ export const create = mutation({
     const newId = await ctx.db.insert("categories", {
       orgId,
       name,
+      imageUrl,
       sortOrder: maxSort + 1,
       isActive: true,
     });
@@ -104,8 +106,9 @@ export const update = mutation({
     orgId: v.string(),
     categoryId: v.id("categories"),
     name: translatedTextArg,
+    imageUrl: v.optional(v.string()),
   },
-  handler: async (ctx, { orgId, categoryId, name }) => {
+  handler: async (ctx, { orgId, categoryId, name, imageUrl }) => {
     await verifyOrgAccess(ctx, orgId);
 
     const category = await ctx.db.get(categoryId);
@@ -115,7 +118,7 @@ export const update = mutation({
       );
     }
 
-    await ctx.db.patch(categoryId, { name });
+    await ctx.db.patch(categoryId, { name, imageUrl: imageUrl !== undefined ? imageUrl : category.imageUrl });
     console.log(`📝 Category updated: ${categoryId}`);
   },
 });
