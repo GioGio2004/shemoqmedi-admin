@@ -5,11 +5,12 @@ import { api } from "@/convex/_generated/api";
 import { RosterRow } from "./RosterRow";
 import { ClerkOrgPanel } from "./ClerkOrgPanel";
 import { NTagFleetPanel } from "./NTagFleetPanel";
+import { BulkImportPanel } from "./BulkImportPanel";
 import { Toaster } from "sonner";
 import { useState } from "react";
-import { Shield, Building2, Nfc, Loader2 } from "lucide-react";
+import { Shield, Building2, Nfc, Loader2, FileJson } from "lucide-react";
 
-type Tab = "workspaces" | "ntags";
+type Tab = "workspaces" | "ntags" | "import";
 
 export function SuperAdminClient() {
   const [activeTab, setActiveTab] = useState<Tab>("workspaces");
@@ -24,6 +25,7 @@ export function SuperAdminClient() {
   const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: "workspaces", label: "Workspaces", icon: Building2 },
     { id: "ntags", label: "NFC Fleet", icon: Nfc },
+    { id: "import", label: "Import Menu", icon: FileJson },
   ];
 
   return (
@@ -134,6 +136,13 @@ export function SuperAdminClient() {
               <p className="text-xs text-zinc-500 mt-0.5">Provision and manage NTAG216 chips across all locations</p>
             </div>
             <NTagFleetPanel organizations={orgs} />
+          </section>
+        )}
+
+        {/* ── TAB: IMPORT MENU ── */}
+        {activeTab === "import" && (
+          <section className="border border-white/8 rounded-xl p-6">
+            <BulkImportPanel organizations={orgs} />
           </section>
         )}
       </main>

@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as admin from "../admin.js";
 import type * as aiChatThemes from "../aiChatThemes.js";
 import type * as analytics from "../analytics.js";
 import type * as authHelpers from "../authHelpers.js";
@@ -36,6 +37,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  admin: typeof admin;
   aiChatThemes: typeof aiChatThemes;
   analytics: typeof analytics;
   authHelpers: typeof authHelpers;

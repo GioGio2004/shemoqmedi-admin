@@ -1,0 +1,67 @@
+{
+  "categories": [
+    {
+      "name": { "en": "Hot Drinks", "ka": "ცხელი სასმელები", "ru": "Горячие напитки" },
+      "sortOrder": 0,
+      "items": [
+        {
+          "name": { "en": "Espresso", "ka": "ესპრესო", "ru": "Эспрессо" },
+          "description": {
+            "en": "A short, strong shot of pure coffee.",
+            "ka": "მოკლე, ძლიერი ყავის შოტი.",
+            "ru": "Короткий, крепкий шот чистого кофе."
+          },
+          "price": 350,
+          "sortOrder": 0,
+          "tags": ["popular", "strong"]
+        },
+        {
+          "name": { "en": "Flat White", "ka": "ფლეთ ვაითი", "ru": "Флэт Уайт" },
+          "description": {
+            "en": "Smooth espresso with steamed milk.",
+            "ka": "გლუვი ესპრესო ორთქლიანი რძით.",
+            "ru": "Мягкий эспрессо с горячим молоком."
+          },
+          "price": 550,
+          "sortOrder": 1,
+          "tags": ["bestseller"]
+        },
+        {
+          "name": { "en": "Cappuccino", "ka": "კაპუჩინო", "ru": "Капучино" },
+          "price": 500,
+          "sortOrder": 2
+        }
+      ]
+    },
+    {
+      "name": { "en": "Cold Drinks", "ka": "ცივი სასმელები", "ru": "Холодные напитки" },
+      "sortOrder": 1,
+      "items": [
+        {
+          "name": { "en": "Cold Brew", "ka": "ცივი ბრუ", "ru": "Колд Брю" },
+          "description": {
+            "en": "12-hour steeped cold brew coffee.",
+            "ka": "12 საათიანი ყავა ცივ წყალში.",
+            "ru": "Кофе холодного приготовления, настоянный 12 часов."
+          },
+          "price": 700,
+          "sortOrder": 0,
+          "tags": ["cold", "strong"],
+          "accentColor": "#1a1a1a"
+        }
+      ]
+    },
+    {
+      "name": { "en": "Food", "ka": "საჭმელი", "ru": "Еда" },
+      "sortOrder": 2,
+      "items": [
+        {
+          "name": { "en": "Croissant", "ka": "კრუასანი", "ru": "Круассан" },
+          "price": 450,
+          "sortOrder": 0,
+          "tags": ["vegan-option", "fresh"]
+        }
+      ]
+    }
+  ]
+}
