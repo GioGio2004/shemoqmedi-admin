@@ -121,6 +121,7 @@ function CategoryDialog({
   const updateCategory = useMutation(api.categories.update);
   const [nameEn, setNameEn] = useState(existing?.name?.en ?? "");
   const [nameKa, setNameKa] = useState(existing?.name?.ka ?? "");
+  const [nameRu, setNameRu] = useState(existing?.name?.ru ?? "");
   const [imageUrl, setImageUrl] = useState(existing?.imageUrl ?? "");
   const [saving, setSaving] = useState(false);
 
@@ -130,6 +131,7 @@ function CategoryDialog({
     try {
       const name: Record<string, string> = { en: nameEn.trim() };
       if (nameKa.trim()) name.ka = nameKa.trim();
+      if (nameRu.trim()) name.ru = nameRu.trim();
 
       if (existing) {
         await updateCategory({ orgId, categoryId: existing._id, name, imageUrl: imageUrl || undefined });
@@ -170,6 +172,17 @@ function CategoryDialog({
               value={nameKa}
               onChange={(e) => setNameKa(e.target.value)}
               placeholder="e.g. ცხელი სასმელები"
+              className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-zinc-300 text-xs font-medium">
+              Name (Russian)
+            </Label>
+            <Input
+              value={nameRu}
+              onChange={(e) => setNameRu(e.target.value)}
+              placeholder="e.g. Горячие напитки"
               className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
             />
           </div>
@@ -243,8 +256,10 @@ function MenuItemDialog({
 
   const [nameEn, setNameEn] = useState(existing?.name?.en ?? "");
   const [nameKa, setNameKa] = useState(existing?.name?.ka ?? "");
+  const [nameRu, setNameRu] = useState(existing?.name?.ru ?? "");
   const [descEn, setDescEn] = useState(existing?.description?.en ?? "");
   const [descKa, setDescKa] = useState(existing?.description?.ka ?? "");
+  const [descRu, setDescRu] = useState(existing?.description?.ru ?? "");
   const [priceGel, setPriceGel] = useState(
     existing ? tetriToGel(existing.price) : "",
   );
@@ -265,8 +280,13 @@ function MenuItemDialog({
     try {
       const name: Record<string, string> = { en: nameEn.trim() };
       if (nameKa.trim()) name.ka = nameKa.trim();
-      const description: Record<string, string> | undefined = descEn.trim()
-        ? { en: descEn.trim(), ...(descKa.trim() ? { ka: descKa.trim() } : {}) }
+      if (nameRu.trim()) name.ru = nameRu.trim();
+      const description: Record<string, string> | undefined = descEn.trim() || descKa.trim() || descRu.trim()
+        ? {
+            ...(descEn.trim() ? { en: descEn.trim() } : {}),
+            ...(descKa.trim() ? { ka: descKa.trim() } : {}),
+            ...(descRu.trim() ? { ru: descRu.trim() } : {}),
+          }
         : undefined;
       const price = gelToTetri(priceGel);
 
@@ -312,7 +332,7 @@ function MenuItemDialog({
 
         <div className="space-y-6 py-2">
           {/* Names */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1.5">
               <Label className="text-zinc-300 text-xs font-medium">
                 Name (EN) *
@@ -335,10 +355,21 @@ function MenuItemDialog({
                 className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
               />
             </div>
+            <div className="space-y-1.5">
+              <Label className="text-zinc-300 text-xs font-medium">
+                Name (RU)
+              </Label>
+              <Input
+                value={nameRu}
+                onChange={(e) => setNameRu(e.target.value)}
+                placeholder="Флэт Уайт"
+                className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+              />
+            </div>
           </div>
 
           {/* Descriptions */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1.5">
               <Label className="text-zinc-300 text-xs font-medium">
                 Description (EN)
@@ -359,6 +390,18 @@ function MenuItemDialog({
                 value={descKa}
                 onChange={(e) => setDescKa(e.target.value)}
                 placeholder="გლუვი ესპრესო ორთქლიანი რძით."
+                rows={3}
+                className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30 resize-none"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-zinc-300 text-xs font-medium">
+                Description (RU)
+              </Label>
+              <Textarea
+                value={descRu}
+                onChange={(e) => setDescRu(e.target.value)}
+                placeholder="Мягкий эспрессо с горячим молоком."
                 rows={3}
                 className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30 resize-none"
               />

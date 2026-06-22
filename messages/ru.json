@@ -1,16 +1,16 @@
 {
   "common": {
-    "signIn": "Войти",
-    "signUp": "Регистрация",
-    "signOut": "Выйти",
-    "dashboard": "Панель управления",
-    "loading": "Загрузка..."
+    "signIn": "Sign In",
+    "signUp": "Sign Up",
+    "signOut": "Sign Out",
+    "dashboard": "Dashboard",
+    "loading": "Loading..."
   },
   "home": {
-    "title": "Шемокмеди Админ",
-    "description": "Эффективно управляйте вашим магазином",
-    "signInPrompt": "Пожалуйста, войдите для доступа к панели управления.",
-    "goToDashboard": "Перейти к панели",
-    "signedIn": "Вы вошли в систему"
+    "title": "Shemoqmedi Admin",
+    "description": "Manage your store efficiently",
+    "signInPrompt": "Please sign in to access the dashboard.",
+    "goToDashboard": "Go to Dashboard",
+    "signedIn": "You are signed in"
   }
 }

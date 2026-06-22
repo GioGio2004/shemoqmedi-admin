@@ -26,14 +26,26 @@ import { ImageUploader } from "@/components/ImageUploader";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface StorefrontConfig {
-  heroHeadline: string;
-  heroSubheadline: string;
-  primaryButtonText?: string;
-  secondaryButtonText?: string;
+  heroHeadline: any;
+  heroSubheadline: any;
+  primaryButtonText?: any;
+  secondaryButtonText?: any;
   coverImageUrl?: string;
   heroImageUrls: [string, string, string];
   address: string;
   cityStateZip: string;
+}
+
+function getI18nStr(val: any, lang: string): string {
+  if (!val) return "";
+  if (typeof val === "string") return lang === "en" ? val : "";
+  return val[lang] || "";
+}
+
+function updateI18nStr(val: any, lang: string, newStr: string): Record<string, string> {
+  const res: Record<string, string> = typeof val === "string" ? { en: val } : { ...(val || {}) };
+  res[lang] = newStr;
+  return res;
 }
 
 interface OperatingHour {
@@ -65,10 +77,10 @@ interface Announcement {
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_STOREFRONT: StorefrontConfig = {
-  heroHeadline: "Discover Our Menu",
-  heroSubheadline: "Fresh ingredients, crafted with care.",
-  primaryButtonText: "Explore Our Menu",
-  secondaryButtonText: "Visit Us",
+  heroHeadline: { en: "Discover Our Menu" },
+  heroSubheadline: { en: "Fresh ingredients, crafted with care." },
+  primaryButtonText: { en: "Explore Our Menu" },
+  secondaryButtonText: { en: "Visit Us" },
   coverImageUrl: "",
   heroImageUrls: ["", "", ""],
   address: "12 Rustaveli Ave",
@@ -198,38 +210,104 @@ function HeroTab({
 
   return (
     <div className="space-y-5">
-      <Field label="Hero Headline" hint="Main title shown on the menu PWA header.">
-        <Input
-          value={data.heroHeadline}
-          onChange={(e) => set("heroHeadline", e.target.value)}
-          placeholder="e.g. Discover Our Menu"
-        />
-      </Field>
+      <div className="space-y-3">
+        <Field label="Hero Headline (EN)" hint="Main title shown on the menu PWA header.">
+          <Input
+            value={getI18nStr(data.heroHeadline, "en")}
+            onChange={(e) => set("heroHeadline", updateI18nStr(data.heroHeadline, "en", e.target.value))}
+            placeholder="e.g. Discover Our Menu"
+          />
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Hero Headline (KA)">
+            <Input
+              value={getI18nStr(data.heroHeadline, "ka")}
+              onChange={(e) => set("heroHeadline", updateI18nStr(data.heroHeadline, "ka", e.target.value))}
+              placeholder="e.g. აღმოაჩინეთ ჩვენი მენიუ"
+            />
+          </Field>
+          <Field label="Hero Headline (RU)">
+            <Input
+              value={getI18nStr(data.heroHeadline, "ru")}
+              onChange={(e) => set("heroHeadline", updateI18nStr(data.heroHeadline, "ru", e.target.value))}
+              placeholder="e.g. Откройте для себя наше меню"
+            />
+          </Field>
+        </div>
+      </div>
 
-      <Field label="Hero Sub-headline">
-        <TextArea
-          value={data.heroSubheadline}
-          onChange={(e) => set("heroSubheadline", e.target.value)}
-          rows={2}
-          placeholder="e.g. Fresh ingredients, crafted with care."
-        />
-      </Field>
+      <div className="space-y-3">
+        <Field label="Hero Sub-headline (EN)">
+          <TextArea
+            value={getI18nStr(data.heroSubheadline, "en")}
+            onChange={(e) => set("heroSubheadline", updateI18nStr(data.heroSubheadline, "en", e.target.value))}
+            rows={2}
+            placeholder="e.g. Fresh ingredients, crafted with care."
+          />
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Hero Sub-headline (KA)">
+            <TextArea
+              value={getI18nStr(data.heroSubheadline, "ka")}
+              onChange={(e) => set("heroSubheadline", updateI18nStr(data.heroSubheadline, "ka", e.target.value))}
+              rows={2}
+              placeholder="e.g. ახალი ინგრედიენტები..."
+            />
+          </Field>
+          <Field label="Hero Sub-headline (RU)">
+            <TextArea
+              value={getI18nStr(data.heroSubheadline, "ru")}
+              onChange={(e) => set("heroSubheadline", updateI18nStr(data.heroSubheadline, "ru", e.target.value))}
+              rows={2}
+              placeholder="e.g. Свежие ингредиенты..."
+            />
+          </Field>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-        <Field label="Primary Button Text">
-          <Input
-            value={data.primaryButtonText || ""}
-            onChange={(e) => set("primaryButtonText", e.target.value)}
-            placeholder="Explore Our Menu"
-          />
-        </Field>
-        <Field label="Secondary Button Text">
-          <Input
-            value={data.secondaryButtonText || ""}
-            onChange={(e) => set("secondaryButtonText", e.target.value)}
-            placeholder="Visit Us"
-          />
-        </Field>
+        <div className="space-y-3">
+          <Field label="Primary Button Text (EN)">
+            <Input
+              value={getI18nStr(data.primaryButtonText, "en")}
+              onChange={(e) => set("primaryButtonText", updateI18nStr(data.primaryButtonText, "en", e.target.value))}
+              placeholder="Explore Our Menu"
+            />
+          </Field>
+          <div className="flex gap-2">
+            <Input
+              value={getI18nStr(data.primaryButtonText, "ka")}
+              onChange={(e) => set("primaryButtonText", updateI18nStr(data.primaryButtonText, "ka", e.target.value))}
+              placeholder="KA Text"
+            />
+            <Input
+              value={getI18nStr(data.primaryButtonText, "ru")}
+              onChange={(e) => set("primaryButtonText", updateI18nStr(data.primaryButtonText, "ru", e.target.value))}
+              placeholder="RU Text"
+            />
+          </div>
+        </div>
+        <div className="space-y-3">
+          <Field label="Secondary Button Text (EN)">
+            <Input
+              value={getI18nStr(data.secondaryButtonText, "en")}
+              onChange={(e) => set("secondaryButtonText", updateI18nStr(data.secondaryButtonText, "en", e.target.value))}
+              placeholder="Visit Us"
+            />
+          </Field>
+          <div className="flex gap-2">
+            <Input
+              value={getI18nStr(data.secondaryButtonText, "ka")}
+              onChange={(e) => set("secondaryButtonText", updateI18nStr(data.secondaryButtonText, "ka", e.target.value))}
+              placeholder="KA Text"
+            />
+            <Input
+              value={getI18nStr(data.secondaryButtonText, "ru")}
+              onChange={(e) => set("secondaryButtonText", updateI18nStr(data.secondaryButtonText, "ru", e.target.value))}
+              placeholder="RU Text"
+            />
+          </div>
+        </div>
       </div>
 
       <Field label="Cover Image (Landing Page)" hint="Primary background image shown on the external directory.">

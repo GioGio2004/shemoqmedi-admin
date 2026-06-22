@@ -44,10 +44,10 @@ export default defineSchema({
     timezone: v.optional(v.string()), // "Asia/Tbilisi"
     storefrontConfig: v.optional(
       v.object({
-        heroHeadline: v.string(),
-        heroSubheadline: v.string(),
-        primaryButtonText: v.optional(v.string()),
-        secondaryButtonText: v.optional(v.string()),
+        heroHeadline: v.union(v.string(), translatedText),
+        heroSubheadline: v.union(v.string(), translatedText),
+        primaryButtonText: v.optional(v.union(v.string(), translatedText)),
+        secondaryButtonText: v.optional(v.union(v.string(), translatedText)),
         coverImageUrl: v.optional(v.string()), // For the landing page card / primary background
         heroImageUrls: v.array(v.string()), // For the 3 floating images
         address: v.string(),
