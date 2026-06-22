@@ -254,3 +254,26 @@ export const setAllAvailability = mutation({
     return items.length;
   },
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REMOVE — hard-delete an item
+// ─────────────────────────────────────────────────────────────────────────────
+export const remove = mutation({
+  args: {
+    orgId: v.string(),
+    menuItemId: v.id("menuItems"),
+  },
+  handler: async (ctx, { orgId, menuItemId }) => {
+    await verifyOrgAccess(ctx, orgId);
+
+    const item = await ctx.db.get(menuItemId);
+    if (!item || item.orgId !== orgId) {
+      throw new Error(
+        `Security violation: menu item "${menuItemId}" does not belong to org "${orgId}".`
+      );
+    }
+
+    await ctx.db.delete(menuItemId);
+    console.log(`🗑️ Menu item deleted: ${menuItemId}`);
+  },
+});

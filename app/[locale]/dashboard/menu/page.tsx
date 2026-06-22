@@ -24,6 +24,9 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -537,6 +540,7 @@ function MenuItemCard({
   cafeName: string;
 }) {
   const archive = useMutation(api.menuItems.archive);
+  const removeItem = useMutation(api.menuItems.remove);
   const toggleAvailable = useMutation(api.menuItems.update);
   const [editing, setEditing] = useState(false);
   const [toggling, setToggling] = useState(false);
@@ -640,10 +644,21 @@ function MenuItemCard({
           </button>
           <button
             onClick={() => archive({ orgId, menuItemId: item._id })}
-            title="Archive item"
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-all"
+            title="Archive item (Hide)"
+            className="p-1.5 rounded-lg text-zinc-400 hover:text-orange-400 hover:bg-orange-500/10 transition-all"
           >
             <Archive className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => {
+              if (confirm("Are you sure you want to permanently delete this item?")) {
+                removeItem({ orgId, menuItemId: item._id });
+              }
+            }}
+            title="Delete item"
+            className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-all"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
@@ -669,11 +684,19 @@ function CategorySection({
   orgId,
   cafeName,
   defaultExpanded = false,
+  isFirst,
+  isLast,
+  onMoveUp,
+  onMoveDown,
 }: {
   category: Category;
   orgId: string;
   cafeName: string;
   defaultExpanded?: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
 }) {
   const items = useQuery(api.menuItems.listByCategory, {
     orgId,
@@ -719,6 +742,22 @@ function CategorySection({
               </div>
             </button>
             <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-0.5 mr-2 border-r border-white/10 pr-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); onMoveUp(); }}
+                  disabled={isFirst}
+                  className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onMoveDown(); }}
+                  disabled={isLast}
+                  className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <ArrowDown className="h-4 w-4" />
+                </button>
+              </div>
               <Button
                 size="sm"
                 variant="ghost"
@@ -821,6 +860,23 @@ export default function MenuPage() {
   const [storefrontToggling, setStorefrontToggling] = useState(false);
 
   const setAllAvailability = useMutation(api.menuItems.setAllAvailability);
+  const updateCategorySort = useMutation(api.categories.updateSort);
+
+  async function moveCategory(index: number, direction: "up" | "down") {
+    if (!categories || !orgId) return;
+    const newCategories = [...categories];
+    const swapIndex = direction === "up" ? index - 1 : index + 1;
+    
+    if (swapIndex < 0 || swapIndex >= newCategories.length) return;
+
+    // Swap
+    const temp = newCategories[index];
+    newCategories[index] = newCategories[swapIndex];
+    newCategories[swapIndex] = temp;
+
+    const orderedIds = newCategories.map((c) => c._id);
+    await updateCategorySort({ orgId, orderedIds });
+  }
 
   async function hideAllFromStorefront() {
     if (!orgId) return;
@@ -968,13 +1024,17 @@ export default function MenuPage() {
         <EmptyState onAdd={() => setAddingCategory(true)} />
       ) : (
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both space-y-4">
-          {categories.map((cat) => (
+          {categories.map((cat, index) => (
             <CategorySection
               key={`${cat._id}-${expandKey}`}
               category={cat as Category}
               orgId={orgId}
               cafeName={cafeName}
               defaultExpanded={globalExpanded}
+              isFirst={index === 0}
+              isLast={index === categories.length - 1}
+              onMoveUp={() => moveCategory(index, "up")}
+              onMoveDown={() => moveCategory(index, "down")}
             />
           ))}
         </div>
