@@ -50,8 +50,8 @@ export default defineSchema({
         secondaryButtonText: v.optional(v.union(v.string(), translatedText)),
         coverImageUrl: v.optional(v.string()), // For the landing page card / primary background
         heroImageUrls: v.array(v.string()), // For the 3 floating images
-        address: v.string(),
-        cityStateZip: v.string(),
+        address: v.union(v.string(), translatedText),
+        cityStateZip: v.union(v.string(), translatedText),
       }),
     ),
 

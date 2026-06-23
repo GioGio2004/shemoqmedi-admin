@@ -32,8 +32,8 @@ interface StorefrontConfig {
   secondaryButtonText?: any;
   coverImageUrl?: string;
   heroImageUrls: [string, string, string];
-  address: string;
-  cityStateZip: string;
+  address: any;
+  cityStateZip: any;
 }
 
 function getI18nStr(val: any, lang: string): string {
@@ -83,8 +83,8 @@ const DEFAULT_STOREFRONT: StorefrontConfig = {
   secondaryButtonText: { en: "Visit Us" },
   coverImageUrl: "",
   heroImageUrls: ["", "", ""],
-  address: "12 Rustaveli Ave",
-  cityStateZip: "Tbilisi, 0108",
+  address: { en: "12 Rustaveli Ave" },
+  cityStateZip: { en: "Tbilisi, 0108" },
 };
 
 const DEFAULT_HOURS: OperatingHour[] = [
@@ -409,25 +409,53 @@ function HeroTab({
         </div>
       </Field>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="Street Address">
-          <div className="relative">
-            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-600 pointer-events-none" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div className="space-y-3">
+          <Field label="Street Address (EN)">
+            <div className="relative">
+              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-600 pointer-events-none" />
+              <Input
+                value={getI18nStr(data.address, "en")}
+                onChange={(e) => set("address", updateI18nStr(data.address, "en", e.target.value))}
+                placeholder="12 Rustaveli Ave"
+                className="pl-9"
+              />
+            </div>
+          </Field>
+          <div className="flex gap-2">
             <Input
-              value={data.address}
-              onChange={(e) => set("address", e.target.value)}
-              placeholder="12 Rustaveli Ave"
-              className="pl-9"
+              value={getI18nStr(data.address, "ka")}
+              onChange={(e) => set("address", updateI18nStr(data.address, "ka", e.target.value))}
+              placeholder="KA Address"
+            />
+            <Input
+              value={getI18nStr(data.address, "ru")}
+              onChange={(e) => set("address", updateI18nStr(data.address, "ru", e.target.value))}
+              placeholder="RU Address"
             />
           </div>
-        </Field>
-        <Field label="City / Zip">
-          <Input
-            value={data.cityStateZip}
-            onChange={(e) => set("cityStateZip", e.target.value)}
-            placeholder="Tbilisi, 0108"
-          />
-        </Field>
+        </div>
+        <div className="space-y-3">
+          <Field label="City / Zip (EN)">
+            <Input
+              value={getI18nStr(data.cityStateZip, "en")}
+              onChange={(e) => set("cityStateZip", updateI18nStr(data.cityStateZip, "en", e.target.value))}
+              placeholder="Tbilisi, 0108"
+            />
+          </Field>
+          <div className="flex gap-2">
+            <Input
+              value={getI18nStr(data.cityStateZip, "ka")}
+              onChange={(e) => set("cityStateZip", updateI18nStr(data.cityStateZip, "ka", e.target.value))}
+              placeholder="KA City/Zip"
+            />
+            <Input
+              value={getI18nStr(data.cityStateZip, "ru")}
+              onChange={(e) => set("cityStateZip", updateI18nStr(data.cityStateZip, "ru", e.target.value))}
+              placeholder="RU City/Zip"
+            />
+          </div>
+        </div>
       </div>
     </div>
   );
