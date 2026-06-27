@@ -32,6 +32,13 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("byExternalId", ["externalId"]),
 
+  anonymous_guests: defineTable({
+    guestId: v.string(), // The UUID stored in localStorage
+    savedNootype: v.optional(v.string()), // The guest's persistent Mood preference
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_guestId", ["guestId"]),
+
   organizations: defineTable({
     clerkId: v.string(),
     name: v.string(),
@@ -543,4 +550,56 @@ export default defineSchema({
   })
     .index("by_org", ["orgId"])
     .index("by_session", ["sessionId"]),
+
+  // ==========================================
+  // 11. AI TRAINING DATA FLYWHEEL
+  // ==========================================
+  /**
+   * ai_training_logs — one row per completed AI exchange.
+   *
+   * Each row is a fully self-contained training example ready to be
+   * serialized into a Gemini SFT JSONL line:
+   *
+   *   {
+   *     "systemInstruction": { "role": "system", "parts": [{ "text": "…" }] },
+   *     "contents": [
+   *       { "role": "user",  "parts": [{ "text": "…" }] },
+   *       { "role": "model", "parts": [{ "text": "…" }] }
+   *     ]
+   *   }
+   *
+   * Partition key: cafeId (org slug) — strict per-cafe tenant isolation.
+   * Quality signals (positiveSignal, nootype) allow downstream filtering
+   * so only high-quality examples make it into a fine-tuning dataset.
+   */
+  ai_training_logs: defineTable({
+    // ── Tenant isolation ──────────────────────────────────────────────────
+    cafeId:    v.string(), // org slug — primary partition key
+    sessionId: v.string(), // anonymous UUID from localStorage — groups a visitor's turns
+
+    // ── SFT payload (Gemini JSONL-ready) ─────────────────────────────────
+    systemInstruction: v.string(), // exact system prompt used for this exchange
+
+    // Alternating user → model turns. role must be "user" | "model" (not "assistant")
+    contents: v.array(
+      v.object({
+        role: v.union(v.literal("user"), v.literal("model")),
+        parts: v.array(v.object({ text: v.string() })),
+      }),
+    ),
+
+    // ── Raw output ────────────────────────────────────────────────────────
+    rawModelJson: v.string(), // the unparsed JSON string returned by Gemini (audit trail)
+
+    // ── Quality signals ───────────────────────────────────────────────────
+    positiveSignal: v.boolean(), // true = user completed checkout after this session
+    nootype: v.optional(v.string()), // detected nootype: "form" | "overcoming" | "relaxation" | "management"
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────
+    exportedAt: v.optional(v.number()), // null until row is included in a JSONL export job
+    timestamp:  v.number(),             // epoch ms — row creation time
+  })
+    .index("byCafe",           ["cafeId"])
+    .index("byCafeAndSession", ["cafeId", "sessionId"])
+    .index("byExported",       ["cafeId", "exportedAt"]),
 });

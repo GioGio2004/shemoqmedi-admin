@@ -100,6 +100,11 @@ export type PublicApiType = {
       "mutation",
       "public",
       {
+        announcements?: Array<{
+          id: string;
+          isActive: boolean;
+          message: string;
+        }>;
         operatingHours?: Array<{ day: string; hours: string }>;
         orgId: string;
         socialLinks?: { email?: string; instagram?: string; whatsapp?: string };
@@ -117,6 +122,7 @@ export type PublicApiType = {
           backgroundColor?: string;
           buttonRadius: string;
           fontFamily: string;
+          menuType?: "basic" | "dragable";
           primaryColor: string;
           textColor?: string;
         };
@@ -144,7 +150,7 @@ export type PublicApiType = {
     create: FunctionReference<
       "mutation",
       "public",
-      { name: Record<string, string>; orgId: string },
+      { imageUrl?: string; name: Record<string, string>; orgId: string },
       any
     >;
     updateSort: FunctionReference<
@@ -158,6 +164,7 @@ export type PublicApiType = {
       "public",
       {
         categoryId: Id<"categories">;
+        imageUrl?: string;
         name: Record<string, string>;
         orgId: string;
       },
@@ -226,6 +233,12 @@ export type PublicApiType = {
       { isAvailable: boolean; orgId: string },
       any
     >;
+    remove: FunctionReference<
+      "mutation",
+      "public",
+      { menuItemId: Id<"menuItems">; orgId: string },
+      any
+    >;
   };
   backfill: {
     syncMembership: FunctionReference<
@@ -283,14 +296,16 @@ export type PublicApiType = {
       "public",
       {
         cafeId: string;
+        guestId: string;
         items: Array<{
-          name: string;
-          price: number;
-          productId: number;
+          name?: string;
+          price?: number;
+          productId: number | string;
           quantity: number;
         }>;
         seatNumber: number;
-        totalPrice: number;
+        sessionId: Id<"tableSessions">;
+        totalPrice?: number;
       },
       any
     >;
@@ -398,7 +413,12 @@ export type PublicApiType = {
     provisionPhysicalTag: FunctionReference<
       "mutation",
       "public",
-      { orgId?: string; tableName?: string; volooTagsUUID: string },
+      {
+        orgId?: string;
+        seatNumber?: number;
+        tableName?: string;
+        volooTagsUUID: string;
+      },
       any
     >;
     updatePhysicalTag: FunctionReference<
@@ -407,6 +427,7 @@ export type PublicApiType = {
       {
         isActive?: boolean;
         orgId?: string;
+        seatNumber?: number;
         tableName?: string;
         tagId: Id<"physicalTags">;
       },
@@ -541,6 +562,163 @@ export type PublicApiType = {
       { alertMessage: string; orgId: string },
       any
     >;
+  };
+  aiChatThemes: {
+    get: FunctionReference<"query", "public", { orgId?: string }, any>;
+    getBySlug: FunctionReference<"query", "public", { slug: string }, any>;
+    update: FunctionReference<
+      "mutation",
+      "public",
+      {
+        backgroundColor: string;
+        backgroundTemplate?: string;
+        botAvatarUrl?: string;
+        botMessageBg: string;
+        botMessageText: string;
+        botName?: string;
+        fontFamily: string;
+        greetingMessage?: string;
+        isActive: boolean;
+        orgId: string;
+        primaryColor: string;
+        textColor: string;
+        userMessageBg: string;
+        userMessageText: string;
+      },
+      any
+    >;
+  };
+  cleanup: {
+    removeExpiredSessions: FunctionReference<"mutation", "public", any, any>;
+  };
+  analytics: {
+    getOverviewStats: FunctionReference<
+      "query",
+      "public",
+      { orgId: string },
+      any
+    >;
+  };
+  tableSessions: {
+    joinSession: FunctionReference<
+      "mutation",
+      "public",
+      { guestId: string; orgId: string; tagId: Id<"physicalTags"> },
+      any
+    >;
+    freeTable: FunctionReference<
+      "mutation",
+      "public",
+      { sessionId: Id<"tableSessions">; tagId: Id<"physicalTags"> },
+      any
+    >;
+    getSession: FunctionReference<
+      "query",
+      "public",
+      { sessionId?: Id<"tableSessions"> },
+      any
+    >;
+    getSessionOrders: FunctionReference<
+      "query",
+      "public",
+      { sessionId?: Id<"tableSessions"> },
+      any
+    >;
+    broadcastSuggestion: FunctionReference<
+      "mutation",
+      "public",
+      { itemName: string; sessionId: Id<"tableSessions">; suggestedBy: string },
+      any
+    >;
+    syncCart: FunctionReference<
+      "mutation",
+      "public",
+      {
+        guestId: string;
+        items: Array<{
+          id: string;
+          image?: string;
+          name: string;
+          price: number;
+          quantity: number;
+        }>;
+        sessionId: Id<"tableSessions">;
+      },
+      any
+    >;
+  };
+  admin: {
+    bulkImportMenu: FunctionReference<
+      "mutation",
+      "public",
+      {
+        orgId: string;
+        payload: {
+          categories: Array<{
+            items: Array<{
+              accentColor?: string;
+              description?: Record<string, string>;
+              imageUrl?: string;
+              name: Record<string, string>;
+              price: number;
+              sortOrder: number;
+              tags?: Array<string>;
+            }>;
+            name: Record<string, string>;
+            sortOrder: number;
+          }>;
+        };
+      },
+      any
+    >;
+  };
+  aiTrainingLogs: {
+    ingestTurn: FunctionReference<
+      "mutation",
+      "public",
+      {
+        cafeId: string;
+        contents: Array<{
+          parts: Array<{ text: string }>;
+          role: "user" | "model";
+        }>;
+        nootype?: string;
+        positiveSignal: boolean;
+        rawModelJson: string;
+        sessionId: string;
+        systemInstruction: string;
+      },
+      any
+    >;
+    updateSignal: FunctionReference<
+      "mutation",
+      "public",
+      {
+        cafeId: string;
+        nootype?: string;
+        positiveSignal: boolean;
+        sessionId: string;
+      },
+      any
+    >;
+    listForExport: FunctionReference<
+      "query",
+      "public",
+      {
+        cafeId: string;
+        limit?: number;
+        nootype?: string;
+        onlyPositive?: boolean;
+      },
+      any
+    >;
+    markExported: FunctionReference<
+      "mutation",
+      "public",
+      { ids: Array<Id<"ai_training_logs">> },
+      any
+    >;
+    getStats: FunctionReference<"query", "public", { cafeId: string }, any>;
   };
 };
 export type InternalApiType = {};

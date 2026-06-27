@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "convex/react";
+import { useQuery, useConvexAuth } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { 
   Building2, 
@@ -15,7 +15,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { motion } from "framer-motion";
 
 export function DashboardOverviewClient({ orgId }: { orgId: string }) {
-  const stats = useQuery(api.analytics.getOverviewStats, { orgId });
+  const { isAuthenticated } = useConvexAuth();
+  const stats = useQuery(
+    api.analytics.getOverviewStats, 
+    isAuthenticated ? { orgId } : "skip"
+  );
 
   // Handle loading state
   if (stats === undefined) {

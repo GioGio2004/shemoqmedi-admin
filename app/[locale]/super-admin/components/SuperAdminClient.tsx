@@ -6,11 +6,12 @@ import { RosterRow } from "./RosterRow";
 import { ClerkOrgPanel } from "./ClerkOrgPanel";
 import { NTagFleetPanel } from "./NTagFleetPanel";
 import { BulkImportPanel } from "./BulkImportPanel";
+import { AiTrainingPanel } from "./AiTrainingPanel";
 import { Toaster } from "sonner";
 import { useState } from "react";
-import { Shield, Building2, Nfc, Loader2, FileJson } from "lucide-react";
+import { Shield, Building2, Nfc, Loader2, FileJson, Database } from "lucide-react";
 
-type Tab = "workspaces" | "ntags" | "import";
+type Tab = "workspaces" | "ntags" | "import" | "ai_training";
 
 export function SuperAdminClient() {
   const [activeTab, setActiveTab] = useState<Tab>("workspaces");
@@ -26,6 +27,7 @@ export function SuperAdminClient() {
     { id: "workspaces", label: "Workspaces", icon: Building2 },
     { id: "ntags", label: "NFC Fleet", icon: Nfc },
     { id: "import", label: "Import Menu", icon: FileJson },
+    { id: "ai_training", label: "AI Training", icon: Database },
   ];
 
   return (
@@ -143,6 +145,13 @@ export function SuperAdminClient() {
         {activeTab === "import" && (
           <section className="border border-white/8 rounded-xl p-6">
             <BulkImportPanel organizations={orgs} />
+          </section>
+        )}
+
+        {/* ── TAB: AI TRAINING ── */}
+        {activeTab === "ai_training" && (
+          <section className="border border-white/8 rounded-xl p-6">
+            <AiTrainingPanel />
           </section>
         )}
       </main>

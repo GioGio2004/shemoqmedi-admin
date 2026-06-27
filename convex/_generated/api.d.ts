@@ -10,7 +10,9 @@
 
 import type * as admin from "../admin.js";
 import type * as aiChatThemes from "../aiChatThemes.js";
+import type * as aiTrainingLogs from "../aiTrainingLogs.js";
 import type * as analytics from "../analytics.js";
+import type * as anonymousGuests from "../anonymousGuests.js";
 import type * as authHelpers from "../authHelpers.js";
 import type * as backfill from "../backfill.js";
 import type * as categories from "../categories.js";
@@ -39,7 +41,9 @@ import type {
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   aiChatThemes: typeof aiChatThemes;
+  aiTrainingLogs: typeof aiTrainingLogs;
   analytics: typeof analytics;
+  anonymousGuests: typeof anonymousGuests;
   authHelpers: typeof authHelpers;
   backfill: typeof backfill;
   categories: typeof categories;
