@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ImageUploader } from "@/components/ImageUploader";
+import { LocationPickerMap } from "@/components/maps/LocationPickerMap";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ interface ThemeSettings {
   fontFamily: string;
   buttonRadius: string;
   menuType?: "basic" | "dragable";
+  categoryLayout?: "pills" | "cards";
 }
 
 interface Announcement {
@@ -105,6 +107,7 @@ const DEFAULT_THEME: ThemeSettings = {
   fontFamily: "Inter",
   buttonRadius: "0.5rem",
   menuType: "basic",
+  categoryLayout: "pills",
 };
 
 // ─── Tab Config ───────────────────────────────────────────────────────────────
@@ -193,10 +196,16 @@ function HeroTab({
   data,
   onChange,
   cafeName,
+  lat,
+  lng,
+  onLocationChange,
 }: {
   data: StorefrontConfig;
   onChange: (d: StorefrontConfig) => void;
   cafeName: string;
+  lat?: number;
+  lng?: number;
+  onLocationChange?: (lat: number, lng: number) => void;
 }) {
   function set<K extends keyof StorefrontConfig>(key: K, val: StorefrontConfig[K]) {
     onChange({ ...data, [key]: val });
@@ -457,6 +466,19 @@ function HeroTab({
           </div>
         </div>
       </div>
+
+      <Field label="Precise Map Location" hint="Search for your address or drag the pin to set your exact venue location on the map.">
+        <div className="rounded-xl overflow-hidden border border-white/10 relative" style={{ height: 320 }}>
+          <LocationPickerMap
+            lat={lat}
+            lng={lng}
+            onChange={(newLat, newLng) => {
+              if (onLocationChange) onLocationChange(newLat, newLng);
+              setTimeout(() => document.getElementById("save-storefront-btn")?.click(), 250);
+            }}
+          />
+        </div>
+      </Field>
     </div>
   );
 }
@@ -779,6 +801,58 @@ function ThemeTab({
         </div>
       </Field>
 
+      <Field label="Category Layout" hint="Choose how categories are displayed in the Classic Scroll menu.">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+          {/* Pills Layout Card */}
+          <button
+            onClick={() => onChange({ ...data, categoryLayout: "pills" })}
+            className={cn(
+              "flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all relative overflow-hidden group",
+              (!data.categoryLayout || data.categoryLayout === "pills")
+                ? "border-emerald-500/50 bg-emerald-500/10 ring-1 ring-emerald-500/30"
+                : "border-white/10 bg-white/[0.02] hover:bg-white/5 hover:border-white/20"
+            )}
+          >
+            <div className="flex items-center justify-between w-full">
+              <span className={cn(
+                "text-sm font-semibold",
+                (!data.categoryLayout || data.categoryLayout === "pills") ? "text-emerald-400" : "text-white"
+              )}>
+                Pill Navigation
+              </span>
+              {(!data.categoryLayout || data.categoryLayout === "pills") && (
+                <Check className="h-4 w-4 text-emerald-400" />
+              )}
+            </div>
+            <p className="text-xs text-zinc-400">Horizontal scrolling pills. Products listed below.</p>
+          </button>
+
+          {/* Cards Layout Card */}
+          <button
+            onClick={() => onChange({ ...data, categoryLayout: "cards" })}
+            className={cn(
+              "flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all relative overflow-hidden group",
+              data.categoryLayout === "cards"
+                ? "border-emerald-500/50 bg-emerald-500/10 ring-1 ring-emerald-500/30"
+                : "border-white/10 bg-white/[0.02] hover:bg-white/5 hover:border-white/20"
+            )}
+          >
+            <div className="flex items-center justify-between w-full">
+              <span className={cn(
+                "text-sm font-semibold",
+                data.categoryLayout === "cards" ? "text-emerald-400" : "text-white"
+              )}>
+                Visual Cards
+              </span>
+              {data.categoryLayout === "cards" && (
+                <Check className="h-4 w-4 text-emerald-400" />
+              )}
+            </div>
+            <p className="text-xs text-zinc-400">Grid of category cards. Products open in a popup.</p>
+          </button>
+        </div>
+      </Field>
+
       {/* Live button preview */}
       <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 flex items-center gap-4">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600 shrink-0">Preview</p>
@@ -900,6 +974,11 @@ export default function StorefrontPage() {
     orgId ? { orgId } : "skip",
   );
   const saveConfig = useMutation(api.organizations.updateStorefrontConfig);
+  const venueRecord = useQuery(
+    api.venues.getByOrgId as any, // Type cast for now until codegen runs
+    orgId ? { orgId } : "skip"
+  );
+  const saveLocation = useMutation(api.venues.updateLocation as any);
 
   // Local state
   const [activeTab, setActiveTab] = useState<TabId>("hero");
@@ -908,6 +987,8 @@ export default function StorefrontPage() {
   const [socials, setSocials] = useState<SocialLinks>(DEFAULT_SOCIALS);
   const [theme, setTheme] = useState<ThemeSettings>(DEFAULT_THEME);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [lat, setLat] = useState<number | undefined>();
+  const [lng, setLng] = useState<number | undefined>();
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -920,6 +1001,13 @@ export default function StorefrontPage() {
     if (config.themeSettings) setTheme(config.themeSettings);
     if (config.announcements) setAnnouncements(config.announcements);
   }, [config]);
+
+  useEffect(() => {
+    if (venueRecord && venueRecord.lat && venueRecord.lng) {
+      setLat(venueRecord.lat);
+      setLng(venueRecord.lng);
+    }
+  }, [venueRecord]);
 
   async function handleSave() {
     if (!orgId) return;
@@ -947,6 +1035,10 @@ export default function StorefrontPage() {
         themeSettings: theme,
         announcements,
       });
+
+      if (lat !== undefined && lng !== undefined) {
+        await saveLocation({ orgId, lat, lng });
+      }
 
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -1044,7 +1136,17 @@ export default function StorefrontPage() {
       {/* Tab panel */}
       <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 delay-150 fill-mode-both bg-[#09090b] border border-white/10 rounded-2xl p-6">
         {activeTab === "hero" && (
-          <HeroTab data={storefront} onChange={setStorefront} cafeName={organization?.name || "cafe"} />
+          <HeroTab 
+            data={storefront} 
+            onChange={setStorefront} 
+            cafeName={organization?.name || "cafe"} 
+            lat={lat}
+            lng={lng}
+            onLocationChange={(newLat, newLng) => {
+              setLat(newLat);
+              setLng(newLng);
+            }}
+          />
         )}
         {activeTab === "hours" && (
           <HoursTab data={hours} onChange={setHours} />

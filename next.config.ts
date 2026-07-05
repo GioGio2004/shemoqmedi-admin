@@ -13,6 +13,10 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "img.clerk.com", // Clerk org logos
       },
+      {
+        protocol: "https",
+        hostname: "*.convex.cloud", // Convex storage
+      },
     ],
   },
 };

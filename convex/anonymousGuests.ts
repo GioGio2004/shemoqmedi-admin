@@ -24,28 +24,7 @@ export const createProfile = mutation({
   },
 });
 
-export const updateNootype = mutation({
-  args: {
-    guestId: v.string(),
-    savedNootype: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const existing = await ctx.db
-      .query("anonymous_guests")
-      .withIndex("by_guestId", (q) => q.eq("guestId", args.guestId))
-      .unique();
 
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        savedNootype: args.savedNootype,
-        updatedAt: Date.now(),
-      });
-      return existing._id;
-    }
-
-    return null;
-  },
-});
 
 export const getProfile = query({
   args: { guestId: v.string() },

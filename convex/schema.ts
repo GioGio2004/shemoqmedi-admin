@@ -59,6 +59,8 @@ export default defineSchema({
         heroImageUrls: v.array(v.string()), // For the 3 floating images
         address: v.union(v.string(), translatedText),
         cityStateZip: v.union(v.string(), translatedText),
+        lat: v.optional(v.number()),
+        lng: v.optional(v.number()),
       }),
     ),
 
@@ -90,6 +92,7 @@ export default defineSchema({
         fontFamily: v.string(),
         buttonRadius: v.string(),
         menuType: v.optional(v.union(v.literal("basic"), v.literal("dragable"))),
+        categoryLayout: v.optional(v.union(v.literal("pills"), v.literal("cards"))),
       }),
     ),
     // Custom branding for the end-user's glassy mobile PWA
@@ -141,7 +144,61 @@ export default defineSchema({
     .index("by_clerk_id", ["clerkId"])
     .index("by_slug", ["slug"]),
 
-  // The Bridge: Maps Users to their Workspaces (Crucial for RBAC)
+  // ==========================================
+  // 1b. VENUES (Public Discovery & SEO)
+  // ==========================================
+  // Decoupled from `organizations` — this table holds all public-facing SEO
+  // data for the /venues directory and individual venue discovery pages.
+  // A venue row is created from the org data but is independently managed.
+  // isPublished: false = safe default; admin must explicitly publish each venue.
+  venues: defineTable({
+    orgId:       v.string(),        // FK → organizations.clerkId
+    slug:        v.string(),        // unique URL slug: "mtatsminda-coffee-tbilisi"
+    name:        v.string(),
+    category:    v.union(
+      v.literal("cafe"),
+      v.literal("restaurant"),
+      v.literal("bar"),
+      v.literal("hotel"),
+      v.literal("other"),
+    ),
+    description: v.string(),        // ≤160 chars, SEO-optimised
+
+    // Location
+    address:     v.string(),
+    lat:         v.optional(v.number()),
+    lng:         v.optional(v.number()),
+    phone:       v.optional(v.string()),
+    hours:       v.optional(v.array(v.object({ day: v.string(), hours: v.string() }))),
+
+    // Media
+    coverImage:    v.optional(v.string()),
+    galleryImages: v.optional(v.array(v.string())),
+
+    // Taxonomy
+    tags: v.optional(v.array(v.string())), // cuisine type, features, etc.
+
+    // ── Google Business Profile (GBP) cache ──────────────────────────────────
+    // Populated by the daily syncAllGoogleData cron via Google Places API (New).
+    // Key on gbpPlaceId to call Place Details; cache results to avoid per-request costs.
+    gbpPlaceId:             v.optional(v.string()),
+    googleRating:           v.optional(v.number()),
+    googleReviewCount:      v.optional(v.number()),
+    googleDataLastFetchedAt: v.optional(v.number()), // epoch ms
+
+    // ── Publishing gate ───────────────────────────────────────────────────────
+    // false = draft (not indexed, not in sitemap).
+    // Admin must explicitly set to true before venue appears publicly.
+    isPublished: v.boolean(),
+
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_slug",      ["slug"])
+    .index("by_org",       ["orgId"])
+    .index("by_published", ["isPublished"]),
+
+
   memberships: defineTable({
     userId: v.id("users"),
     orgId: v.string(), // The Clerk Org ID

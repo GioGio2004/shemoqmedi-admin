@@ -121,7 +121,7 @@ export default function VolooAiTestUI() {
   const { organization } = useOrganization();
   const orgId = organization?.id ?? "";
 
-  const [mode, setMode] = useState<"voice" | "chat">("voice");
+  const [mode, setMode] = useState<"voice" | "chat">("chat");
   const [showcasedItems, setShowcasedItems] = useState<ShowcaseItem[] | null>(null);
   const [themeToast, setThemeToast] = useState<(ThemeUpdate & { visible: boolean }) | null>(null);
   const [logOpen, setLogOpen] = useState(false);
@@ -161,10 +161,7 @@ export default function VolooAiTestUI() {
       {/* ── CHAT MODE — fills full height ────────────────────────────── */}
       {mode === "chat" && orgId && (
         <div className="flex flex-col h-full relative">
-          {/* Floating mode toggle inside chat */}
-          <div className="absolute top-14 left-1/2 -translate-x-1/2 z-10">
-            <ModeToggle mode={mode} onChange={handleModeChange} />
-          </div>
+          {/* Floating mode toggle inside chat (HIDDEN: Voice AI disabled) */}
           <VolooChatUI orgId={orgId} orgName={organization?.name} />
         </div>
       )}
@@ -174,10 +171,8 @@ export default function VolooAiTestUI() {
         <div className="overflow-y-auto flex-1">
           <div className="flex flex-col gap-5 w-full max-w-2xl mx-auto px-4 py-6 pb-28 lg:pb-8">
 
-            {/* Mode toggle */}
-            <div className="flex justify-center">
-              <ModeToggle mode={mode} onChange={handleModeChange} />
-            </div>
+            {/* Mode toggle (HIDDEN) */}
+
           {/* Main voice card */}
           <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#09090b]/80 backdrop-blur-2xl shadow-2xl">
             <div className={`absolute top-0 inset-x-0 h-px transition-colors duration-700 ${status === "speaking" ? "bg-white" : status === "listening" ? "bg-white/60" : "bg-white/15"}`} />

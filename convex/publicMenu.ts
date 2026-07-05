@@ -51,6 +51,7 @@ export const get = query({
     const categories = activeCategories.map((category) => ({
       _id: category._id,
       name: category.name,         // Record<string, string> — multilingual
+      imageUrl: category.imageUrl ?? null,
       sortOrder: category.sortOrder,
       items: availableItems
         .filter((item) => item.categoryId === category._id)
@@ -66,6 +67,12 @@ export const get = query({
         })),
     }));
 
+    // ── 4a. Fetch venue data for lat/lng ────────────────────────────────────
+    const venue = await ctx.db
+      .query("venues")
+      .withIndex("by_org", (q) => q.eq("orgId", org.clerkId))
+      .unique();
+
     // ── 5. Return the clean, self-contained payload ─────────────────────────
     return {
       organization: {
@@ -80,6 +87,10 @@ export const get = query({
         storefrontAlert: org.storefrontAlert ?? null,
         features: org.features ?? null,
       },
+      venue: venue && venue.lat && venue.lng ? {
+        lat: venue.lat,
+        lng: venue.lng,
+      } : null,
       categories,
     };
   },

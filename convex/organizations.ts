@@ -203,6 +203,8 @@ export const updateStorefrontConfig = mutation({
         heroImageUrls: v.array(v.string()), // Up to 3 floating hero images
         address: v.string(),
         cityStateZip: v.string(),
+        lat: v.optional(v.number()),
+        lng: v.optional(v.number()),
       }),
     ),
 
@@ -231,6 +233,7 @@ export const updateStorefrontConfig = mutation({
         fontFamily: v.string(), // e.g. "Inter"
         buttonRadius: v.string(), // e.g. "0.5rem" | "9999px"
         menuType: v.optional(v.union(v.literal("basic"), v.literal("dragable"))),
+        categoryLayout: v.optional(v.union(v.literal("pills"), v.literal("cards"))),
       }),
     ),
 

@@ -50,13 +50,6 @@ import {
 import { SFTSanitizer, type RawTrainingLog } from "@/lib/ai/sftSanitizer";
 
 const TARGET_MILESTONE = 5000;
-const NOOTYPE_COLORS: Record<string, string> = {
-  form:       "bg-amber-500/20 text-amber-300 border-amber-500/30",
-  overcoming: "bg-red-500/20 text-red-300 border-red-500/30",
-  relaxation: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
-  management: "bg-blue-500/20 text-blue-300 border-blue-500/30",
-  baseline:   "bg-zinc-700/30 text-zinc-400 border-zinc-600/30",
-};
 
 export function AiTrainingPanel() {
   const convex = useConvex();
@@ -218,10 +211,10 @@ export function AiTrainingPanel() {
           <span className="font-semibold text-blue-200">Gemini 3.5 Flash SFT Format Active — </span>
           Exports are processed by the SFT Sanitizer before download.
           Each JSONL line uses{" "}
-          <code className="bg-white/10 px-1 rounded">
+          <code>
             {`{ "systemInstruction": { "role": "system", "parts": [...] }, "contents": [...] }`}
           </code>
-          . Internal metadata (nootype labels) is stripped from the output file.
+          . Internal tracking labels are stripped from the output file.
         </div>
       </div>
 
@@ -285,41 +278,8 @@ export function AiTrainingPanel() {
         </Card>
       </div>
 
-      {/* ── Nootype Distribution + Sanitizer Audit ── */}
-      <div className="grid gap-6 md:grid-cols-2 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200 fill-mode-both">
-        <Card className="bg-[#0f0f11] border-white/5 shadow-none">
-          <CardHeader>
-            <CardTitle className="text-sm font-medium text-white flex items-center gap-2">
-              Global Nootype Distribution
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {stats.breakdown.map((bt) => {
-                const totalNootype = stats.total - (stats.unknownNootype ?? 0);
-                const percentage =
-                  totalNootype > 0 ? Math.round((bt.total / totalNootype) * 100) : 0;
-                return (
-                  <div key={bt.nootype} className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-zinc-300 capitalize">{bt.nootype}</span>
-                      <span className="text-zinc-500">
-                        {percentage}% ({bt.total} total · {bt.positive} ✓)
-                      </span>
-                    </div>
-                    <div className="w-full bg-white/5 rounded-full h-1.5">
-                      <div
-                        className="bg-amber-600/80 h-1.5 rounded-full"
-                        style={{ width: `${percentage}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-
+      {/* ── Sanitizer Audit ── */}
+      <div className="grid gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200 fill-mode-both">
         {/* Sanitizer live audit */}
         <Card className="bg-[#0f0f11] border-white/5 shadow-none">
           <CardHeader>
@@ -357,22 +317,6 @@ export function AiTrainingPanel() {
                   </div>
                 )}
 
-                <div className="text-[10px] text-zinc-500 pt-1">
-                  Breakdown of the 50 most recent logs by nootype:
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {Object.entries(auditResult.byNootype).map(([nt, count]) => (
-                    <span
-                      key={nt}
-                      className={cn(
-                        "px-2 py-0.5 rounded-full text-[11px] border",
-                        NOOTYPE_COLORS[nt] ?? NOOTYPE_COLORS.baseline
-                      )}
-                    >
-                      {nt} · {count}
-                    </span>
-                  ))}
-                </div>
               </div>
             )}
           </CardContent>
@@ -446,14 +390,6 @@ export function AiTrainingPanel() {
                             ✓ High Quality
                           </span>
                         )}
-                        {log.nootype && (
-                          <span className={cn(
-                            "px-2 py-0.5 rounded-full capitalize border text-[11px]",
-                            NOOTYPE_COLORS[log.nootype] ?? NOOTYPE_COLORS.baseline
-                          )}>
-                            {log.nootype}
-                          </span>
-                        )}
                       </div>
                       <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
                         {log.contents.map((turn: any, i: number) => (
@@ -503,12 +439,6 @@ export function AiTrainingPanel() {
                       <div key={log._id} className="border border-blue-500/20 rounded-lg p-3 bg-blue-500/5">
                         <div className="flex items-center gap-2 mb-2 text-xs">
                           <span className="text-blue-400 font-mono">{log.sessionId?.slice(0, 8)}…</span>
-                          <span className={cn(
-                            "px-2 py-0.5 rounded-full capitalize border text-[10px]",
-                            NOOTYPE_COLORS[sanitized.nootype_label] ?? NOOTYPE_COLORS.baseline
-                          )}>
-                            {sanitized.nootype_label}
-                          </span>
                           {sanitized.positiveSignal && (
                             <span className="text-emerald-400 text-[10px]">✓ High Quality</span>
                           )}
