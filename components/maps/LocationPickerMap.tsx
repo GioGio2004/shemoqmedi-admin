@@ -32,34 +32,42 @@ function PlacesAutocomplete({ onPlaceSelect }: { onPlaceSelect: (place: google.m
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setInputValue(value);
 
-    if (!places) return;
-
-    if (!value.trim()) {
-      setSuggestions([]);
-      setIsOpen(false);
-      return;
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
     }
 
-    let token = sessionToken;
-    if (!token) {
-      token = new places.AutocompleteSessionToken();
-      setSessionToken(token);
-    }
+    debounceTimeoutRef.current = setTimeout(async () => {
+      if (!places) return;
 
-    try {
-      const response = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
-        input: value,
-        sessionToken: token,
-      });
-      setSuggestions(response.suggestions || []);
-      setIsOpen(true);
-    } catch (error) {
-      console.error("Failed to fetch autocomplete suggestions", error);
-    }
+      if (!value.trim()) {
+        setSuggestions([]);
+        setIsOpen(false);
+        return;
+      }
+
+      let token = sessionToken;
+      if (!token) {
+        token = new places.AutocompleteSessionToken();
+        setSessionToken(token);
+      }
+
+      try {
+        const response = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+          input: value,
+          sessionToken: token,
+        });
+        setSuggestions(response.suggestions || []);
+        setIsOpen(true);
+      } catch (error) {
+        console.error("Failed to fetch autocomplete suggestions", error);
+      }
+    }, 400);
   };
 
   const handleSelect = async (suggestion: google.maps.places.AutocompleteSuggestion) => {
@@ -191,27 +199,7 @@ function MapController({
   );
 }
 
-// Sleek dark mode map style
-const DARK_MAP_STYLE = [
-  { elementType: "geometry", stylers: [{ color: "#242f3e" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#242f3e" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#746855" }] },
-  { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
-  { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
-  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#263c3f" }] },
-  { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#6b9a76" }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#38414e" }] },
-  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#212a37" }] },
-  { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#9ca5b3" }] },
-  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#746855" }] },
-  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#1f2835" }] },
-  { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#f3d19c" }] },
-  { featureType: "transit", elementType: "geometry", stylers: [{ color: "#2f3948" }] },
-  { featureType: "transit.station", elementType: "labels.text.fill", stylers: [{ color: "#d59563" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#17263c" }] },
-  { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#515c6d" }] },
-  { featureType: "water", elementType: "labels.text.stroke", stylers: [{ color: "#17263c" }] },
-];
+
 
 export function LocationPickerMap({ lat, lng, onChange }: LocationPickerMapProps) {
   const [apiKey, setApiKey] = useState<string | null>(null);
@@ -241,7 +229,7 @@ export function LocationPickerMap({ lat, lng, onChange }: LocationPickerMapProps
         disableDefaultUI={false} // Keep UI for the picker
         mapTypeControl={false}
         streetViewControl={false}
-        styles={DARK_MAP_STYLE}
+        colorScheme="DARK"
         mapId="location-picker-map"
         className="w-full h-full"
       >

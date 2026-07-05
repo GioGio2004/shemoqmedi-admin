@@ -120,6 +120,26 @@ export const updateLocation = mutation({
       .unique();
     if (venue) {
       await ctx.db.patch(venue._id, { lat, lng, updatedAt: Date.now() });
+    } else {
+      const org = await ctx.db
+        .query("organizations")
+        .withIndex("by_clerk_id", (q) => q.eq("clerkId", orgId))
+        .unique();
+      if (org) {
+        await ctx.db.insert("venues", {
+          orgId,
+          slug: org.slug,
+          name: org.name,
+          category: "other",
+          description: "New Venue",
+          address: "Unknown",
+          lat,
+          lng,
+          isPublished: false,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+      }
     }
   },
 });
