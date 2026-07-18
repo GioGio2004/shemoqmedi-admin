@@ -95,3 +95,36 @@ export async function verifyOrgAdmin(ctx: AnyCtx, orgId: string) {
 
   return { user, membership };
 }
+
+/**
+ * requireSuperAdmin — platform-level gate for global operations
+ * (training-data readers, venue directory management, etc.).
+ *
+ * Checks the Convex `users.role` field FIRST, then falls back to the Clerk JWT
+ * role claim (metadata.role / publicMetadata.role / role). This mirrors the
+ * super-admin page guard (which reads the JWT claim) so a super-admin configured
+ * either way is never locked out. Seed the DB role once with:
+ *   npx convex run backfill:setRole '{"clerkUserId":"user_XXX","role":"super_admin"}'
+ */
+export async function requireSuperAdmin(ctx: AnyCtx) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new ConvexError("Authentication required");
+
+  const user = await ctx.db
+    .query("users")
+    .withIndex("byExternalId", (q) => q.eq("externalId", identity.subject))
+    .unique();
+
+  const ADMIN_ROLES = new Set(["super_admin", "admin"]);
+  if (user?.role && ADMIN_ROLES.has(user.role)) return user;
+
+  // Fallback: scan JWT claim locations (Clerk sessionClaims metadata).
+  const c = identity as Record<string, unknown>;
+  const jwtRole =
+    (c["metadata"] as Record<string, unknown> | undefined)?.["role"] ??
+    (c["publicMetadata"] as Record<string, unknown> | undefined)?.["role"] ??
+    c["role"];
+  if (typeof jwtRole === "string" && ADMIN_ROLES.has(jwtRole)) return user;
+
+  throw new ConvexError("Forbidden: super_admin role required");
+}

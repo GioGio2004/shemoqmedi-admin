@@ -1,13 +1,19 @@
 /**
  * One-time admin utilities.
- * Used to seed roles and inspect data. Safe to keep — all mutations
- * are unguarded on purpose (run from trusted CLI only, never from the browser).
+ * Used to seed roles and inspect data.
+ *
+ * 🔒 SECURITY: these are declared as INTERNAL functions so they are NOT part of
+ * the public Convex API and can never be called from a browser/client. Run them
+ * from the trusted CLI, e.g.:
+ *   npx convex run backfill:setRole '{"clerkUserId":"user_XXX","role":"super_admin"}'
+ *   npx convex run backfill:listUsers
+ * (`npx convex run` can invoke internal functions.)
  */
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery } from "./_generated/server";
 
 // ── 1. Sync a specific membership ────────────────────────────────────────────
-export const syncMembership = mutation({
+export const syncMembership = internalMutation({
   args: {
     clerkUserId: v.string(),
     orgId: v.string(),
@@ -41,7 +47,7 @@ export const syncMembership = mutation({
 });
 
 // ── 2. Set platform role (e.g. super_admin) on a user ────────────────────────
-export const setRole = mutation({
+export const setRole = internalMutation({
   args: {
     clerkUserId: v.string(),
     role: v.string(), // "super_admin" | "admin" | etc.
@@ -62,7 +68,7 @@ export const setRole = mutation({
 });
 
 // ── 3. List all users (to find your Clerk user ID) ───────────────────────────
-export const listUsers = query({
+export const listUsers = internalQuery({
   args: {},
   handler: async (ctx) => {
     const users = await ctx.db.query("users").collect();

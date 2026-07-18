@@ -199,8 +199,19 @@ export const getCurrentUser = query({
 export const get = query({
   args: { id: v.id("users") },
   handler: async (ctx, args) => {
-    const user = await ctx.db.get(args.id);
-    return user;
+    // 🔒 Auth: only allow reading your own record, unless you are a super_admin.
+    // Previously this was fully public — anyone could read any user's PII by ID.
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Authentication required");
+
+    const caller = await getUserByExternalId(ctx, identity.subject);
+    if (!caller) throw new Error("Authentication required");
+
+    if (caller._id !== args.id && caller.role !== "super_admin") {
+      throw new Error("Access denied");
+    }
+
+    return await ctx.db.get(args.id);
   },
 });
 

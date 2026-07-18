@@ -1,6 +1,13 @@
 import { v } from "convex/values";
-import { mutation, query, action, internalMutation } from "./_generated/server";
-import { api, internal } from "./_generated/api";
+import {
+  mutation,
+  query,
+  action,
+  internalMutation,
+  internalQuery,
+} from "./_generated/server";
+import { internal } from "./_generated/api";
+import { requireSuperAdmin, verifyOrgAccess } from "./authHelpers";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VENUES — admin CRUD + Google Business Profile sync
@@ -15,26 +22,40 @@ import { api, internal } from "./_generated/api";
 
 // ── Admin Queries ─────────────────────────────────────────────────────────────
 
-/** listAll — admin view of all venues including drafts */
+/** listAll — admin view of all venues including drafts (super-admin only) */
 export const listAll = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireSuperAdmin(ctx); // 🔒 was public
+    return ctx.db.query("venues").collect();
+  },
+});
+
+/**
+ * listAllForCron — internal-only variant for the daily GBP sync action.
+ * Actions have no user identity, so they can't call the guarded public query.
+ */
+export const listAllForCron = internalQuery({
   args: {},
   handler: async (ctx) => {
     return ctx.db.query("venues").collect();
   },
 });
 
-/** getById — admin fetch single venue */
+/** getById — admin fetch single venue (super-admin only) */
 export const getById = query({
   args: { id: v.id("venues") },
   handler: async (ctx, { id }) => {
+    await requireSuperAdmin(ctx); // 🔒 was public
     return ctx.db.get(id);
   },
 });
 
-/** getByOrgId — admin fetch single venue by organization */
+/** getByOrgId — fetch a single venue by organization (org members only) */
 export const getByOrgId = query({
   args: { orgId: v.string() },
   handler: async (ctx, { orgId }) => {
+    await verifyOrgAccess(ctx, orgId); // 🔒 was public
     return ctx.db
       .query("venues")
       .withIndex("by_org", (q) => q.eq("orgId", orgId))
@@ -74,6 +95,8 @@ export const upsertVenue = mutation({
     isPublished:  v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    await verifyOrgAccess(ctx, args.orgId); // 🔒 was public
+
     const existing = await ctx.db
       .query("venues")
       .withIndex("by_slug", (q) => q.eq("slug", args.slug))
@@ -102,6 +125,11 @@ export const setPublished = mutation({
     isPublished: v.boolean(),
   },
   handler: async (ctx, { id, isPublished }) => {
+    // 🔒 was public — resolve the venue's org and verify the caller owns it.
+    const venue = await ctx.db.get(id);
+    if (!venue) throw new Error("Venue not found");
+    await verifyOrgAccess(ctx, venue.orgId);
+
     await ctx.db.patch(id, { isPublished, updatedAt: Date.now() });
   },
 });
@@ -114,6 +142,8 @@ export const updateLocation = mutation({
     lng: v.number(),
   },
   handler: async (ctx, { orgId, lat, lng }) => {
+    await verifyOrgAccess(ctx, orgId); // 🔒 was public
+
     const venue = await ctx.db
       .query("venues")
       .withIndex("by_org", (q) => q.eq("orgId", orgId))
@@ -187,7 +217,7 @@ export const syncAllGoogleData = action({
     const venues: Array<{
       _id: string;
       gbpPlaceId?: string | null;
-    }> = await ctx.runQuery(api.venues.listAll);
+    }> = await ctx.runQuery(internal.venues.listAllForCron);
 
     const withPlaceId = venues.filter(
       (v): v is typeof v & { gbpPlaceId: string } =>

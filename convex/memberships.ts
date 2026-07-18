@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
+import { verifyOrgAdmin } from "./authHelpers";
 
 /**
  * Syncs a Clerk organizationMembership.created / organizationMembership.updated
@@ -107,6 +108,10 @@ export const updateCustomRole = mutation({
     customRole: v.string(), // "owner", "manager", "barista", "server"
   },
   handler: async (ctx, { userId, orgId, customRole }) => {
+    // 🔒 Auth: caller must be an admin of this org (or a super_admin).
+    // Previously unguarded — anyone could promote themselves to "owner".
+    await verifyOrgAdmin(ctx, orgId);
+
     // 1. Resolve the Convex user
     const user = await ctx.db
       .query("users")

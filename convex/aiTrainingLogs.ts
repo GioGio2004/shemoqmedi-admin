@@ -25,6 +25,42 @@
 
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { requireSuperAdmin } from "./authHelpers";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🔒 AUTH GUARDS
+//
+// The training corpus is the crown-jewel dataset — verbatim guest conversations
+// and system prompts across every café. All READERS below are gated to
+// super_admin (the super-admin panel that consumes them is already page-guarded
+// to super_admin, and its Convex client carries the Clerk identity).
+//
+// The two WRITERS (ingestTurn / updateSignal) are called server-to-server from
+// the customer app's harvest routes, which have no user identity — so they are
+// gated by a shared secret instead. Set the SAME value on the Convex deployment:
+//   npx convex env set HARVEST_SECRET <your-secret>
+// ─────────────────────────────────────────────────────────────────────────────
+function verifyHarvestSecret(secret: string | undefined) {
+  const expected = process.env.HARVEST_SECRET;
+  if (!expected) {
+    throw new Error(
+      "HARVEST_SECRET is not configured on the Convex deployment. " +
+        "Run: npx convex env set HARVEST_SECRET <value>",
+    );
+  }
+  // Constant-time-ish comparison to avoid leaking length/timing.
+  const ok =
+    typeof secret === "string" &&
+    secret.length === expected.length &&
+    (() => {
+      let diff = 0;
+      for (let i = 0; i < expected.length; i++) {
+        diff |= secret.charCodeAt(i) ^ expected.charCodeAt(i);
+      }
+      return diff === 0;
+    })();
+  if (!ok) throw new Error("Unauthorized: invalid harvest secret");
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared validator for a single SFT content turn
@@ -46,6 +82,7 @@ const sftTurnValidator = v.object({
 // ─────────────────────────────────────────────────────────────────────────────
 export const ingestTurn = mutation({
   args: {
+    secret: v.string(), // 🔒 shared harvest secret — verified below
     cafeId: v.string(),
     sessionId: v.string(),
     systemInstruction: v.string(),
@@ -55,6 +92,9 @@ export const ingestTurn = mutation({
     nootype: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    // 🔒 Previously public with no auth — anyone could inject/poison training rows.
+    verifyHarvestSecret(args.secret);
+
     const id = await ctx.db.insert("ai_training_logs", {
       cafeId: args.cafeId,
       sessionId: args.sessionId,
@@ -89,12 +129,16 @@ export const ingestTurn = mutation({
 // ─────────────────────────────────────────────────────────────────────────────
 export const updateSignal = mutation({
   args: {
+    secret: v.string(), // 🔒 shared harvest secret — verified below
     cafeId: v.string(),
     sessionId: v.string(),
     positiveSignal: v.boolean(),
     nootype: v.optional(v.string()),
   },
-  handler: async (ctx, { cafeId, sessionId, positiveSignal, nootype }) => {
+  handler: async (ctx, { secret, cafeId, sessionId, positiveSignal, nootype }) => {
+    // 🔒 Previously public — anyone could flip quality signals on any session.
+    verifyHarvestSecret(secret);
+
     const rows = await ctx.db
       .query("ai_training_logs")
       .withIndex("byCafeAndSession", (q) =>
@@ -155,6 +199,7 @@ export const listForExport = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, { orgId, onlyPositive, nootype, limit = 1000 }) => {
+    await requireSuperAdmin(ctx); // 🔒 was public
     // 1. Resolve org slug from orgId
     const org = await ctx.db
       .query("organizations")
@@ -210,6 +255,7 @@ export const markExported = mutation({
     ids: v.array(v.id("ai_training_logs")),
   },
   handler: async (ctx, { ids }) => {
+    await requireSuperAdmin(ctx); // 🔒 was public
     const now = Date.now();
     await Promise.all(ids.map((id) => ctx.db.patch(id, { exportedAt: now })));
     console.log(`📦 [SFT] Marked ${ids.length} training row(s) as exported.`);
@@ -226,6 +272,7 @@ export const markExported = mutation({
 export const getStats = query({
   args: { orgId: v.string() },
   handler: async (ctx, { orgId }) => {
+    await requireSuperAdmin(ctx); // 🔒 was public
     const org = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", orgId))
@@ -279,6 +326,7 @@ export const listGlobalForExport = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, { onlyPositive, nootype, limit = 5000 }) => {
+    await requireSuperAdmin(ctx); // 🔒 was public — leaked ALL cafés' data
     let rows = await ctx.db
       .query("ai_training_logs")
       .filter((q) => q.eq(q.field("exportedAt"), undefined)) // Filter out exported
@@ -314,6 +362,7 @@ export const listGlobalForExport = query({
 export const getGlobalStats = query({
   args: {},
   handler: async (ctx) => {
+    await requireSuperAdmin(ctx); // 🔒 was public
     const allRows = await ctx.db.query("ai_training_logs").collect();
 
     const NOOTYPES = [
@@ -357,6 +406,7 @@ export const getRecentLogs = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, { limit = 50 }) => {
+    await requireSuperAdmin(ctx); // 🔒 was public — getRecentLogs took no args and leaked all cafés
     const rows = await ctx.db
       .query("ai_training_logs")
       .order("desc")

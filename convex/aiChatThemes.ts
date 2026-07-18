@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { verifyOrgAccess } from "./authHelpers";
 
 export const get = query({
   args: { orgId: v.optional(v.string()) },
@@ -48,6 +49,10 @@ export const update = mutation({
     isActive: v.boolean(),
   },
   handler: async (ctx, args) => {
+    // 🔒 Auth: caller must be a staff member of this org.
+    // Previously unguarded — anyone could rewrite any café's chatbot theme/greeting.
+    await verifyOrgAccess(ctx, args.orgId);
+
     const existing = await ctx.db
       .query("aiChatThemes")
       .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
