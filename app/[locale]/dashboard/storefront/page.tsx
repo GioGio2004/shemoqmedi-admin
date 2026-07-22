@@ -1134,7 +1134,7 @@ export default function StorefrontPage() {
       </div>
 
       {/* Tab panel */}
-      <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 delay-150 fill-mode-both bg-[#09090b] border border-white/10 rounded-2xl p-6">
+      <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 delay-150 fill-mode-both bg-[#09090b] border border-white/10 rounded-2xl p-4 sm:p-6">
         {activeTab === "hero" && (
           <HeroTab 
             data={storefront} 

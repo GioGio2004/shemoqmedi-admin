@@ -2,7 +2,12 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { useOrganization, useAuth, UserButton } from "@clerk/nextjs";
+import {
+  useOrganization,
+  useOrganizationList,
+  useAuth,
+  UserButton,
+} from "@clerk/nextjs";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { cn } from "@/lib/utils";
@@ -18,8 +23,11 @@ import {
   ChevronLeft,
   ChevronRight,
   MessageSquare,
+  Gift,
 } from "lucide-react";
-import { useState, createContext, useContext } from "react";
+import { useState, createContext, useContext, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { NoWorkspace } from "./_components/NoWorkspace";
 
 // Sidebar collapsed state shared between layout and sidebar content
 const SidebarCtx = createContext(false);
@@ -50,6 +58,12 @@ const NAV_ITEMS = [
     label: "Chat",
     href: "/dashboard/chat-theme",
     icon: MessageSquare,
+    exact: false,
+  },
+  {
+    label: "Surprise Bags",
+    href: "/bags-dashboard",
+    icon: Gift,
     exact: false,
   },
 ] as const;
@@ -275,13 +289,56 @@ export default function DashboardLayout({
     organization ? { orgId: organization.id } : "skip",
   );
 
+  // ── Surprise Bags gating ─────────────────────────────────────────────────
+  // "bags"-only orgs are redirected to the isolated Surprise Bags dashboard.
+  const router = useRouter();
+  const gating = useQuery(
+    api.bagsDashboard.getOrgGating,
+    organization ? { orgId: organization.id } : "skip",
+  );
+  const isBagsOnly = gating?.onboardingType === "bags";
+  useEffect(() => {
+    if (isBagsOnly) router.replace("/bags-dashboard");
+  }, [isBagsOnly, router]);
+
+  // ── Org-less guard ───────────────────────────────────────────────────────
+  // The venue portal is invitation-only. A signed-in user with zero org
+  // memberships (and no platform-level admin role) would otherwise land on a
+  // dead-end dashboard shell, so we show the NoWorkspace screen instead.
+  // Membership truth comes from Clerk (same source the active org comes
+  // from); the platform role comes from the existing Convex users record.
+  const { isLoaded: membershipsLoaded, userMemberships } = useOrganizationList({
+    userMemberships: true,
+  });
+  const currentUser = useQuery(api.users.getCurrentUser);
+  const isPlatformAdmin =
+    currentUser?.role === "super_admin" || currentUser?.role === "admin";
+
+  // Every signal must settle before deciding — never flash NoWorkspace at a
+  // legitimate member, and never flash the dashboard at an org-less visitor.
+  const orgAccessResolved =
+    isLoaded &&
+    membershipsLoaded &&
+    !userMemberships.isLoading &&
+    currentUser !== undefined;
+  const showNoWorkspace =
+    orgAccessResolved &&
+    !organization &&
+    !userMemberships.isError && // fail open on network errors
+    userMemberships.count === 0 &&
+    !isPlatformAdmin;
+  const orgAccessPending = isLoaded && !organization && !orgAccessResolved;
+
   const role = convexRole || membership?.role;
   const showAiManager = orgSettings?.features?.hasAiManager !== false;
   const showNfc = orgSettings?.features?.hasNfcHardware !== false;
   const showLiveOrdering = orgSettings?.features?.hasLiveOrdering !== false;
   const showDigitalMenu = orgSettings?.features?.hasDigitalMenu !== false;
 
+  const showSurpriseBags = orgSettings?.features?.hasSurpriseBags !== false;
+
   const allowedNavItems = NAV_ITEMS.filter((item) => {
+    if (!showSurpriseBags && item.label === "Surprise Bags") return false;
     if (!showAiManager && (item.label === "VolooAI" || item.label === "Chat"))
       return false;
     if (!showNfc && item.label === "NFC") return false;
@@ -308,6 +365,28 @@ export default function DashboardLayout({
     item.exact ? bare === item.href : bare.startsWith(item.href),
   );
   const isAllowed = !currentNavItem || allowedNavItems.includes(currentNavItem);
+
+  // Org-less user (no membership, not a platform admin): replace the entire
+  // dashboard chrome with the invitation-only explainer.
+  if (showNoWorkspace) {
+    return (
+      <div className="flex h-[100dvh] flex-col overflow-hidden bg-black">
+        <ImpersonationBanner />
+        <NoWorkspace />
+      </div>
+    );
+  }
+
+  // Clerk is loaded but there is no active org and membership/role signals
+  // are still in flight — hold a neutral screen so neither the dashboard nor
+  // NoWorkspace flashes at the wrong audience.
+  if (orgAccessPending) {
+    return (
+      <div className="flex h-[100dvh] items-center justify-center bg-black">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+      </div>
+    );
+  }
 
   return (
     <SidebarCtx.Provider value={sidebarCollapsed}>

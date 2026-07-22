@@ -8,9 +8,12 @@ import {
   Wifi, 
   UtensilsCrossed, 
   MessageSquare, 
-  Bot, 
-  Star 
+  Bot,
+  Star,
+  Gift,
+  ArrowRight,
 } from "lucide-react";
+import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { motion } from "framer-motion";
 
@@ -62,6 +65,25 @@ export function DashboardOverviewClient({ orgId }: { orgId: string }) {
           Live data feed active for {stats.orgName}
         </p>
       </div>
+
+      {/* Surprise Bags promo card */}
+      <Link
+        href="/bags-dashboard"
+        className="group relative flex items-center justify-between overflow-hidden rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-400/15 via-emerald-400/5 to-transparent p-5 backdrop-blur-xl transition-all hover:border-emerald-400/40 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-150 fill-mode-both"
+      >
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-400/15 ring-1 ring-emerald-400/30">
+            <Gift className="h-6 w-6 text-emerald-300" />
+          </div>
+          <div>
+            <p className="text-base font-semibold text-white">Surprise Bags</p>
+            <p className="text-sm text-zinc-400">
+              Sell today&apos;s surplus food as discounted surprise bags
+            </p>
+          </div>
+        </div>
+        <ArrowRight className="h-5 w-5 shrink-0 text-emerald-300 transition-transform group-hover:translate-x-1" />
+      </Link>
 
       {/* General Stats Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

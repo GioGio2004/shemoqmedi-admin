@@ -36,7 +36,7 @@ export function SuperAdminClient() {
 
       {/* ── Top bar ── */}
       <header className="sticky top-0 z-50 border-b border-white/8 bg-black/90 backdrop-blur-xl">
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
+        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-2.5">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/8 border border-white/12">
               <Shield className="h-3.5 w-3.5 text-zinc-300" />
@@ -62,7 +62,7 @@ export function SuperAdminClient() {
         </div>
 
         {/* Tabs */}
-        <div className="mx-auto max-w-5xl px-6 flex gap-0">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6 flex gap-0 overflow-x-auto">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
@@ -70,7 +70,7 @@ export function SuperAdminClient() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-all border-b-2 -mb-px ${
+                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-xs font-medium transition-all border-b-2 -mb-px ${
                   active
                     ? "text-white border-white"
                     : "text-zinc-500 border-transparent hover:text-zinc-300"
@@ -84,7 +84,7 @@ export function SuperAdminClient() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl px-6 py-8 space-y-8">
+      <main className="mx-auto max-w-5xl px-4 sm:px-6 py-8 space-y-8">
 
         {/* ── TAB: WORKSPACES ── */}
         {activeTab === "workspaces" && (

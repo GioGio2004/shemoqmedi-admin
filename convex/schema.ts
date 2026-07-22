@@ -119,7 +119,15 @@ export default defineSchema({
         hasCustomDomain: v.boolean(),
         hasAiManager: v.boolean(),
         hasLiveOrdering: v.boolean(),
+        hasSurpriseBags: v.optional(v.boolean()),
       }),
+    ),
+
+    // Which product(s) this org onboarded for. Drives dashboard gating:
+    // "bags" → only the Surprise Bags dashboard; "full" → everything.
+    // Existing orgs (field undefined) are treated as "full".
+    onboardingType: v.optional(
+      v.union(v.literal("full"), v.literal("bags")),
     ),
 
     // VolooAI Megaphone — real-time alert broadcast to all customers
@@ -396,6 +404,115 @@ export default defineSchema({
   })
     .index("by_org", ["orgId"])
     .index("by_status", ["status"]),
+
+  // ==========================================
+  // 6. SURPRISE BAGS (Leftover-Food Marketplace)
+  // ==========================================
+  // A bag is a daily, time-windowed offer of leftover food at a discount.
+  // Bags can be composed from menuItems (auto-valued from menu prices) or
+  // posted free-form with just a photo. Templates make reposting one-tap:
+  // a template row (isTemplate: true) is never sold; posting "from template"
+  // clones it into a live daily instance.
+  surpriseBags: defineTable({
+    orgId: v.string(), // Clerk Org ID
+    isTemplate: v.boolean(),
+    templateId: v.optional(v.id("surpriseBags")), // instance → its template
+
+    title: translatedText, // e.g. { en: "Bakery Surprise Bag", ka: "..." }
+    description: v.optional(translatedText), // AI-generated from contents
+    imageUrl: v.optional(v.string()), // today's photo or menu-item image
+
+    // Contents (optional — mystery bags may list nothing)
+    items: v.optional(
+      v.array(
+        v.object({
+          menuItemId: v.optional(v.id("menuItems")),
+          name: translatedText, // snapshot, survives menu edits
+          quantity: v.number(),
+          menuPrice: v.number(), // tetri, snapshot
+        }),
+      ),
+    ),
+
+    originalValue: v.number(), // tetri — sum of menu prices or manual
+    price: v.number(), // tetri — discounted sale price
+
+    // Daily-instance fields (unset on templates)
+    quantityTotal: v.optional(v.number()),
+    quantityLeft: v.optional(v.number()), // decremented on paid orders + active holds
+    pickupStart: v.optional(v.number()), // epoch ms
+    pickupEnd: v.optional(v.number()), // epoch ms — bag auto-expires after this
+
+    status: v.union(
+      v.literal("draft"),
+      v.literal("active"),
+      v.literal("sold_out"),
+      v.literal("expired"),
+      v.literal("cancelled"),
+    ),
+
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_org", ["orgId"])
+    .index("by_org_and_status", ["orgId", "status"])
+    .index("by_status_and_end", ["status", "pickupEnd"]),
+
+  bagOrders: defineTable({
+    orgId: v.string(),
+    bagId: v.id("surpriseBags"),
+    // Buyer: Clerk user (required for paid orders); guestId only during hold
+    buyerUserId: v.optional(v.id("users")),
+    buyerGuestId: v.optional(v.string()),
+
+    quantity: v.number(),
+    unitPrice: v.number(), // tetri snapshot
+    totalAmount: v.number(), // tetri
+    commissionRate: v.number(), // 0 at launch; baked in from day one
+    commissionAmount: v.number(), // tetri
+
+    status: v.union(
+      v.literal("held"), // 2-min inventory hold during checkout
+      v.literal("paid"),
+      v.literal("ready"), // venue packed the bag (delivery flow)
+      v.literal("collected"),
+      v.literal("delivered"),
+      v.literal("no_show"),
+      v.literal("cancelled"), // hold expired or payment failed
+      v.literal("refunded"),
+    ),
+    holdExpiresAt: v.optional(v.number()), // epoch ms, set while status === "held"
+
+    fulfillmentType: v.union(v.literal("pickup"), v.literal("delivery")),
+    pickupCode: v.optional(v.string()), // short code, set on payment
+    deliveryAddress: v.optional(v.string()),
+    deliveryTrackingId: v.optional(v.string()), // Wolt Drive id, phase 2
+
+    // Payment (Flitt)
+    flittOrderId: v.optional(v.string()),
+    flittPaymentId: v.optional(v.string()),
+    paidAt: v.optional(v.number()),
+    refundedAt: v.optional(v.number()),
+
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_org", ["orgId"])
+    .index("by_org_and_status", ["orgId", "status"])
+    .index("by_bag", ["bagId"])
+    .index("by_buyer", ["buyerUserId"])
+    .index("by_pickup_code", ["orgId", "pickupCode"])
+    .index("by_status_and_hold", ["status", "holdExpiresAt"]),
+
+  // User follows a venue → push notification when it posts a bag
+  bagFollows: defineTable({
+    userId: v.id("users"),
+    orgId: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_org", ["orgId"])
+    .index("by_user_and_org", ["userId", "orgId"]),
 
   // ==========================================
   // 7. AI CHAT (VolooAI Widget)

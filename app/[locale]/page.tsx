@@ -54,6 +54,12 @@ export default function HomePage() {
                   <span className="ml-2 group-hover:translate-x-1 transition-transform">→</span>
                 </Link>
               </Button>
+              <Button asChild variant="outline" size="lg" className="w-full sm:w-auto h-12 px-8 border border-emerald-400/30 bg-emerald-400/5 text-emerald-300 hover:text-emerald-200 hover:bg-emerald-400/10 hover:border-emerald-400/50 shadow-none rounded-lg transition-all group">
+                <Link href="/bags-dashboard">
+                  Surprise Bags
+                  <span className="ml-2 group-hover:translate-x-1 transition-transform">→</span>
+                </Link>
+              </Button>
             </Authenticated>
           </div>
         </div>

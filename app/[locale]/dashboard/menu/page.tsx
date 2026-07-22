@@ -84,19 +84,19 @@ type MenuItem = {
 function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center gap-4">
-      <div className="h-16 w-16 rounded-2xl bg-white/5 dark:bg-white/5 bg-zinc-100 border border-border flex items-center justify-center">
-        <UtensilsCrossed className="h-7 w-7 text-muted-foreground" />
+      <div className="h-16 w-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+        <UtensilsCrossed className="h-7 w-7 text-zinc-500" />
       </div>
       <div>
-        <p className="font-medium text-foreground text-lg">No categories yet</p>
-        <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">
+        <p className="font-medium text-white text-lg">No categories yet</p>
+        <p className="text-sm text-zinc-400 mt-1 max-w-xs mx-auto">
           Create your first category (e.g. "Coffee", "Food") to start building
           your menu.
         </p>
       </div>
       <Button
         onClick={onAdd}
-        className="bg-foreground text-background hover:opacity-90 transition-all font-medium rounded-lg"
+        className="bg-white text-black hover:bg-zinc-200 transition-all font-medium rounded-lg"
       >
         <Plus className="h-4 w-4 mr-2" />
         Add Category
@@ -715,7 +715,7 @@ function CategorySection({
       <Card className="bg-[#09090b] border-white/10 shadow-none overflow-hidden">
         {/* Category header */}
         <CardHeader className="p-0">
-          <div className="flex items-center justify-between px-5 py-4">
+          <div className="flex items-center justify-between gap-2 px-4 sm:px-5 py-4">
             <button
               onClick={() => setExpanded(!expanded)}
               className="flex items-center gap-3 flex-1 min-w-0 text-left"
@@ -765,7 +765,7 @@ function CategorySection({
                 className="h-8 gap-1.5 text-xs text-zinc-400 hover:text-white hover:bg-white/5"
               >
                 <Plus className="h-3.5 w-3.5" />
-                Add Item
+                <span className="hidden sm:inline">Add Item</span>
               </Button>
               <button
                 onClick={() => setEditingCategory(true)}
@@ -919,8 +919,8 @@ export default function MenuPage() {
   if (!orgId) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
-        <p className="font-medium text-foreground">No workspace selected</p>
-        <p className="text-sm text-muted-foreground max-w-xs">
+        <p className="font-medium text-white">No workspace selected</p>
+        <p className="text-sm text-zinc-400 max-w-xs">
           Select a workspace from the sidebar to manage its menu.
         </p>
       </div>

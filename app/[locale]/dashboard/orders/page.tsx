@@ -76,8 +76,8 @@ export default function OrdersPage() {
   if (!orgSlug) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
-        <p className="font-medium text-foreground">No workspace selected</p>
-        <p className="text-sm text-muted-foreground max-w-xs">
+        <p className="font-medium text-white">No workspace selected</p>
+        <p className="text-sm text-zinc-400 max-w-xs">
           Select a workspace from the sidebar to view its orders.
         </p>
       </div>
@@ -189,16 +189,16 @@ function OrderCard({
       )}
     >
       {/* Card header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-white/[0.06]">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-4 border-b border-white/[0.06]">
+        <div className="flex items-center gap-3 min-w-0">
           {/* Seat badge */}
           <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center justify-center shrink-0">
             <Hash className="w-3 h-3 text-zinc-600 mb-0" />
             <span className="text-sm font-black text-white leading-none">{order.seatNumber}</span>
           </div>
 
-          <div>
-            <div className="flex items-center gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold text-white">Table {order.seatNumber}</span>
               <span className={cn("flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold", status.classes)}>
                 <span className={cn("w-1.5 h-1.5 rounded-full", status.dot)} />
@@ -214,7 +214,7 @@ function OrderCard({
         </div>
 
         {/* Total */}
-        <div className="text-right">
+        <div className="text-right shrink-0">
           <p className="text-xs text-zinc-500 font-medium mb-0.5">
             {order.items.length} item{order.items.length !== 1 ? "s" : ""}
           </p>
@@ -225,7 +225,7 @@ function OrderCard({
       </div>
 
       {/* Items breakdown */}
-      <div className="px-5 py-4">
+      <div className="px-4 sm:px-5 py-4">
         <div className="space-y-2.5">
           {order.items.map((item: any, idx: number) => (
             <div key={idx} className="flex items-start gap-3">
@@ -270,7 +270,7 @@ function OrderCard({
 
       {/* Actions */}
       {order.status === "pending" && (
-        <div className="px-5 pb-4 flex gap-2">
+        <div className="px-4 sm:px-5 pb-4 flex gap-2">
           <button
             onClick={() => updateStatus({ orderId: order._id, status: "completed" })}
             className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-emerald-500 text-emerald-950 font-bold text-sm transition-all hover:bg-emerald-400 active:scale-95"

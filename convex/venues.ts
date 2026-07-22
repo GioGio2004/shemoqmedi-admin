@@ -174,6 +174,63 @@ export const updateLocation = mutation({
   },
 });
 
+// ── Internal: auto-create draft venue on organization.created ───────────────
+
+/**
+ * createDraftForOrg — called from the Clerk webhook (convex/http.ts) when an
+ * organization is created. Inserts a draft (isPublished: false) venue row.
+ *
+ * Idempotent: skips if a venue already exists for the org (by_org index).
+ * Slug uniqueness: if the org slug is taken (by_slug index), appends -2, -3, …
+ */
+export const createDraftForOrg = internalMutation({
+  args: {
+    orgId: v.string(), // Clerk org ID
+    slug:  v.string(),
+    name:  v.string(),
+  },
+  handler: async (ctx, { orgId, slug, name }) => {
+    // Idempotency guard — one venue per org
+    const existing = await ctx.db
+      .query("venues")
+      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .first();
+    if (existing) {
+      console.log(`[Venues] ⏭️  Draft skipped (already exists) for org ${orgId}`);
+      return existing._id;
+    }
+
+    // Ensure slug uniqueness — suffix with -2, -3, … if taken
+    const base = slug || orgId.toLowerCase();
+    let candidate = base;
+    let n = 2;
+    while (
+      await ctx.db
+        .query("venues")
+        .withIndex("by_slug", (q) => q.eq("slug", candidate))
+        .first()
+    ) {
+      candidate = `${base}-${n++}`;
+    }
+
+    const now = Date.now();
+    const id = await ctx.db.insert("venues", {
+      orgId,
+      slug:        candidate,
+      name,
+      // ⚠️  DEFAULT CATEGORY: "cafe" — review before publishing
+      category:    "cafe",
+      description: `${name} — a premium hospitality venue powered by Voloo AI menus. Tap to explore the digital menu.`.slice(0, 160),
+      address:     "",
+      isPublished: false, // SAFE DEFAULT — admin must explicitly publish
+      createdAt:   now,
+      updatedAt:   now,
+    });
+    console.log(`[Venues] ✅ Draft venue created for org ${orgId} → slug="${candidate}"`);
+    return id;
+  },
+});
+
 // ── Internal patch used by the GBP sync action ─────────────────────────────
 
 export const patchGoogleData = internalMutation({
