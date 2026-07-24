@@ -46,6 +46,48 @@ export const listPublished = query({
 });
 
 /**
+ * listStorefront — the consumer landing's venue directory feed.
+ *
+ * Returns every published venue with the claim/menu-mode fields the storefront
+ * needs to pick the right link per venue:
+ *   - claimStatus defaults by orgId: org-born venues (orgId set) are "claimed",
+ *     seeded org-less venues are "unclaimed" — unless explicitly stored.
+ *   - menuMode defaults to "native" only when an org exists to serve a native
+ *     menu; org-less venues get undefined unless explicitly set to "external".
+ *
+ * listPublished stays untouched — the consumer sitemap depends on its exact
+ * projection (slug + updatedAt).
+ */
+export const listStorefront = query({
+  args: {},
+  handler: async (ctx) => {
+    const venues = await ctx.db
+      .query("venues")
+      .withIndex("by_published", (q) => q.eq("isPublished", true))
+      .collect();
+
+    return venues.map((venue) => ({
+      _id:               venue._id,
+      slug:              venue.slug,
+      name:              venue.name,
+      category:          venue.category,
+      coverImage:        venue.coverImage ?? null,
+      googleRating:      venue.googleRating ?? null,
+      googleReviewCount: venue.googleReviewCount ?? null,
+      claimStatus:
+        venue.claimStatus ?? (venue.orgId ? "claimed" : "unclaimed"),
+      menuMode:
+        venue.menuMode ?? (venue.orgId ? ("native" as const) : undefined),
+      externalMenuUrl:   venue.externalMenuUrl ?? null,
+      address:           venue.address,
+      lat:               venue.lat ?? null,
+      lng:               venue.lng ?? null,
+      orgId:             venue.orgId ?? null,
+    }));
+  },
+});
+
+/**
  * getBySlug — returns a single published venue's full detail record.
  *
  * Used by:

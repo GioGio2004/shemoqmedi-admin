@@ -4,10 +4,21 @@ import { useEffect, useState, useRef } from "react";
 import { APIProvider, Map, AdvancedMarker, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
 import { Search } from "lucide-react";
 
+/** Rich info about a place chosen via the search box (not map click/drag). */
+export interface PickedPlace {
+  lat: number;
+  lng: number;
+  name?: string;
+  address?: string;
+  placeId?: string;
+}
+
 interface LocationPickerMapProps {
   lat?: number;
   lng?: number;
   onChange: (lat: number, lng: number) => void;
+  /** Fires on search-selection with name/address/placeId for form autofill. */
+  onPlaceSelect?: (place: PickedPlace) => void;
 }
 
 // Default to Tbilisi if no lat/lng provided
@@ -45,7 +56,8 @@ function PlacesAutocomplete({ onPlaceSelect }: { onPlaceSelect: (place: google.m
     debounceTimeoutRef.current = setTimeout(async () => {
       if (!places) return;
 
-      if (!value.trim()) {
+      // Min 3 chars before any Places request — cheap keystrokes stay free.
+      if (value.trim().length < 3) {
         setSuggestions([]);
         setIsOpen(false);
         return;
@@ -141,9 +153,11 @@ function PlacesAutocomplete({ onPlaceSelect }: { onPlaceSelect: (place: google.m
 function MapController({
   position,
   onChange,
+  onPlaceSelect,
 }: {
   position: google.maps.LatLngLiteral;
   onChange: (lat: number, lng: number) => void;
+  onPlaceSelect?: (place: PickedPlace) => void;
 }) {
   const map = useMap();
 
@@ -158,7 +172,16 @@ function MapController({
             map?.setZoom(17);
           }
           if (place.location) {
-            onChange(place.location.lat(), place.location.lng());
+            const lat = place.location.lat();
+            const lng = place.location.lng();
+            onChange(lat, lng);
+            onPlaceSelect?.({
+              lat,
+              lng,
+              name: place.displayName ?? undefined,
+              address: place.formattedAddress ?? undefined,
+              placeId: place.id,
+            });
           }
         }}
       />
@@ -201,7 +224,7 @@ function MapController({
 
 
 
-export function LocationPickerMap({ lat, lng, onChange }: LocationPickerMapProps) {
+export function LocationPickerMap({ lat, lng, onChange, onPlaceSelect }: LocationPickerMapProps) {
   const [apiKey, setApiKey] = useState<string | null>(null);
 
   useEffect(() => {
@@ -232,8 +255,17 @@ export function LocationPickerMap({ lat, lng, onChange }: LocationPickerMapProps
         colorScheme="DARK"
         mapId="location-picker-map"
         className="w-full h-full"
+        onClick={(e) => {
+          // Tap-to-place: drop the pin wherever the map is clicked.
+          const ll = e.detail.latLng;
+          if (ll) onChange(ll.lat, ll.lng);
+        }}
       >
-        <MapController position={position} onChange={onChange} />
+        <MapController
+          position={position}
+          onChange={onChange}
+          onPlaceSelect={onPlaceSelect}
+        />
       </Map>
     </APIProvider>
   );

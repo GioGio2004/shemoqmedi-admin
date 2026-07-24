@@ -134,10 +134,10 @@ const RADIUS_OPTIONS = [
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <label className="block text-xs font-semibold uppercase tracking-widest text-zinc-400">
+      <label className="v-t-micro block text-v-faint">
         {label}
       </label>
-      {hint && <p className="text-[11px] text-zinc-600 -mt-0.5">{hint}</p>}
+      {hint && <p className="-mt-0.5 text-[11px] text-v-faint">{hint}</p>}
       {children}
     </div>
   );
@@ -148,7 +148,7 @@ function Input({ ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={cn(
-        "w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:border-white/25 focus:outline-none focus:bg-white/8 transition-all",
+        "w-full min-w-0 rounded-v border border-v-line bg-white/[0.03] px-4 py-2.5 text-sm text-v-ink placeholder:text-v-faint transition-all focus:border-v-accent focus:bg-white/[0.05] focus:outline-none",
         props.className,
       )}
     />
@@ -160,7 +160,7 @@ function TextArea({ ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement
     <textarea
       {...props}
       className={cn(
-        "w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:border-white/25 focus:outline-none focus:bg-white/8 transition-all resize-none",
+        "w-full rounded-v border border-v-line bg-white/[0.03] px-4 py-2.5 text-sm text-v-ink placeholder:text-v-faint transition-all focus:border-v-accent focus:bg-white/[0.05] focus:outline-none resize-none",
         props.className,
       )}
     />
@@ -181,11 +181,11 @@ function SelectInput({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full appearance-none rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 pr-10 text-sm text-white focus:border-white/25 focus:outline-none transition-all cursor-pointer"
+        className="w-full cursor-pointer appearance-none rounded-v border border-v-line bg-white/[0.03] px-4 py-2.5 pr-10 text-sm text-v-ink transition-all focus:border-v-accent focus:outline-none [color-scheme:dark]"
       >
         {children}
       </select>
-      <ChevronDown className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+      <ChevronDown className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-v-faint" />
     </div>
   );
 }
@@ -320,14 +320,14 @@ function HeroTab({
       </div>
 
       <Field label="Cover Image (Landing Page)" hint="Primary background image shown on the external directory.">
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4 flex flex-col sm:flex-row gap-4">
-          <div className="relative w-full sm:w-32 aspect-video rounded-lg overflow-hidden bg-black/40 shrink-0 border border-white/10">
+        <div className="rounded-v border border-v-line bg-white/[0.02] p-4 flex flex-col sm:flex-row gap-4">
+          <div className="relative aspect-video w-full shrink-0 overflow-hidden rounded-v border border-v-line bg-v-bg sm:w-32">
             {data.coverImageUrl ? (
               <img src={data.coverImageUrl} alt="Cover Preview" className="object-cover w-full h-full" />
             ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center text-white/20">
-                <ImageIcon className="h-5 w-5 mb-1" />
-                <span className="text-[10px] uppercase tracking-wider">No Image</span>
+              <div className="flex h-full w-full flex-col items-center justify-center text-v-faint">
+                <ImageIcon className="mb-1 h-5 w-5" />
+                <span className="v-t-micro">No Image</span>
               </div>
             )}
           </div>
@@ -348,7 +348,7 @@ function HeroTab({
                     set("coverImageUrl", "");
                     setTimeout(() => document.getElementById("save-storefront-btn")?.click(), 250);
                   }}
-                  className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors border border-transparent hover:border-red-400/20"
+                  className="rounded-v border border-transparent p-2 text-v-mut transition-colors hover:border-red-400/20 hover:bg-red-400/10 hover:text-red-400"
                   title="Remove Image"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -368,20 +368,20 @@ function HeroTab({
       <Field label="Hero Images (3 slots)" hint="Upload images for the floating hero visuals.">
         <div className="space-y-4">
           {([0, 1, 2] as const).map((idx) => (
-            <div key={idx} className="rounded-xl border border-white/10 bg-white/5 p-4 flex flex-col sm:flex-row gap-4">
-              <div className="relative w-24 aspect-[3/4] rounded-lg overflow-hidden bg-black/40 shrink-0 border border-white/10">
+            <div key={idx} className="rounded-v border border-v-line bg-white/[0.02] p-4 flex flex-col sm:flex-row gap-4">
+              <div className="relative aspect-[3/4] w-24 shrink-0 overflow-hidden rounded-v border border-v-line bg-v-bg">
                 {data.heroImageUrls[idx] ? (
                   <img src={data.heroImageUrls[idx]} alt={`Hero ${idx + 1}`} className="object-cover w-full h-full" />
                 ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-white/20">
-                    <ImageIcon className="h-4 w-4 mb-1" />
-                    <span className="text-[10px] uppercase tracking-wider">Slot {idx + 1}</span>
+                  <div className="flex h-full w-full flex-col items-center justify-center text-v-faint">
+                    <ImageIcon className="mb-1 h-4 w-4" />
+                    <span className="v-t-micro">Slot {idx + 1}</span>
                   </div>
                 )}
               </div>
               <div className="flex-1 space-y-3 flex flex-col justify-center">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Image {idx + 1}</span>
+                  <span className="v-t-micro text-v-mut">Image {idx + 1}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <ImageUploader
@@ -399,7 +399,7 @@ function HeroTab({
                         setImage(idx, "");
                         setTimeout(() => document.getElementById("save-storefront-btn")?.click(), 250);
                       }}
-                      className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors border border-transparent hover:border-red-400/20"
+                      className="rounded-v border border-transparent p-2 text-v-mut transition-colors hover:border-red-400/20 hover:bg-red-400/10 hover:text-red-400"
                       title="Remove Image"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -422,7 +422,7 @@ function HeroTab({
         <div className="space-y-3">
           <Field label="Street Address (EN)">
             <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-600 pointer-events-none" />
+              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-v-faint pointer-events-none" />
               <Input
                 value={getI18nStr(data.address, "en")}
                 onChange={(e) => set("address", updateI18nStr(data.address, "en", e.target.value))}
@@ -468,7 +468,7 @@ function HeroTab({
       </div>
 
       <Field label="Precise Map Location" hint="Search for your address or drag the pin to set your exact venue location on the map.">
-        <div className="rounded-xl overflow-hidden border border-white/10 relative" style={{ height: 320 }}>
+        <div className="relative overflow-hidden rounded-v border border-v-line" style={{ height: 320 }}>
           <LocationPickerMap
             lat={lat}
             lng={lng}
@@ -505,7 +505,7 @@ function HoursTab({
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-zinc-500">
+      <p className="text-xs text-v-faint">
         Define your operating schedule. These appear in the Info section of the customer menu.
       </p>
 
@@ -513,9 +513,9 @@ function HoursTab({
         {data.map((row, idx) => (
           <div
             key={idx}
-            className="flex items-center gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-4 py-3"
+            className="flex items-center gap-2 rounded-v border border-v-line bg-white/[0.02] px-3 py-3 sm:gap-3 sm:px-4"
           >
-            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white/8 text-[10px] font-bold text-zinc-500">
+            <div className="v-t-micro flex h-6 w-6 shrink-0 items-center justify-center rounded-v border border-v-line tabular-nums text-v-faint">
               {idx + 1}
             </div>
             <Input
@@ -524,16 +524,16 @@ function HoursTab({
               placeholder="Mon – Fri"
               className="flex-1"
             />
-            <span className="text-zinc-700 text-sm shrink-0">→</span>
+            <span className="hidden shrink-0 text-sm text-v-faint sm:block">→</span>
             <Input
               value={row.hours}
               onChange={(e) => updateRow(idx, "hours", e.target.value)}
               placeholder="08:00 – 20:00"
-              className="flex-1"
+              className="flex-1 font-v-mono tabular-nums"
             />
             <button
               onClick={() => removeRow(idx)}
-              className="shrink-0 p-1.5 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
+              className="shrink-0 rounded-v p-1.5 text-v-faint transition-all hover:bg-red-400/10 hover:text-red-400"
             >
               <Trash2 className="h-4 w-4" />
             </button>
@@ -543,7 +543,7 @@ function HoursTab({
 
       <button
         onClick={addRow}
-        className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/15 py-3 text-xs font-medium text-zinc-500 hover:border-white/30 hover:text-white hover:bg-white/[0.03] transition-all"
+        className="v-t-micro flex w-full items-center justify-center gap-2 rounded-v border border-dashed border-v-line py-3 text-v-faint transition-all hover:bg-white/[0.03] hover:text-v-ink"
       >
         <Plus className="h-3.5 w-3.5" />
         Add Time Slot
@@ -563,7 +563,7 @@ function SocialsTab({
     <div className="space-y-5">
       <Field label="WhatsApp" hint="Include country code, e.g. +995 555 000 000">
         <div className="relative">
-          <MessageCircle className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-600 pointer-events-none" />
+          <MessageCircle className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-v-faint pointer-events-none" />
           <Input
             value={data.whatsapp}
             onChange={(e) => onChange({ ...data, whatsapp: e.target.value })}
@@ -575,7 +575,7 @@ function SocialsTab({
 
       <Field label="Instagram" hint="Handle only, without @">
         <div className="relative">
-          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-600 pointer-events-none" />
+          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-v-faint pointer-events-none" />
           <Input
             value={data.instagram}
             onChange={(e) => onChange({ ...data, instagram: e.target.value })}
@@ -587,7 +587,7 @@ function SocialsTab({
 
       <Field label="Email">
         <div className="relative">
-          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-600 pointer-events-none" />
+          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-v-faint pointer-events-none" />
           <Input
             value={data.email}
             onChange={(e) => onChange({ ...data, email: e.target.value })}
@@ -598,26 +598,26 @@ function SocialsTab({
       </Field>
 
       {/* Preview pill */}
-      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">Preview</p>
+      <div className="space-y-2 rounded-v border border-v-line bg-white/[0.02] p-4">
+        <p className="v-t-micro text-v-faint">Preview</p>
         <div className="flex flex-wrap gap-2">
           {data.whatsapp && (
-            <span className="flex items-center gap-1.5 text-xs text-green-400 border border-green-500/20 bg-green-500/5 rounded-full px-3 py-1.5">
+            <span className="flex items-center gap-1.5 rounded-full border border-v-line px-3 py-1.5 text-xs text-v-mut">
               <MessageCircle className="h-3 w-3" /> {data.whatsapp}
             </span>
           )}
           {data.instagram && (
-            <span className="flex items-center gap-1.5 text-xs text-pink-400 border border-pink-500/20 bg-pink-500/5 rounded-full px-3 py-1.5">
+            <span className="flex items-center gap-1.5 rounded-full border border-v-line px-3 py-1.5 text-xs text-v-mut">
               <Mail className="h-3 w-3" /> @{data.instagram}
             </span>
           )}
           {data.email && (
-            <span className="flex items-center gap-1.5 text-xs text-blue-400 border border-blue-500/20 bg-blue-500/5 rounded-full px-3 py-1.5">
+            <span className="flex items-center gap-1.5 rounded-full border border-v-line px-3 py-1.5 text-xs text-v-mut">
               <Mail className="h-3 w-3" /> {data.email}
             </span>
           )}
           {!data.whatsapp && !data.instagram && !data.email && (
-            <p className="text-xs text-zinc-700 italic">Fill in at least one field to preview.</p>
+            <p className="text-xs italic text-v-faint">Fill in at least one field to preview.</p>
           )}
         </div>
       </div>
@@ -637,7 +637,7 @@ function ThemeTab({
       <Field label="Primary Color" hint="Used for buttons, active states, and accent elements.">
         <div className="flex items-center gap-3">
           <div
-            className="relative h-10 w-10 rounded-lg border border-white/20 overflow-hidden cursor-pointer shrink-0"
+            className="relative h-10 w-10 shrink-0 cursor-pointer overflow-hidden rounded-v border border-v-line"
             style={{ backgroundColor: data.primaryColor }}
           >
             <input
@@ -651,7 +651,7 @@ function ThemeTab({
             value={data.primaryColor}
             onChange={(e) => onChange({ ...data, primaryColor: e.target.value })}
             placeholder="#ffffff"
-            className="font-mono"
+            className="font-v-mono"
           />
         </div>
       </Field>
@@ -659,7 +659,7 @@ function ThemeTab({
       <Field label="Background Color" hint="Primary background for the PWA menu.">
         <div className="flex items-center gap-3">
           <div
-            className="relative h-10 w-10 rounded-lg border border-white/20 overflow-hidden cursor-pointer shrink-0"
+            className="relative h-10 w-10 shrink-0 cursor-pointer overflow-hidden rounded-v border border-v-line"
             style={{ backgroundColor: data.backgroundColor || "#09090b" }}
           >
             <input
@@ -673,7 +673,7 @@ function ThemeTab({
             value={data.backgroundColor || ""}
             onChange={(e) => onChange({ ...data, backgroundColor: e.target.value })}
             placeholder="#09090b"
-            className="font-mono"
+            className="font-v-mono"
           />
         </div>
       </Field>
@@ -681,7 +681,7 @@ function ThemeTab({
       <Field label="Text Color" hint="Main body text color.">
         <div className="flex items-center gap-3">
           <div
-            className="relative h-10 w-10 rounded-lg border border-white/20 overflow-hidden cursor-pointer shrink-0"
+            className="relative h-10 w-10 shrink-0 cursor-pointer overflow-hidden rounded-v border border-v-line"
             style={{ backgroundColor: data.textColor || "#ffffff" }}
           >
             <input
@@ -695,7 +695,7 @@ function ThemeTab({
             value={data.textColor || ""}
             onChange={(e) => onChange({ ...data, textColor: e.target.value })}
             placeholder="#ffffff"
-            className="font-mono"
+            className="font-v-mono"
           />
         </div>
       </Field>
@@ -716,10 +716,10 @@ function ThemeTab({
               key={f}
               onClick={() => onChange({ ...data, fontFamily: f })}
               className={cn(
-                "px-3 py-2 rounded-xl border text-xs transition-all",
+                "rounded-v border px-3 py-2 text-xs transition-all",
                 data.fontFamily === f
-                  ? "border-white/30 bg-white/10 text-white"
-                  : "border-white/10 bg-white/[0.02] text-zinc-500 hover:text-white hover:bg-white/5",
+                  ? "border-v-accent/50 bg-v-accent/[0.06] text-v-ink"
+                  : "border-v-line bg-white/[0.02] text-v-faint hover:bg-white/[0.04] hover:text-v-ink",
               )}
               style={{ fontFamily: f }}
             >
@@ -739,8 +739,8 @@ function ThemeTab({
                 "flex-1 py-2.5 text-xs font-medium border transition-all",
                 opt.value === "0px" ? "rounded-none" : opt.value === "9999px" ? "rounded-full" : "rounded-xl",
                 data.buttonRadius === opt.value
-                  ? "border-white/30 bg-white/10 text-white"
-                  : "border-white/10 bg-white/[0.02] text-zinc-400 hover:text-white hover:bg-white/5",
+                  ? "border-v-accent/50 bg-v-accent/[0.06] text-v-ink"
+                  : "border-v-line bg-white/[0.02] text-v-mut hover:bg-white/[0.04] hover:text-v-ink",
               )}
             >
               {opt.label}
@@ -755,48 +755,48 @@ function ThemeTab({
           <button
             onClick={() => onChange({ ...data, menuType: "basic" })}
             className={cn(
-              "flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all relative overflow-hidden group",
+              "flex flex-col items-start gap-2 p-4 rounded-v border text-left transition-all relative overflow-hidden group",
               (!data.menuType || data.menuType === "basic")
-                ? "border-emerald-500/50 bg-emerald-500/10 ring-1 ring-emerald-500/30"
-                : "border-white/10 bg-white/[0.02] hover:bg-white/5 hover:border-white/20"
+                ? "border-v-accent/50 bg-v-accent/[0.07]"
+                : "border-v-line bg-white/[0.02] hover:bg-white/[0.04]"
             )}
           >
             <div className="flex items-center justify-between w-full">
               <span className={cn(
                 "text-sm font-semibold",
-                (!data.menuType || data.menuType === "basic") ? "text-emerald-400" : "text-white"
+                (!data.menuType || data.menuType === "basic") ? "text-v-accent" : "text-v-ink"
               )}>
                 Classic Scroll
               </span>
               {(!data.menuType || data.menuType === "basic") && (
-                <Check className="h-4 w-4 text-emerald-400" />
+                <Check className="h-4 w-4 text-v-accent" />
               )}
             </div>
-            <p className="text-xs text-zinc-400">Traditional vertical scrolling list with category tabs.</p>
+            <p className="text-xs text-v-mut">Traditional vertical scrolling list with category tabs.</p>
           </button>
 
           {/* Dragable Map Layout Card */}
           <button
             onClick={() => onChange({ ...data, menuType: "dragable" })}
             className={cn(
-              "flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all relative overflow-hidden group",
+              "flex flex-col items-start gap-2 p-4 rounded-v border text-left transition-all relative overflow-hidden group",
               data.menuType === "dragable"
-                ? "border-emerald-500/50 bg-emerald-500/10 ring-1 ring-emerald-500/30"
-                : "border-white/10 bg-white/[0.02] hover:bg-white/5 hover:border-white/20"
+                ? "border-v-accent/50 bg-v-accent/[0.07]"
+                : "border-v-line bg-white/[0.02] hover:bg-white/[0.04]"
             )}
           >
             <div className="flex items-center justify-between w-full">
               <span className={cn(
                 "text-sm font-semibold",
-                data.menuType === "dragable" ? "text-emerald-400" : "text-white"
+                data.menuType === "dragable" ? "text-v-accent" : "text-v-ink"
               )}>
                 Spatial Map
               </span>
               {data.menuType === "dragable" && (
-                <Check className="h-4 w-4 text-emerald-400" />
+                <Check className="h-4 w-4 text-v-accent" />
               )}
             </div>
-            <p className="text-xs text-zinc-400">Interactive 2D drag-to-explore canvas experience.</p>
+            <p className="text-xs text-v-mut">Interactive 2D drag-to-explore canvas experience.</p>
           </button>
         </div>
       </Field>
@@ -807,55 +807,55 @@ function ThemeTab({
           <button
             onClick={() => onChange({ ...data, categoryLayout: "pills" })}
             className={cn(
-              "flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all relative overflow-hidden group",
+              "flex flex-col items-start gap-2 p-4 rounded-v border text-left transition-all relative overflow-hidden group",
               (!data.categoryLayout || data.categoryLayout === "pills")
-                ? "border-emerald-500/50 bg-emerald-500/10 ring-1 ring-emerald-500/30"
-                : "border-white/10 bg-white/[0.02] hover:bg-white/5 hover:border-white/20"
+                ? "border-v-accent/50 bg-v-accent/[0.07]"
+                : "border-v-line bg-white/[0.02] hover:bg-white/[0.04]"
             )}
           >
             <div className="flex items-center justify-between w-full">
               <span className={cn(
                 "text-sm font-semibold",
-                (!data.categoryLayout || data.categoryLayout === "pills") ? "text-emerald-400" : "text-white"
+                (!data.categoryLayout || data.categoryLayout === "pills") ? "text-v-accent" : "text-v-ink"
               )}>
                 Pill Navigation
               </span>
               {(!data.categoryLayout || data.categoryLayout === "pills") && (
-                <Check className="h-4 w-4 text-emerald-400" />
+                <Check className="h-4 w-4 text-v-accent" />
               )}
             </div>
-            <p className="text-xs text-zinc-400">Horizontal scrolling pills. Products listed below.</p>
+            <p className="text-xs text-v-mut">Horizontal scrolling pills. Products listed below.</p>
           </button>
 
           {/* Cards Layout Card */}
           <button
             onClick={() => onChange({ ...data, categoryLayout: "cards" })}
             className={cn(
-              "flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all relative overflow-hidden group",
+              "flex flex-col items-start gap-2 p-4 rounded-v border text-left transition-all relative overflow-hidden group",
               data.categoryLayout === "cards"
-                ? "border-emerald-500/50 bg-emerald-500/10 ring-1 ring-emerald-500/30"
-                : "border-white/10 bg-white/[0.02] hover:bg-white/5 hover:border-white/20"
+                ? "border-v-accent/50 bg-v-accent/[0.07]"
+                : "border-v-line bg-white/[0.02] hover:bg-white/[0.04]"
             )}
           >
             <div className="flex items-center justify-between w-full">
               <span className={cn(
                 "text-sm font-semibold",
-                data.categoryLayout === "cards" ? "text-emerald-400" : "text-white"
+                data.categoryLayout === "cards" ? "text-v-accent" : "text-v-ink"
               )}>
                 Visual Cards
               </span>
               {data.categoryLayout === "cards" && (
-                <Check className="h-4 w-4 text-emerald-400" />
+                <Check className="h-4 w-4 text-v-accent" />
               )}
             </div>
-            <p className="text-xs text-zinc-400">Grid of category cards. Products open in a popup.</p>
+            <p className="text-xs text-v-mut">Grid of category cards. Products open in a popup.</p>
           </button>
         </div>
       </Field>
 
       {/* Live button preview */}
-      <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 flex items-center gap-4">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600 shrink-0">Preview</p>
+      <div className="flex items-center gap-4 rounded-v border border-v-line bg-white/[0.02] p-4">
+        <p className="v-t-micro shrink-0 text-v-faint">Preview</p>
         <button
           className="px-5 py-2.5 text-sm font-semibold text-black transition-all"
           style={{
@@ -894,10 +894,10 @@ function AnnouncementsTab({
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-v-faint">
           Create up to 5 announcements. Toggle them live to show as popup banners.
         </p>
-        <span className="text-xs font-medium text-zinc-500">
+        <span className="v-t-micro tabular-nums text-v-faint">
           {data.length} / 5
         </span>
       </div>
@@ -906,27 +906,27 @@ function AnnouncementsTab({
         {data.map((row, idx) => (
           <div
             key={row.id}
-            className="flex flex-col gap-3 rounded-xl border border-white/10 bg-white/[0.02] p-4"
+            className="flex flex-col gap-3 rounded-v border border-v-line bg-white/[0.02] p-4"
           >
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+              <span className="v-t-micro text-v-faint">
                 Announcement {idx + 1}
               </span>
               <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <span className={cn("text-[10px] uppercase tracking-widest font-bold", row.isActive ? "text-emerald-400" : "text-zinc-500")}>
+                <label className="flex cursor-pointer items-center gap-2">
+                  <span className={cn("v-t-micro", row.isActive ? "text-v-accent" : "text-v-faint")}>
                     {row.isActive ? "Live" : "Closed"}
                   </span>
                   <input
                     type="checkbox"
                     checked={row.isActive}
                     onChange={(e) => updateRow(row.id, "isActive", e.target.checked)}
-                    className="h-4 w-4 rounded border-white/20 bg-white/10 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0 cursor-pointer"
+                    className="h-4 w-4 cursor-pointer rounded-v border-v-line accent-[#D8FF3A]"
                   />
                 </label>
                 <button
                   onClick={() => removeRow(row.id)}
-                  className="text-zinc-500 hover:text-red-400 transition-colors"
+                  className="text-v-faint transition-colors hover:text-red-400"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -943,8 +943,8 @@ function AnnouncementsTab({
         ))}
 
         {data.length === 0 && (
-          <div className="p-8 text-center border border-dashed border-white/10 rounded-xl">
-            <p className="text-sm text-zinc-500">No announcements created yet.</p>
+          <div className="rounded-v border border-dashed border-v-line p-8 text-center">
+            <p className="text-sm text-v-faint">No announcements created yet.</p>
           </div>
         )}
       </div>
@@ -952,7 +952,7 @@ function AnnouncementsTab({
       {data.length < 5 && (
         <button
           onClick={addRow}
-          className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-white/15 py-3 text-xs font-medium text-zinc-500 hover:border-white/30 hover:text-white hover:bg-white/[0.03] transition-all"
+          className="v-t-micro flex w-full items-center justify-center gap-2 rounded-v border border-dashed border-v-line py-3 text-v-faint transition-all hover:bg-white/[0.03] hover:text-v-ink"
         >
           <Plus className="h-3.5 w-3.5" />
           Add Announcement
@@ -1055,10 +1055,10 @@ export default function StorefrontPage() {
     return (
       <div className="space-y-6">
         <div>
-          <div className="h-8 w-48 rounded-xl bg-white/5 animate-pulse mb-2" />
-          <div className="h-4 w-72 rounded-lg bg-white/5 animate-pulse" />
+          <div className="mb-2 h-8 w-48 animate-pulse rounded-v bg-white/[0.05]" />
+          <div className="h-4 w-72 max-w-full animate-pulse rounded-v bg-white/[0.03]" />
         </div>
-        <div className="h-[500px] rounded-2xl bg-white/[0.02] border border-white/10 animate-pulse" />
+        <div className="h-[500px] animate-pulse rounded-v border border-v-line bg-white/[0.02]" />
       </div>
     );
   }
@@ -1066,9 +1066,9 @@ export default function StorefrontPage() {
   if (!orgId) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
-        <Store className="h-8 w-8 text-zinc-600" />
-        <p className="font-medium text-white">No workspace selected</p>
-        <p className="text-sm text-zinc-400 max-w-xs">
+        <Store className="h-8 w-8 text-v-faint" />
+        <p className="font-medium text-v-ink">No workspace selected</p>
+        <p className="max-w-xs text-sm text-v-mut">
           Select a workspace from the sidebar to configure its storefront.
         </p>
       </div>
@@ -1076,19 +1076,19 @@ export default function StorefrontPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="max-w-3xl space-y-6 text-v-ink">
       {/* Page header */}
       <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both flex items-start justify-between gap-4 flex-wrap">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <Store className="h-4 w-4 text-white" />
-            <h1 className="text-3xl font-medium tracking-tight text-white">
+            <Store className="h-4 w-4 text-v-mut" />
+            <h1 className="font-v-display text-2xl font-medium tracking-tight text-v-ink sm:text-3xl">
               Storefront
             </h1>
           </div>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-v-mut">
             Configure the public-facing menu for{" "}
-            <span className="text-white font-medium">{organization?.name}</span>.
+            <span className="font-medium text-v-ink">{organization?.name}</span>.
             Changes are pushed to the PWA instantly on save.
           </p>
         </div>
@@ -1097,12 +1097,12 @@ export default function StorefrontPage() {
           onClick={handleSave}
           disabled={saving}
           className={cn(
-            "flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition-all duration-200",
+            "v-press flex items-center gap-2 rounded-v px-5 py-2.5 text-sm font-semibold transition-all duration-200",
             saved
-              ? "bg-white/10 text-white border border-white/20"
+              ? "border border-v-line text-v-ink"
               : saving
-                ? "bg-white/80 text-black cursor-not-allowed"
-                : "bg-white text-black hover:bg-zinc-200",
+                ? "cursor-not-allowed bg-v-accent/80 text-v-accent-ink"
+                : "bg-v-accent text-v-accent-ink hover:brightness-95",
           )}
         >
           {saving ? (
@@ -1115,26 +1115,26 @@ export default function StorefrontPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-75 fill-mode-both flex gap-1 rounded-2xl border border-white/10 bg-[#09090b] p-1.5">
+      <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-75 fill-mode-both flex divide-x divide-v-line overflow-hidden rounded-v border border-v-line bg-v-bg-raise">
         {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
             className={cn(
-              "flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-xs font-medium transition-all duration-150",
+              "v-t-micro flex min-w-0 flex-1 items-center justify-center gap-2 px-3 py-2.5 transition-colors duration-150",
               activeTab === id
-                ? "bg-white/10 text-white shadow-sm"
-                : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5",
+                ? "bg-white/[0.05] text-v-accent"
+                : "text-v-faint hover:bg-white/[0.03] hover:text-v-mut",
             )}
           >
             <Icon className="h-3.5 w-3.5 shrink-0" />
-            <span className="hidden sm:block">{label}</span>
+            <span className="hidden truncate sm:block">{label}</span>
           </button>
         ))}
       </div>
 
       {/* Tab panel */}
-      <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 delay-150 fill-mode-both bg-[#09090b] border border-white/10 rounded-2xl p-4 sm:p-6">
+      <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 delay-150 fill-mode-both rounded-v border border-v-line bg-v-bg-raise p-4 sm:p-6">
         {activeTab === "hero" && (
           <HeroTab 
             data={storefront} 
@@ -1169,20 +1169,20 @@ export default function StorefrontPage() {
           onClick={handleSave}
           disabled={saving}
           className={cn(
-            "w-full flex items-center justify-center gap-2 rounded-2xl py-3.5 text-sm font-semibold transition-all",
+            "v-press flex w-full items-center justify-center gap-2 rounded-v py-3.5 text-sm font-semibold transition-all",
             saved
-              ? "bg-white/10 text-white border border-white/20"
+              ? "border border-v-line text-v-ink"
               : saving
-                ? "bg-white/80 text-black cursor-not-allowed"
-                : "bg-white text-black hover:bg-zinc-200",
+                ? "cursor-not-allowed bg-v-accent/80 text-v-accent-ink"
+                : "bg-v-accent text-v-accent-ink hover:brightness-95",
           )}
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <Check className="h-4 w-4" /> : null}
           {saved ? "All changes saved!" : saving ? "Saving…" : "Save All Changes"}
         </button>
-        <p className="text-center text-[10px] text-zinc-700 mt-2">
+        <p className="v-t-micro mt-2 text-center text-v-faint">
           Ready to connect to{" "}
-          <code className="font-mono text-zinc-600">
+          <code className="font-v-mono">
             api.organizations.updateStorefrontConfig
           </code>
         </p>

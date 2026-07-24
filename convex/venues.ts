@@ -126,9 +126,15 @@ export const setPublished = mutation({
   },
   handler: async (ctx, { id, isPublished }) => {
     // 🔒 was public — resolve the venue's org and verify the caller owns it.
+    // Seeded directory venues have no org — only the super admin manages
+    // those (via venueDirectory.updateVenue); requireSuperAdmin covers them.
     const venue = await ctx.db.get(id);
     if (!venue) throw new Error("Venue not found");
-    await verifyOrgAccess(ctx, venue.orgId);
+    if (venue.orgId) {
+      await verifyOrgAccess(ctx, venue.orgId);
+    } else {
+      await requireSuperAdmin(ctx);
+    }
 
     await ctx.db.patch(id, { isPublished, updatedAt: Date.now() });
   },

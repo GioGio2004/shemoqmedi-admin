@@ -39,34 +39,26 @@ export default function BagsDashboardLayout({
   const isFullOrg = gating?.onboardingType === "full";
 
   return (
-    <div className="min-h-[100dvh] bg-black text-zinc-50 font-sans">
-      {/* Ambient glow */}
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-x-0 top-0 h-72 bg-gradient-to-b from-emerald-500/[0.07] via-transparent to-transparent"
-      />
-
+    <div className="min-h-[100dvh] bg-v-bg text-v-ink font-sans">
       {/* ── Top header ─────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-black/60 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)] backdrop-blur-xl backdrop-saturate-150">
+      <header className="sticky top-0 z-30 border-b border-v-line bg-v-bg">
         <div className="mx-auto flex h-14 max-w-4xl items-center justify-between gap-3 px-4">
           <div className="flex min-w-0 items-center gap-2.5">
             {isFullOrg && (
               <Link
                 href="/dashboard"
                 title="Back to main dashboard"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/10 border-t-white/20 bg-white/[0.06] text-zinc-400 backdrop-blur-xl backdrop-saturate-150 transition-[color,transform] duration-150 ease-out hover:text-white active:scale-[0.97] motion-reduce:transform-none"
+                className="v-press flex h-8 w-8 shrink-0 items-center justify-center rounded-v border border-v-line text-v-mut transition-colors hover:text-v-ink"
               >
                 <ArrowLeft className="h-4 w-4" />
               </Link>
             )}
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-emerald-400/20 bg-emerald-400/10">
-              <ShoppingBag className="h-4 w-4 text-emerald-300" />
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-v border border-v-line bg-v-bg-raise">
+              <ShoppingBag className="h-4 w-4 text-v-accent" />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold leading-none text-white">
-                Surprise Bags
-              </p>
-              <p className="mt-0.5 truncate text-[11px] text-zinc-500">
+              <p className="v-t-micro truncate text-v-ink">Surprise Bags</p>
+              <p className="v-t-micro mt-0.5 truncate text-v-faint">
                 {organization?.name ?? "Loading…"}
               </p>
             </div>
@@ -74,11 +66,7 @@ export default function BagsDashboardLayout({
 
           <div className="flex items-center gap-2.5">
             {/* Desktop tabs */}
-            <nav className="relative hidden items-center gap-1 overflow-hidden rounded-full border border-white/10 border-t-white/25 bg-white/[0.06] p-1 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12)] backdrop-blur-xl backdrop-saturate-150 sm:flex">
-              <span
-                aria-hidden
-                className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/[0.10] to-transparent"
-              />
+            <nav className="hidden items-center divide-x divide-v-line overflow-hidden rounded-v border border-v-line sm:flex">
               {TABS.map((tab) => {
                 const active = tab.exact
                   ? bare === tab.href
@@ -88,10 +76,10 @@ export default function BagsDashboardLayout({
                     key={tab.href}
                     href={tab.href}
                     className={cn(
-                      "relative flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-[color,background-color,transform] duration-150 ease-out active:scale-[0.97] motion-reduce:transform-none",
+                      "v-t-micro v-press flex items-center gap-1.5 px-4 py-2 transition-colors",
                       active
-                        ? "bg-white/15 text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] ring-1 ring-white/20 backdrop-blur-md backdrop-saturate-150"
-                        : "text-zinc-400 hover:text-white",
+                        ? "bg-white/[0.04] text-v-accent"
+                        : "text-v-mut hover:text-v-ink",
                     )}
                   >
                     <tab.icon className="h-3.5 w-3.5" />
@@ -101,7 +89,7 @@ export default function BagsDashboardLayout({
               })}
             </nav>
             <UserButton
-              appearance={{ elements: { avatarBox: "h-8 w-8 rounded-xl" } }}
+              appearance={{ elements: { avatarBox: "h-8 w-8 rounded-none" } }}
             />
           </div>
         </div>
@@ -117,12 +105,7 @@ export default function BagsDashboardLayout({
         className="fixed inset-x-0 bottom-0 z-30 sm:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        {/* Soft fade so content dissolves under the bar */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 -top-12 h-12 bg-gradient-to-t from-black/60 to-transparent"
-        />
-        <div className="border-t border-white/10 bg-black/60 px-6 pt-1 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.08)] backdrop-blur-xl backdrop-saturate-150">
+        <div className="border-t border-v-line bg-v-bg px-6 pt-1">
           <div className="flex items-center justify-around">
             {TABS.map((tab) => {
               const active = tab.exact
@@ -132,26 +115,32 @@ export default function BagsDashboardLayout({
                 <Link
                   key={tab.href}
                   href={tab.href}
-                  className="group flex flex-1 flex-col items-center gap-1 py-2 transition-transform duration-150 ease-out active:scale-[0.97] motion-reduce:transform-none"
+                  className="v-press group flex flex-1 flex-col items-center gap-1 py-2"
                 >
                   <div
                     className={cn(
-                      "flex h-10 w-10 items-center justify-center rounded-2xl transition-all duration-200 ease-out",
+                      "flex h-9 w-9 items-center justify-center transition-colors",
                       active
-                        ? "bg-white/15 text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] ring-1 ring-white/20 backdrop-blur-md backdrop-saturate-150"
-                        : "text-zinc-500 group-active:bg-white/10",
+                        ? "text-v-accent"
+                        : "text-v-faint group-active:text-v-mut",
                     )}
                   >
                     <tab.icon className="h-5 w-5" />
                   </div>
                   <span
                     className={cn(
-                      "text-[10px] font-semibold tracking-wide",
-                      active ? "text-white" : "text-zinc-600",
+                      "v-t-micro",
+                      active ? "text-v-accent" : "text-v-faint",
                     )}
                   >
                     {tab.label}
                   </span>
+                  <span
+                    className={cn(
+                      "h-1 w-1 rounded-full",
+                      active ? "bg-v-accent" : "bg-transparent",
+                    )}
+                  />
                 </Link>
               );
             })}

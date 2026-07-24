@@ -34,6 +34,7 @@ import type * as publicVenues from "../publicVenues.js";
 import type * as surpriseBags from "../surpriseBags.js";
 import type * as tableSessions from "../tableSessions.js";
 import type * as users from "../users.js";
+import type * as venueDirectory from "../venueDirectory.js";
 import type * as venues from "../venues.js";
 import type * as volooAi from "../volooAi.js";
 import type * as volootags from "../volootags.js";
@@ -72,6 +73,7 @@ declare const fullApi: ApiFromModules<{
   surpriseBags: typeof surpriseBags;
   tableSessions: typeof tableSessions;
   users: typeof users;
+  venueDirectory: typeof venueDirectory;
   venues: typeof venues;
   volooAi: typeof volooAi;
   volootags: typeof volootags;

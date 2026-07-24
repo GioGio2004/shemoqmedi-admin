@@ -84,19 +84,19 @@ type MenuItem = {
 function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center gap-4">
-      <div className="h-16 w-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
-        <UtensilsCrossed className="h-7 w-7 text-zinc-500" />
+      <div className="flex h-16 w-16 items-center justify-center rounded-v border border-v-line bg-v-bg-raise">
+        <UtensilsCrossed className="h-7 w-7 text-v-faint" />
       </div>
       <div>
-        <p className="font-medium text-white text-lg">No categories yet</p>
-        <p className="text-sm text-zinc-400 mt-1 max-w-xs mx-auto">
+        <p className="text-lg font-medium text-v-ink">No categories yet</p>
+        <p className="mx-auto mt-1 max-w-xs text-sm text-v-mut">
           Create your first category (e.g. "Coffee", "Food") to start building
           your menu.
         </p>
       </div>
       <Button
         onClick={onAdd}
-        className="bg-white text-black hover:bg-zinc-200 transition-all font-medium rounded-lg"
+        className="v-press rounded-v bg-v-accent font-semibold text-v-accent-ink transition-[filter] hover:bg-v-accent hover:brightness-95"
       >
         <Plus className="h-4 w-4 mr-2" />
         Add Category
@@ -149,48 +149,48 @@ function CategoryDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-md bg-[#09090b] border-white/10 text-white">
+      <DialogContent className="sm:max-w-md rounded-v border border-v-line bg-v-bg-raise text-v-ink ring-0">
         <DialogHeader>
-          <DialogTitle className="text-white">
+          <DialogTitle className="font-v-display text-v-ink">
             {existing ? "Edit Category" : "New Category"}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <Label className="text-zinc-300 text-xs font-medium">
+            <Label className="v-t-micro text-v-faint">
               Name (English) *
             </Label>
             <Input
               value={nameEn}
               onChange={(e) => setNameEn(e.target.value)}
               placeholder="e.g. Hot Drinks"
-              className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+              className="rounded-v border-v-line bg-white/[0.03] text-v-ink placeholder:text-v-faint focus-visible:border-v-accent focus-visible:ring-0"
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-zinc-300 text-xs font-medium">
+            <Label className="v-t-micro text-v-faint">
               Name (Georgian)
             </Label>
             <Input
               value={nameKa}
               onChange={(e) => setNameKa(e.target.value)}
               placeholder="e.g. ცხელი სასმელები"
-              className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+              className="rounded-v border-v-line bg-white/[0.03] text-v-ink placeholder:text-v-faint focus-visible:border-v-accent focus-visible:ring-0"
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-zinc-300 text-xs font-medium">
+            <Label className="v-t-micro text-v-faint">
               Name (Russian)
             </Label>
             <Input
               value={nameRu}
               onChange={(e) => setNameRu(e.target.value)}
               placeholder="e.g. Горячие напитки"
-              className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+              className="rounded-v border-v-line bg-white/[0.03] text-v-ink placeholder:text-v-faint focus-visible:border-v-accent focus-visible:ring-0"
             />
           </div>
-          <div className="space-y-2 border border-white/10 rounded-xl p-5 bg-white/[0.02]">
-            <Label className="text-zinc-300 text-xs font-medium flex items-center gap-1.5 mb-2">
+          <div className="space-y-2 border border-v-line rounded-v p-5 bg-white/[0.02]">
+            <Label className="v-t-micro text-v-faint flex items-center gap-1.5 mb-2">
               <ImageIcon className="h-4 w-4" />
               Category Cover
             </Label>
@@ -200,7 +200,7 @@ function CategoryDialog({
               onSuccess={(res) => setImageUrl(res.url ?? "")}
             />
             {imageUrl && (
-              <div className="mt-4 rounded-xl overflow-hidden border border-white/10 w-32 h-32 relative shadow-xl shadow-black/50">
+              <div className="mt-4 rounded-v overflow-hidden border border-v-line w-32 h-32 relative">
                 <MenuImage
                   src={imageUrl.replace(
                     process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT ?? "",
@@ -219,14 +219,14 @@ function CategoryDialog({
           <Button
             variant="ghost"
             onClick={onClose}
-            className="text-zinc-400 hover:text-white hover:bg-white/5"
+            className="text-v-mut hover:text-v-ink hover:bg-white/[0.04]"
           >
             Cancel
           </Button>
           <Button
             onClick={handleSave}
             disabled={saving || !nameEn.trim()}
-            className="bg-white text-black hover:bg-zinc-200 font-medium"
+            className="v-press rounded-v bg-v-accent font-semibold text-v-accent-ink transition-[filter] hover:bg-v-accent hover:brightness-95"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             {existing ? "Save Changes" : "Create"}
@@ -326,9 +326,9 @@ function MenuItemDialog({
         Increased max-width to md:max-w-2xl lg:max-w-3xl. 
         Added p-6 for better breathing room on larger displays.
       */}
-      <DialogContent className="w-[95vw] sm:w-full md:max-w-2xl lg:max-w-3xl bg-[#09090b] border-white/10 text-white max-h-[90dvh] overflow-y-auto p-4 md:p-6 lg:p-8">
+      <DialogContent className="w-[95vw] sm:w-full md:max-w-2xl lg:max-w-3xl rounded-v border border-v-line bg-v-bg-raise text-v-ink ring-0 max-h-[90dvh] overflow-y-auto p-4 md:p-6 lg:p-8">
         <DialogHeader className="mb-2">
-          <DialogTitle className="text-white text-xl">
+          <DialogTitle className="font-v-display text-xl text-v-ink">
             {existing ? "Edit Menu Item" : "New Menu Item"}
           </DialogTitle>
         </DialogHeader>
@@ -337,36 +337,36 @@ function MenuItemDialog({
           {/* Names */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1.5">
-              <Label className="text-zinc-300 text-xs font-medium">
+              <Label className="v-t-micro text-v-faint">
                 Name (EN) *
               </Label>
               <Input
                 value={nameEn}
                 onChange={(e) => setNameEn(e.target.value)}
                 placeholder="Flat White"
-                className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+                className="rounded-v border-v-line bg-white/[0.03] text-v-ink placeholder:text-v-faint focus-visible:border-v-accent focus-visible:ring-0"
               />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-zinc-300 text-xs font-medium">
+              <Label className="v-t-micro text-v-faint">
                 Name (KA)
               </Label>
               <Input
                 value={nameKa}
                 onChange={(e) => setNameKa(e.target.value)}
                 placeholder="ფლეთ ვაითი"
-                className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+                className="rounded-v border-v-line bg-white/[0.03] text-v-ink placeholder:text-v-faint focus-visible:border-v-accent focus-visible:ring-0"
               />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-zinc-300 text-xs font-medium">
+              <Label className="v-t-micro text-v-faint">
                 Name (RU)
               </Label>
               <Input
                 value={nameRu}
                 onChange={(e) => setNameRu(e.target.value)}
                 placeholder="Флэт Уайт"
-                className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+                className="rounded-v border-v-line bg-white/[0.03] text-v-ink placeholder:text-v-faint focus-visible:border-v-accent focus-visible:ring-0"
               />
             </div>
           </div>
@@ -374,7 +374,7 @@ function MenuItemDialog({
           {/* Descriptions */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1.5">
-              <Label className="text-zinc-300 text-xs font-medium">
+              <Label className="v-t-micro text-v-faint">
                 Description (EN)
               </Label>
               <Textarea
@@ -382,11 +382,11 @@ function MenuItemDialog({
                 onChange={(e) => setDescEn(e.target.value)}
                 placeholder="Smooth espresso with steamed milk."
                 rows={3}
-                className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30 resize-none"
+                className="rounded-v border-v-line bg-white/[0.03] text-v-ink placeholder:text-v-faint focus-visible:border-v-accent focus-visible:ring-0 resize-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-zinc-300 text-xs font-medium">
+              <Label className="v-t-micro text-v-faint">
                 Description (KA)
               </Label>
               <Textarea
@@ -394,11 +394,11 @@ function MenuItemDialog({
                 onChange={(e) => setDescKa(e.target.value)}
                 placeholder="გლუვი ესპრესო ორთქლიანი რძით."
                 rows={3}
-                className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30 resize-none"
+                className="rounded-v border-v-line bg-white/[0.03] text-v-ink placeholder:text-v-faint focus-visible:border-v-accent focus-visible:ring-0 resize-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-zinc-300 text-xs font-medium">
+              <Label className="v-t-micro text-v-faint">
                 Description (RU)
               </Label>
               <Textarea
@@ -406,7 +406,7 @@ function MenuItemDialog({
                 onChange={(e) => setDescRu(e.target.value)}
                 placeholder="Мягкий эспрессо с горячим молоком."
                 rows={3}
-                className="bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30 resize-none"
+                className="rounded-v border-v-line bg-white/[0.03] text-v-ink placeholder:text-v-faint focus-visible:border-v-accent focus-visible:ring-0 resize-none"
               />
             </div>
           </div>
@@ -414,7 +414,7 @@ function MenuItemDialog({
           {/* Price & Tags (Side by side on desktop) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label className="text-zinc-300 text-xs font-medium">
+              <Label className="v-t-micro text-v-faint">
                 Price (GEL) *
               </Label>
               <div className="relative">
@@ -428,13 +428,13 @@ function MenuItemDialog({
                   value={priceGel}
                   onChange={(e) => setPriceGel(e.target.value)}
                   placeholder="5.50"
-                  className="pl-7 bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+                  className="pl-7 rounded-v border-v-line bg-white/[0.03] text-v-ink placeholder:text-v-faint focus-visible:border-v-accent focus-visible:ring-0"
                 />
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-zinc-300 text-xs font-medium">Tags</Label>
+              <Label className="v-t-micro text-v-faint">Tags</Label>
               <div className="flex gap-2">
                 <Input
                   value={tagInput}
@@ -443,14 +443,14 @@ function MenuItemDialog({
                     e.key === "Enter" && (e.preventDefault(), addTag())
                   }
                   placeholder="vegan, spicy, popular…"
-                  className="flex-1 bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30"
+                  className="flex-1 rounded-v border-v-line bg-white/[0.03] text-v-ink placeholder:text-v-faint focus-visible:border-v-accent focus-visible:ring-0"
                 />
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={addTag}
-                  className="border-white/20 text-zinc-300 hover:text-white hover:bg-white/5 h-9"
+                  className="h-9 rounded-v border-v-line bg-transparent text-v-mut hover:bg-white/[0.04] hover:text-v-ink"
                 >
                   <Plus className="h-4 w-4" />
                 </Button>
@@ -461,13 +461,13 @@ function MenuItemDialog({
                     <Badge
                       key={t}
                       variant="secondary"
-                      className="gap-1 bg-white/10 text-white border-white/20 text-xs font-medium py-1 px-2"
+                      className="v-t-micro gap-1 rounded-v border border-v-line bg-white/[0.04] px-2 py-1 text-v-ink"
                     >
                       {t}
                       <button
                         type="button"
                         onClick={() => setTags(tags.filter((x) => x !== t))}
-                        className="ml-0.5 text-zinc-400 hover:text-white"
+                        className="ml-0.5 text-v-mut hover:text-v-ink"
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -479,8 +479,8 @@ function MenuItemDialog({
           </div>
 
           {/* Image Upload Area */}
-          <div className="space-y-2 border border-white/10 rounded-xl p-5 bg-white/[0.02]">
-            <Label className="text-zinc-300 text-xs font-medium flex items-center gap-1.5 mb-2">
+          <div className="space-y-2 border border-v-line rounded-v p-5 bg-white/[0.02]">
+            <Label className="v-t-micro text-v-faint flex items-center gap-1.5 mb-2">
               <ImageIcon className="h-4 w-4" />
               Product Photo
             </Label>
@@ -490,7 +490,7 @@ function MenuItemDialog({
               onSuccess={(res) => setImageUrl(res.url ?? "")}
             />
             {imageUrl && (
-              <div className="mt-4 rounded-xl overflow-hidden border border-white/10 w-32 h-32 relative shadow-xl shadow-black/50">
+              <div className="mt-4 rounded-v overflow-hidden border border-v-line w-32 h-32 relative">
                 <MenuImage
                   src={imageUrl.replace(
                     process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT ?? "",
@@ -510,14 +510,14 @@ function MenuItemDialog({
           <Button
             variant="ghost"
             onClick={onClose}
-            className="text-zinc-400 hover:text-white hover:bg-white/5"
+            className="text-v-mut hover:text-v-ink hover:bg-white/[0.04]"
           >
             Cancel
           </Button>
           <Button
             onClick={handleSave}
             disabled={saving || !nameEn.trim() || !priceGel}
-            className="bg-white text-black hover:bg-zinc-200 font-medium px-8"
+            className="v-press rounded-v bg-v-accent px-8 font-semibold text-v-accent-ink transition-[filter] hover:bg-v-accent hover:brightness-95"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             {existing ? "Save Changes" : "Add Item"}
@@ -562,14 +562,14 @@ function MenuItemCard({
     <>
       <div
         className={cn(
-          "group flex items-center gap-4 p-4 rounded-xl border transition-all",
+          "group flex items-center gap-4 p-4 rounded-v border transition-all",
           item.isAvailable
-            ? "border-white/10 bg-white/[0.02] hover:bg-white/[0.04]"
-            : "border-white/5 bg-transparent opacity-50 hover:opacity-70",
+            ? "border-v-line bg-white/[0.02] hover:bg-white/[0.04]"
+            : "border-v-line bg-transparent opacity-50 hover:opacity-70",
         )}
       >
         {/* Image */}
-        <div className="h-14 w-14 rounded-lg overflow-hidden border border-white/10 shrink-0 bg-white/5 flex items-center justify-center">
+        <div className="h-14 w-14 rounded-v overflow-hidden border border-v-line shrink-0 bg-white/[0.03] flex items-center justify-center">
           {item.imageUrl ? (
             <MenuImage
               src={item.imageUrl.replace(
@@ -582,36 +582,36 @@ function MenuItemCard({
               className="object-cover w-full h-full"
             />
           ) : (
-            <ImageIcon className="h-5 w-5 text-zinc-600" />
+            <ImageIcon className="h-5 w-5 text-v-faint" />
           )}
         </div>
 
         {/* Details */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <p className="font-medium text-white text-sm truncate">
+            <p className="font-medium text-v-ink text-sm truncate">
               {item.name?.en}
             </p>
             {item.name?.ka && (
-              <span className="text-xs text-zinc-500 truncate">
+              <span className="text-xs text-v-faint truncate">
                 {item.name.ka}
               </span>
             )}
           </div>
           {item.description?.en && (
-            <p className="text-xs text-zinc-500 mt-0.5 truncate">
+            <p className="text-xs text-v-faint mt-0.5 truncate">
               {item.description.en}
             </p>
           )}
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-            <span className="text-sm font-medium text-white tabular-nums">
+            <span className="font-v-mono text-sm font-medium text-v-ink tabular-nums">
               ₾ {tetriToGel(item.price)}
             </span>
             {item.tags?.map((tag) => (
               <Badge
                 key={tag}
                 variant="outline"
-                className="text-[10px] px-1.5 py-0 border-white/15 text-zinc-400"
+                className="v-t-micro rounded-v border-v-line px-1.5 py-0 text-v-mut"
               >
                 <Tag className="h-2.5 w-2.5 mr-1" />
                 {tag}
@@ -626,26 +626,26 @@ function MenuItemCard({
             onClick={handleToggle}
             disabled={toggling}
             title={item.isAvailable ? "Mark unavailable" : "Mark available"}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-all"
+            className="p-1.5 rounded-v text-v-mut hover:text-v-ink hover:bg-white/[0.04] transition-all"
           >
             {toggling ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : item.isAvailable ? (
-              <ToggleRight className="h-4 w-4 text-white" />
+              <ToggleRight className="h-4 w-4 text-v-accent" />
             ) : (
               <ToggleLeft className="h-4 w-4" />
             )}
           </button>
           <button
             onClick={() => setEditing(true)}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-all"
+            className="p-1.5 rounded-v text-v-mut hover:text-v-ink hover:bg-white/[0.04] transition-all"
           >
             <Pencil className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={() => archive({ orgId, menuItemId: item._id })}
             title="Archive item (Hide)"
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-orange-400 hover:bg-orange-500/10 transition-all"
+            className="p-1.5 rounded-v text-v-mut hover:text-v-ink hover:bg-white/[0.06] transition-all"
           >
             <Archive className="h-3.5 w-3.5" />
           </button>
@@ -656,7 +656,7 @@ function MenuItemCard({
               }
             }}
             title="Delete item"
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-all"
+            className="p-1.5 rounded-v text-v-mut hover:text-red-400 hover:bg-red-400/10 transition-all"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
@@ -712,7 +712,7 @@ function CategorySection({
 
   return (
     <>
-      <Card className="bg-[#09090b] border-white/10 shadow-none overflow-hidden">
+      <Card className="rounded-v border-v-line bg-v-bg-raise shadow-none overflow-hidden">
         {/* Category header */}
         <CardHeader className="p-0">
           <div className="flex items-center justify-between gap-2 px-4 sm:px-5 py-4">
@@ -721,39 +721,39 @@ function CategorySection({
               className="flex items-center gap-3 flex-1 min-w-0 text-left"
             >
               {expanded ? (
-                <ChevronDown className="h-4 w-4 text-zinc-400 shrink-0" />
+                <ChevronDown className="h-4 w-4 text-v-mut shrink-0" />
               ) : (
-                <ChevronRight className="h-4 w-4 text-zinc-400 shrink-0" />
+                <ChevronRight className="h-4 w-4 text-v-mut shrink-0" />
               )}
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h3 className="font-medium text-white text-sm">
+                  <h3 className="font-medium text-v-ink text-sm">
                     {category.name?.en}
                   </h3>
                   {category.name?.ka && (
-                    <span className="text-xs text-zinc-500">
+                    <span className="text-xs text-v-faint">
                       · {category.name.ka}
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] text-zinc-500 mt-0.5">
+                <p className="v-t-micro mt-0.5 tabular-nums text-v-faint">
                   {available}/{total} available
                 </p>
               </div>
             </button>
             <div className="flex items-center gap-1 shrink-0">
-              <div className="flex items-center gap-0.5 mr-2 border-r border-white/10 pr-2">
+              <div className="flex items-center gap-0.5 mr-2 border-r border-v-line pr-2">
                 <button
                   onClick={(e) => { e.stopPropagation(); onMoveUp(); }}
                   disabled={isFirst}
-                  className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:hover:bg-transparent"
+                  className="p-1 rounded-v text-v-faint hover:text-v-ink hover:bg-white/[0.04] disabled:opacity-30 disabled:hover:bg-transparent"
                 >
                   <ArrowUp className="h-4 w-4" />
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); onMoveDown(); }}
                   disabled={isLast}
-                  className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/5 disabled:opacity-30 disabled:hover:bg-transparent"
+                  className="p-1 rounded-v text-v-faint hover:text-v-ink hover:bg-white/[0.04] disabled:opacity-30 disabled:hover:bg-transparent"
                 >
                   <ArrowDown className="h-4 w-4" />
                 </button>
@@ -762,14 +762,14 @@ function CategorySection({
                 size="sm"
                 variant="ghost"
                 onClick={() => setAddingItem(true)}
-                className="h-8 gap-1.5 text-xs text-zinc-400 hover:text-white hover:bg-white/5"
+                className="h-8 gap-1.5 rounded-v text-xs text-v-mut hover:text-v-ink hover:bg-white/[0.04]"
               >
                 <Plus className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Add Item</span>
               </Button>
               <button
                 onClick={() => setEditingCategory(true)}
-                className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-white/5 transition-all"
+                className="p-1.5 rounded-v text-v-faint hover:text-v-ink hover:bg-white/[0.04] transition-all"
               >
                 <Pencil className="h-3.5 w-3.5" />
               </button>
@@ -777,7 +777,7 @@ function CategorySection({
                 onClick={() =>
                   archiveCategory({ orgId, categoryId: category._id })
                 }
-                className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
+                className="p-1.5 rounded-v text-v-faint hover:text-red-400 hover:bg-red-400/10 transition-all"
               >
                 <Archive className="h-3.5 w-3.5" />
               </button>
@@ -788,17 +788,17 @@ function CategorySection({
         {/* Items */}
         {expanded && (
           <CardContent className="p-0">
-            <div className="border-t border-white/5 px-4 py-3 space-y-2">
+            <div className="border-t border-v-line px-4 py-3 space-y-2">
               {items === undefined ? (
                 <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-5 w-5 animate-spin text-zinc-600" />
+                  <Loader2 className="h-5 w-5 animate-spin text-v-faint" />
                 </div>
               ) : items.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 text-center">
-                  <p className="text-sm text-zinc-500">No items yet.</p>
+                  <p className="text-sm text-v-faint">No items yet.</p>
                   <button
                     onClick={() => setAddingItem(true)}
-                    className="mt-2 text-xs text-zinc-400 hover:text-white transition-colors underline underline-offset-2"
+                    className="mt-2 text-xs text-v-mut hover:text-v-ink transition-colors underline underline-offset-2"
                   >
                     Add the first one
                   </button>
@@ -911,7 +911,7 @@ export default function MenuPage() {
   if (!isLoaded) {
     return (
       <div className="flex items-center justify-center py-32">
-        <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+        <Loader2 className="h-6 w-6 animate-spin text-v-faint" />
       </div>
     );
   }
@@ -919,8 +919,8 @@ export default function MenuPage() {
   if (!orgId) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
-        <p className="font-medium text-white">No workspace selected</p>
-        <p className="text-sm text-zinc-400 max-w-xs">
+        <p className="font-medium text-v-ink">No workspace selected</p>
+        <p className="text-sm text-v-mut max-w-xs">
           Select a workspace from the sidebar to manage its menu.
         </p>
       </div>
@@ -928,25 +928,25 @@ export default function MenuPage() {
   }
 
   return (
-    <div className="space-y-6 text-zinc-50">
+    <div className="space-y-6 text-v-ink">
       {/* Header */}
       <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both flex items-start justify-between gap-4 flex-wrap">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <UtensilsCrossed className="h-4 w-4 text-white" />
-            <h1 className="text-3xl font-medium tracking-tight text-white">
+            <UtensilsCrossed className="h-4 w-4 text-v-mut" />
+            <h1 className="font-v-display text-2xl font-medium tracking-tight text-v-ink sm:text-3xl">
               Menu
             </h1>
             <Badge
               variant="outline"
-              className="text-[10px] text-zinc-400 border-white/10 bg-white/5 font-medium ml-1"
+              className="v-t-micro ml-1 rounded-v border-v-line bg-white/[0.03] tabular-nums text-v-mut"
             >
               {categories?.length ?? 0} categories
             </Badge>
           </div>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-v-mut">
             Manage categories and items for{" "}
-            <span className="text-white font-medium">{cafeName}</span>. Photos
+            <span className="text-v-ink font-medium">{cafeName}</span>. Photos
             are served via ImageKit CDN.
           </p>
         </div>
@@ -957,7 +957,7 @@ export default function MenuPage() {
               href={previewUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg border border-white/15 text-zinc-300 bg-white/[0.03] hover:bg-white/[0.08] hover:text-white hover:border-white/30 transition-all"
+              className="inline-flex items-center gap-1.5 rounded-v border border-v-line px-3 py-2 text-sm font-medium text-v-mut transition-colors hover:bg-white/[0.04] hover:text-v-ink"
             >
               <ExternalLink className="h-3.5 w-3.5" />
               View Menu
@@ -967,7 +967,7 @@ export default function MenuPage() {
             variant="outline"
             onClick={hideAllFromStorefront}
             disabled={storefrontToggling}
-            className="border-red-500/30 text-red-400 bg-red-500/[0.05] hover:bg-red-500/[0.15] hover:text-red-300 hover:border-red-500/50 font-medium rounded-lg shadow-none transition-all"
+            className="rounded-v border-red-400/25 bg-transparent font-medium text-red-400/90 shadow-none transition-colors hover:bg-red-400/10 hover:text-red-300"
           >
             {storefrontToggling ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -980,7 +980,7 @@ export default function MenuPage() {
             variant="outline"
             onClick={showAllOnStorefront}
             disabled={storefrontToggling}
-            className="border-emerald-500/30 text-emerald-400 bg-emerald-500/[0.05] hover:bg-emerald-500/[0.15] hover:text-emerald-300 hover:border-emerald-500/50 font-medium rounded-lg shadow-none transition-all"
+            className="rounded-v border-v-accent/40 bg-transparent font-medium text-v-accent shadow-none transition-colors hover:bg-v-accent/10 hover:text-v-accent"
           >
             {storefrontToggling ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -992,7 +992,7 @@ export default function MenuPage() {
           <Button
             variant="outline"
             onClick={collapseAll}
-            className="border-white/15 text-zinc-300 bg-white/[0.03] hover:bg-white/[0.08] hover:text-white hover:border-white/30 font-medium rounded-lg shadow-none"
+            className="rounded-v border-v-line bg-transparent font-medium text-v-mut shadow-none hover:bg-white/[0.04] hover:text-v-ink"
           >
             <ChevronRight className="h-4 w-4 mr-2" />
             Collapse All
@@ -1000,14 +1000,14 @@ export default function MenuPage() {
           <Button
             variant="outline"
             onClick={expandAll}
-            className="border-white/15 text-zinc-300 bg-white/[0.03] hover:bg-white/[0.08] hover:text-white hover:border-white/30 font-medium rounded-lg shadow-none"
+            className="rounded-v border-v-line bg-transparent font-medium text-v-mut shadow-none hover:bg-white/[0.04] hover:text-v-ink"
           >
             <ChevronDown className="h-4 w-4 mr-2" />
             Expand All
           </Button>
           <Button
             onClick={() => setAddingCategory(true)}
-            className="bg-white text-black hover:bg-zinc-200 font-medium rounded-lg shadow-none"
+            className="v-press rounded-v bg-v-accent font-semibold text-v-accent-ink shadow-none transition-[filter] hover:bg-v-accent hover:brightness-95"
           >
             <Plus className="h-4 w-4 mr-2" />
             New Category
@@ -1018,7 +1018,7 @@ export default function MenuPage() {
       {/* Categories */}
       {categories === undefined ? (
         <div className="flex items-center justify-center py-32">
-          <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+          <Loader2 className="h-6 w-6 animate-spin text-v-faint" />
         </div>
       ) : categories.length === 0 ? (
         <EmptyState onAdd={() => setAddingCategory(true)} />

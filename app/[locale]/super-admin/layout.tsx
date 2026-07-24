@@ -4,7 +4,7 @@ export default function SuperAdminLayout({
     children: React.ReactNode;
 }) {
     return (
-        <div className="dark min-h-screen bg-background text-foreground">
+        <div className="dark min-h-screen bg-v-bg text-v-ink">
             {children}
         </div>
     );

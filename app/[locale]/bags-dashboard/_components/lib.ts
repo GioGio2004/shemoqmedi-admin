@@ -34,6 +34,25 @@ export function timeToEpochToday(hhmm: string): number | null {
   return d.getTime();
 }
 
+/** Date → datetime-local input value "YYYY-MM-DDTHH:mm" (local time). */
+export function toDatetimeLocal(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(
+    d.getHours(),
+  )}:${p(d.getMinutes())}`;
+}
+
+/**
+ * datetime-local string "YYYY-MM-DDTHH:mm" → epoch ms (parsed as LOCAL time).
+ * Handles overnight pickup windows correctly because the date is explicit.
+ * Returns null when invalid.
+ */
+export function datetimeLocalToEpoch(s: string): number | null {
+  if (!s) return null;
+  const ms = new Date(s).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
 /** Discount % between original value and price (both tetri). */
 export function discountPct(originalValue: number, price: number): number {
   if (!originalValue || originalValue <= 0) return 0;

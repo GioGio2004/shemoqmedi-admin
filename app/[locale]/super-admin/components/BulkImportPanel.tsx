@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import {
   FileJson,
@@ -105,18 +105,18 @@ function OrgSelector({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full appearance-none bg-white/5 border border-white/10 text-white text-sm rounded-lg px-4 py-2.5 pr-10 focus:outline-none focus:border-orange-500/50 focus:ring-1 focus:ring-orange-500/30 transition-all cursor-pointer"
+        className="w-full cursor-pointer appearance-none rounded-v border border-v-line bg-v-bg px-4 py-2.5 pr-10 text-sm text-v-ink outline-none transition-colors focus:border-v-faint"
       >
-        <option value="" disabled className="bg-zinc-900">
+        <option value="" disabled>
           Select a workspace…
         </option>
         {orgs.map((org: any) => (
-          <option key={org._id} value={org.clerkId} className="bg-zinc-900">
+          <option key={org._id} value={org.clerkId}>
             {org.name}
           </option>
         ))}
       </select>
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-v-faint" />
     </div>
   );
 }
@@ -183,17 +183,11 @@ export function BulkImportPanel({ organizations }: { organizations: any[] }) {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-sm font-medium text-white">Bulk Menu Import</h1>
-          <p className="text-xs text-zinc-500 mt-0.5">
-            Paste a structured JSON payload to seed an entire menu in one operation.
-          </p>
-        </div>
+      {/* Template download */}
+      <div className="flex justify-end">
         <button
           onClick={handleDownloadSkeleton}
-          className="flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-all"
+          className="v-t-micro v-press flex shrink-0 items-center gap-1.5 rounded-v border border-v-line px-3 py-1.5 text-v-mut transition-colors hover:border-v-faint hover:text-v-ink"
         >
           <Download className="h-3.5 w-3.5" />
           Template JSON
@@ -202,9 +196,7 @@ export function BulkImportPanel({ organizations }: { organizations: any[] }) {
 
       {/* Org selector */}
       <div className="space-y-1.5">
-        <label className="text-[11px] font-semibold uppercase tracking-widest text-zinc-600">
-          Target Workspace
-        </label>
+        <label className="v-t-micro block text-v-faint">Target Workspace</label>
         <OrgSelector
           orgs={organizations}
           value={selectedOrgId}
@@ -214,35 +206,33 @@ export function BulkImportPanel({ organizations }: { organizations: any[] }) {
 
       {/* JSON textarea */}
       <div className="space-y-1.5">
-        <div className="flex items-center justify-between">
-          <label className="text-[11px] font-semibold uppercase tracking-widest text-zinc-600">
-            JSON Payload
-          </label>
+        <div className="flex items-center justify-between gap-2">
+          <label className="v-t-micro text-v-faint">JSON Payload</label>
           {parseResult && (
             <span
-              className={`text-[10px] font-medium tabular-nums ${
-                parseResult.ok ? "text-emerald-400" : "text-red-400"
+              className={`v-t-micro tabular-nums ${
+                parseResult.ok ? "text-v-accent" : "text-red-400"
               }`}
             >
               {parseResult.ok
-                ? `✓ ${parseResult.summary.categories} categories · ${parseResult.summary.items} items`
-                : `✗ ${parseResult.error}`}
+                ? `OK · ${parseResult.summary.categories} categories · ${parseResult.summary.items} items`
+                : "Invalid payload"}
             </span>
           )}
         </div>
 
         <div
-          className={`relative rounded-xl border transition-colors ${
+          className={`relative rounded-v border bg-v-bg transition-colors ${
             parseResult === null
-              ? "border-white/10"
+              ? "border-v-line"
               : parseResult.ok
-              ? "border-emerald-500/30"
-              : "border-red-500/30"
+              ? "border-v-accent/50"
+              : "border-red-500/40"
           }`}
         >
-          <div className="absolute top-3 left-3 flex items-center gap-1.5 pointer-events-none">
-            <FileJson className="h-3.5 w-3.5 text-zinc-600" />
-            <span className="text-[10px] font-mono text-zinc-600">JSON</span>
+          <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-1.5">
+            <FileJson className="h-3.5 w-3.5 text-v-faint" />
+            <span className="v-t-micro text-v-faint">JSON</span>
           </div>
           <textarea
             value={rawJson}
@@ -250,49 +240,42 @@ export function BulkImportPanel({ organizations }: { organizations: any[] }) {
             placeholder={`{\n  "categories": [\n    {\n      "name": { "en": "Hot Drinks", "ka": "ცხელი სასმელები", "ru": "Горячие напитки" },\n      "sortOrder": 0,\n      "items": [\n        {\n          "name": { "en": "Espresso", "ka": "ესპრესო", "ru": "Эспрессо" },\n          "price": 350,\n          "sortOrder": 0\n        }\n      ]\n    }\n  ]\n}`}
             rows={18}
             spellCheck={false}
-            className="w-full bg-transparent text-zinc-300 text-xs font-mono px-4 pt-10 pb-4 resize-none focus:outline-none placeholder:text-zinc-700 leading-relaxed"
+            className="w-full resize-none bg-transparent px-4 pb-4 pt-10 font-v-mono text-xs leading-relaxed text-v-mut outline-none placeholder:text-v-faint"
           />
         </div>
 
         {/* Parse error detail */}
         {parseResult && !parseResult.ok && (
-          <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-red-500/8 border border-red-500/20">
-            <AlertTriangle className="h-3.5 w-3.5 text-red-400 shrink-0 mt-0.5" />
-            <p className="text-xs text-red-300">{parseResult.error}</p>
+          <div className="flex items-start gap-2 rounded-v border border-red-500/30 px-3 py-2.5">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
+            <p className="text-xs text-red-400">{parseResult.error}</p>
           </div>
         )}
       </div>
 
       {/* Result banner */}
       {status === "success" && (
-        <div className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-          <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-          <p className="text-sm text-emerald-300 font-medium">{resultMessage}</p>
+        <div className="flex items-center gap-2.5 rounded-v border border-v-line bg-v-bg px-4 py-3">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-v-accent" />
+          <p className="text-sm text-v-ink">{resultMessage}</p>
         </div>
       )}
       {status === "error" && (
-        <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20">
-          <XCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
-          <p className="text-sm text-red-300">{resultMessage}</p>
+        <div className="flex items-start gap-2.5 rounded-v border border-red-500/30 px-4 py-3">
+          <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+          <p className="text-sm text-red-400">{resultMessage}</p>
         </div>
       )}
 
-      {/* Import button */}
+      {/* Import button — the ONE accent action on this surface */}
       <button
         onClick={handleImport}
         disabled={!canImport}
-        className={`
-          w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold
-          transition-all duration-200 relative overflow-hidden
-          ${canImport
-            ? "text-white cursor-pointer hover:opacity-90 active:scale-[0.99]"
-            : "text-zinc-600 cursor-not-allowed bg-white/5 border border-white/8"
-          }
-        `}
-        style={canImport ? {
-          background: "linear-gradient(135deg, #c2410c 0%, #ea580c 40%, #d97706 100%)",
-          boxShadow: "0 0 24px rgba(234,88,12,0.25)",
-        } : undefined}
+        className={`v-t-micro v-press flex w-full items-center justify-center gap-2 rounded-v py-3 transition-colors ${
+          canImport
+            ? "bg-v-accent text-v-accent-ink"
+            : "cursor-not-allowed border border-v-line bg-v-bg text-v-faint"
+        }`}
       >
         {status === "loading" ? (
           <>
@@ -308,10 +291,10 @@ export function BulkImportPanel({ organizations }: { organizations: any[] }) {
       </button>
 
       {/* Price convention note */}
-      <p className="text-[10px] text-zinc-600 text-center leading-relaxed">
-        Prices must be integers in the smallest currency unit.{" "}
-        <span className="font-mono">₾5.50 → 550</span>{" "}
-        &nbsp;|&nbsp; <span className="font-mono">₾12.00 → 1200</span>
+      <p className="v-t-micro text-center leading-relaxed text-v-faint">
+        Prices are integers in the smallest currency unit ·{" "}
+        <span className="font-v-mono normal-case">₾5.50 → 550</span>{" "}
+        · <span className="font-v-mono normal-case">₾12.00 → 1200</span>
       </p>
     </div>
   );

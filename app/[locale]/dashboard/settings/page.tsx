@@ -81,14 +81,14 @@ const FEATURE_META: { key: keyof Features; label: string; description: string; i
 
 function SectionHeader({ icon: Icon, title, badge }: { icon: React.ElementType; title: string; badge?: string }) {
   return (
-    <div className="flex items-center gap-3 mb-6">
-      <div className="h-8 w-8 rounded-lg bg-white/10 border border-white/20 flex items-center justify-center shrink-0">
-        <Icon className="h-4 w-4 text-white" />
+    <div className="mb-6 flex items-center gap-3 border-b border-v-line pb-3">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-v border border-v-line bg-white/[0.03]">
+        <Icon className="h-4 w-4 text-v-mut" />
       </div>
       <div>
-        <h2 className="text-white font-medium text-sm">{title}</h2>
+        <h2 className="text-sm font-medium text-v-ink">{title}</h2>
         {badge && (
-          <Badge variant="outline" className="text-[10px] text-zinc-500 border-white/10 bg-transparent mt-0.5 font-medium">
+          <Badge variant="outline" className="v-t-micro mt-0.5 rounded-v border-v-line bg-transparent text-v-faint">
             {badge}
           </Badge>
         )}
@@ -110,10 +110,10 @@ function FeatureToggle({
   return (
     <div
       className={cn(
-        "flex items-center justify-between p-4 rounded-xl border transition-all duration-200 cursor-pointer select-none",
+        "flex items-center justify-between p-4 rounded-v border transition-all duration-200 cursor-pointer select-none",
         enabled
-          ? "border-white/25 bg-white/[0.06]"
-          : "border-white/8 bg-white/[0.02] hover:bg-white/[0.04]"
+          ? "border-v-accent/40 bg-v-accent/[0.05]"
+          : "border-v-line bg-white/[0.02] hover:bg-white/[0.04]"
       )}
       onClick={() => onChange(!enabled)}
       role="switch"
@@ -121,22 +121,22 @@ function FeatureToggle({
     >
       <div className="flex items-center gap-3">
         <div className={cn(
-          "h-8 w-8 rounded-lg flex items-center justify-center shrink-0 transition-colors",
-          enabled ? "bg-white/15" : "bg-white/5"
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-v border transition-colors",
+          enabled ? "border-v-accent/40" : "border-v-line"
         )}>
-          <Icon className={cn("h-4 w-4 transition-colors", enabled ? "text-white" : "text-zinc-500")} />
+          <Icon className={cn("h-4 w-4 transition-colors", enabled ? "text-v-accent" : "text-v-faint")} />
         </div>
         <div>
-          <p className={cn("text-sm font-medium transition-colors", enabled ? "text-white" : "text-zinc-400")}>
+          <p className={cn("text-sm font-medium transition-colors", enabled ? "text-v-ink" : "text-v-mut")}>
             {feature.label}
           </p>
-          <p className="text-xs text-zinc-500 mt-0.5">{feature.description}</p>
+          <p className="mt-0.5 text-xs text-v-faint">{feature.description}</p>
         </div>
       </div>
       <div className="shrink-0 ml-4">
         {enabled
-          ? <ToggleRight className="h-5 w-5 text-white" />
-          : <ToggleLeft className="h-5 w-5 text-zinc-600" />}
+          ? <ToggleRight className="h-5 w-5 text-v-accent" />
+          : <ToggleLeft className="h-5 w-5 text-v-faint" />}
       </div>
     </div>
   );
@@ -146,11 +146,11 @@ function LoadingSkeleton() {
   return (
     <div className="space-y-6">
       {[1, 2].map((i) => (
-        <div key={i} className="bg-[#09090b] border border-white/10 rounded-2xl p-6 animate-pulse">
-          <div className="h-4 w-32 bg-white/10 rounded mb-6" />
+        <div key={i} className="animate-pulse rounded-v border border-v-line bg-v-bg-raise p-6">
+          <div className="mb-6 h-4 w-32 rounded-v bg-white/[0.06]" />
           <div className="space-y-3">
             {[1, 2, 3].map((j) => (
-              <div key={j} className="h-14 bg-white/5 rounded-xl" />
+              <div key={j} className="h-14 rounded-v bg-white/[0.03]" />
             ))}
           </div>
         </div>
@@ -220,10 +220,10 @@ export default function SettingsPage() {
   // ── Guards ────────────────────────────────────────────────────────────────
   if (!isLoaded || settings === undefined) {
     return (
-      <div className="space-y-6 text-zinc-50 font-sans">
+      <div className="space-y-6 font-sans text-v-ink">
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both">
-          <h1 className="text-3xl font-medium tracking-tight text-white">Settings</h1>
-          <p className="text-sm text-zinc-400 mt-1">Loading workspace configuration…</p>
+          <h1 className="font-v-display text-3xl font-medium tracking-tight text-v-ink">Settings</h1>
+          <p className="mt-1 text-sm text-v-mut">Loading workspace configuration…</p>
         </div>
         <LoadingSkeleton />
       </div>
@@ -233,29 +233,29 @@ export default function SettingsPage() {
   if (!orgId) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
-        <Settings className="h-8 w-8 text-zinc-600" />
-        <p className="font-medium text-white">No workspace selected</p>
-        <p className="text-sm text-zinc-400 max-w-xs">Select a workspace from the sidebar to configure its settings.</p>
+        <Settings className="h-8 w-8 text-v-faint" />
+        <p className="font-medium text-v-ink">No workspace selected</p>
+        <p className="max-w-xs text-sm text-v-mut">Select a workspace from the sidebar to configure its settings.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 text-zinc-50 font-sans max-w-2xl">
+    <div className="max-w-2xl space-y-6 font-sans text-v-ink">
       {/* Page header */}
       <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both">
         <div className="flex items-center gap-2 mb-1">
-          <Settings className="h-4 w-4 text-white" />
-          <h1 className="text-3xl font-medium tracking-tight text-white">Settings</h1>
+          <Settings className="h-4 w-4 text-v-mut" />
+          <h1 className="font-v-display text-2xl font-medium tracking-tight text-v-ink sm:text-3xl">Settings</h1>
         </div>
-        <p className="text-sm text-zinc-400">
+        <p className="text-sm text-v-mut">
           Configure the Liquid UI and feature entitlements for{" "}
-          <span className="text-white font-medium">{organization?.name}</span>.
+          <span className="font-medium text-v-ink">{organization?.name}</span>.
         </p>
       </div>
 
       {/* ── Section A: Theme Settings ───────────────────────────────────────── */}
-      <Card className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both bg-[#09090b] border-white/10 shadow-none rounded-2xl">
+      <Card className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both rounded-v border-v-line bg-v-bg-raise shadow-none">
         <CardHeader className="px-6 pt-6 pb-0">
           <SectionHeader icon={Palette} title="Liquid UI Engine" badge="Customer-facing PWA" />
         </CardHeader>
@@ -263,9 +263,9 @@ export default function SettingsPage() {
 
           {/* Primary Color */}
           <div className="space-y-2">
-            <Label className="text-zinc-300 text-xs font-medium uppercase tracking-widest">Primary Color</Label>
+            <Label className="v-t-micro text-v-faint">Primary Color</Label>
             <div className="flex items-center gap-3">
-              <div className="relative h-10 w-10 rounded-lg border border-white/20 overflow-hidden shrink-0">
+              <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-v border border-v-line">
                 <input
                   type="color"
                   value={theme.primaryColor}
@@ -274,7 +274,7 @@ export default function SettingsPage() {
                   id="color-picker"
                 />
                 <div
-                  className="w-full h-full rounded-lg"
+                  className="h-full w-full rounded-v"
                   style={{ backgroundColor: theme.primaryColor }}
                 />
               </div>
@@ -282,14 +282,14 @@ export default function SettingsPage() {
                 value={theme.primaryColor}
                 onChange={(e) => setTheme((t) => ({ ...t, primaryColor: e.target.value }))}
                 placeholder="#ffffff"
-                className="flex-1 bg-white/5 border-white/20 text-white placeholder:text-zinc-600 focus-visible:ring-white/30 font-mono text-sm"
+                className="flex-1 rounded-v border-v-line bg-white/[0.03] font-v-mono text-sm text-v-ink placeholder:text-v-faint focus-visible:border-v-accent focus-visible:ring-0"
               />
             </div>
           </div>
 
           {/* Font Family */}
           <div className="space-y-2">
-            <Label className="text-zinc-300 text-xs font-medium uppercase tracking-widest">Font Family</Label>
+            <Label className="v-t-micro text-v-faint">Font Family</Label>
             <div className="grid grid-cols-2 gap-2">
               {FONT_OPTIONS.map((opt) => (
                 <button
@@ -297,15 +297,15 @@ export default function SettingsPage() {
                   type="button"
                   onClick={() => setTheme((t) => ({ ...t, fontFamily: opt.value }))}
                   className={cn(
-                    "flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all",
+                    "flex items-center gap-3 rounded-v border px-4 py-3 text-left transition-all",
                     theme.fontFamily === opt.value
-                      ? "border-white/30 bg-white/10 text-white"
-                      : "border-white/10 bg-white/[0.02] text-zinc-400 hover:text-white hover:bg-white/5"
+                      ? "border-v-accent/50 bg-v-accent/[0.06] text-v-ink"
+                      : "border-v-line bg-white/[0.02] text-v-mut hover:bg-white/[0.04] hover:text-v-ink"
                   )}
                 >
                   <span className="text-lg font-medium w-7" style={{ fontFamily: opt.value }}>{opt.preview}</span>
                   <span className="text-xs font-medium">{opt.label}</span>
-                  {theme.fontFamily === opt.value && <Check className="h-3 w-3 ml-auto" />}
+                  {theme.fontFamily === opt.value && <Check className="ml-auto h-3 w-3 text-v-accent" />}
                 </button>
               ))}
             </div>
@@ -313,7 +313,7 @@ export default function SettingsPage() {
 
           {/* Button Radius */}
           <div className="space-y-2">
-            <Label className="text-zinc-300 text-xs font-medium uppercase tracking-widest">Button Radius</Label>
+            <Label className="v-t-micro text-v-faint">Button Radius</Label>
             <div className="flex gap-2">
               {RADIUS_OPTIONS.map((opt) => (
                 <button
@@ -324,8 +324,8 @@ export default function SettingsPage() {
                     "flex-1 py-2.5 text-xs font-medium border transition-all",
                     opt.value === "0px" ? "rounded-none" : opt.value === "9999px" ? "rounded-full" : "rounded-lg",
                     theme.buttonRadius === opt.value
-                      ? "border-white/30 bg-white/10 text-white"
-                      : "border-white/10 bg-white/[0.02] text-zinc-400 hover:text-white hover:bg-white/5"
+                      ? "border-v-accent/50 bg-v-accent/[0.06] text-v-ink"
+                      : "border-v-line bg-white/[0.02] text-v-mut hover:bg-white/[0.04] hover:text-v-ink"
                   )}
                 >
                   {opt.label}
@@ -335,8 +335,8 @@ export default function SettingsPage() {
           </div>
 
           {/* Preview pill */}
-          <div className="rounded-xl border border-white/5 bg-white/[0.02] p-4 flex items-center gap-4">
-            <p className="text-xs text-zinc-500 font-medium shrink-0">Preview</p>
+          <div className="flex items-center gap-4 rounded-v border border-v-line bg-white/[0.02] p-4">
+            <p className="v-t-micro shrink-0 text-v-faint">Preview</p>
             <button
               className="px-4 py-2 text-sm font-medium text-black transition-all"
               style={{
@@ -354,12 +354,12 @@ export default function SettingsPage() {
             <Button
               onClick={handleSaveTheme}
               disabled={themeSaving}
-              className="bg-white text-black hover:bg-zinc-200 font-medium rounded-lg shadow-none min-w-[120px]"
+              className="v-press min-w-[120px] rounded-v bg-v-accent font-semibold text-v-accent-ink shadow-none transition-[filter] hover:bg-v-accent hover:brightness-95"
             >
               {themeSaving ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : themeSaved ? (
-                <Check className="h-4 w-4 mr-2 text-black" />
+                <Check className="mr-2 h-4 w-4 text-v-accent-ink" />
               ) : null}
               {themeSaved ? "Saved!" : "Save Theme"}
             </Button>
@@ -368,7 +368,7 @@ export default function SettingsPage() {
       </Card>
 
       {/* ── Section B: Feature Entitlements ────────────────────────────────── */}
-      <Card className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200 fill-mode-both bg-[#09090b] border-white/10 shadow-none rounded-2xl">
+      <Card className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200 fill-mode-both rounded-v border-v-line bg-v-bg-raise shadow-none">
         <CardHeader className="px-6 pt-6 pb-0">
           <SectionHeader
             icon={Settings}
@@ -391,12 +391,12 @@ export default function SettingsPage() {
             <Button
               onClick={handleSaveFeatures}
               disabled={featuresSaving}
-              className="bg-white text-black hover:bg-zinc-200 font-medium rounded-lg shadow-none min-w-[140px]"
+              className="v-press min-w-[140px] rounded-v bg-v-accent font-semibold text-v-accent-ink shadow-none transition-[filter] hover:bg-v-accent hover:brightness-95"
             >
               {featuresSaving ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : featuresSaved ? (
-                <Check className="h-4 w-4 mr-2 text-black" />
+                <Check className="mr-2 h-4 w-4 text-v-accent-ink" />
               ) : null}
               {featuresSaved ? "Updated!" : "Update Features"}
             </Button>

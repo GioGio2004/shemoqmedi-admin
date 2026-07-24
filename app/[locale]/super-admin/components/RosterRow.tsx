@@ -4,8 +4,16 @@ import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, LogIn, Mail, UserCircle, Loader2 } from "lucide-react";
+import {
+  ArrowRightLeft,
+  ChevronDown,
+  LogIn,
+  Mail,
+  UserCircle,
+  Loader2,
+} from "lucide-react";
 import { impersonateUserAction } from "../actions";
+import { useSwitchIntoOrg } from "./useSwitchIntoOrg";
 import { toast } from "sonner";
 
 // ── Feature metadata ──────────────────────────────────────────────────────────
@@ -19,15 +27,15 @@ const FEATURES = [
 
 type FeatureKey = (typeof FEATURES)[number]["key"];
 
-// ── Role badge color ──────────────────────────────────────────────────────────
+// ── Role badge tone — quiet hierarchy, no accent (not a live state) ───────────
 function roleClass(role: string) {
   const r = role?.replace("org:", "") || "";
-  if (r === "owner") return "text-white bg-white/10 border-white/20";
-  if (r === "manager") return "text-zinc-300 bg-white/5 border-white/10";
-  return "text-zinc-500 bg-transparent border-white/8";
+  if (r === "owner") return "text-v-ink border-v-faint";
+  if (r === "manager") return "text-v-mut border-v-line";
+  return "text-v-faint border-v-line";
 }
 
-// ── Toggle switch ─────────────────────────────────────────────────────────────
+// ── Toggle switch — accent = feature live ─────────────────────────────────────
 function Toggle({
   enabled,
   onChange,
@@ -41,12 +49,14 @@ function Toggle({
     <button
       onClick={(e) => { e.stopPropagation(); onChange(); }}
       disabled={disabled}
-      className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none disabled:opacity-40 ${
-        enabled ? "bg-white" : "bg-white/15"
+      role="switch"
+      aria-checked={enabled}
+      className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-v transition-colors focus:outline-none disabled:opacity-40 ${
+        enabled ? "bg-v-accent" : "bg-v-line"
       }`}
     >
       <span
-        className={`inline-block h-3 w-3 transform rounded-full bg-black transition-transform duration-200 ${
+        className={`inline-block h-3 w-3 transform rounded-[1px] bg-v-bg transition-transform ${
           enabled ? "translate-x-3.5" : "translate-x-0.5"
         }`}
       />
@@ -83,24 +93,24 @@ function MemberCard({
   const currentRole = member.customRole || member.membershipRole || "";
 
   return (
-    <div className="p-3 rounded-lg border border-white/8 bg-white/[0.02] space-y-2.5">
+    <div className="space-y-2.5 rounded-v border border-v-line bg-v-bg p-3">
       <div className="flex items-center gap-2.5">
         {member.profilePicture ? (
           <img
             src={member.profilePicture}
             alt={member.name}
-            className="h-8 w-8 rounded-full object-cover border border-white/10 shrink-0"
+            className="h-8 w-8 shrink-0 rounded-v border border-v-line object-cover"
           />
         ) : (
-          <div className="h-8 w-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
-            <UserCircle className="h-4 w-4 text-zinc-600" />
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-v border border-v-line bg-v-bg-raise">
+            <UserCircle className="h-4 w-4 text-v-faint" />
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-white truncate">
+          <p className="truncate text-xs text-v-ink">
             {member.name} {member.lastname}
           </p>
-          <div className="flex items-center gap-1 mt-0.5 text-[10px] text-zinc-500">
+          <div className="mt-0.5 flex items-center gap-1 text-[10px] text-v-faint">
             <Mail className="h-2.5 w-2.5 shrink-0" />
             <span className="truncate">{member.email}</span>
           </div>
@@ -124,7 +134,7 @@ function MemberCard({
             }
           }}
           disabled={updatingRole}
-          className={`text-[10px] uppercase font-mono tracking-wider px-2 py-1 rounded-md border appearance-none cursor-pointer focus:outline-none transition-all disabled:opacity-50 ${roleClass(currentRole)}`}
+          className={`v-t-micro cursor-pointer appearance-none rounded-v border bg-v-bg px-2 py-1 transition-colors focus:outline-none disabled:opacity-50 ${roleClass(currentRole)}`}
           style={{ textAlignLast: "center" }}
         >
           <option value="" disabled>Role</option>
@@ -138,7 +148,7 @@ function MemberCard({
       <button
         onClick={(e) => { e.stopPropagation(); handleImpersonate(); }}
         disabled={loading}
-        className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[11px] font-medium text-zinc-400 hover:text-white hover:bg-white/5 border border-white/8 hover:border-white/15 transition-all"
+        className="v-t-micro v-press flex w-full items-center justify-center gap-1.5 rounded-v border border-v-line py-1.5 text-v-mut transition-colors hover:border-v-faint hover:text-v-ink"
       >
         {loading ? (
           <Loader2 className="h-3 w-3 animate-spin" />
@@ -156,6 +166,8 @@ export function RosterRow({ org }: { org: any }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [savingFeature, setSavingFeature] = useState<FeatureKey | null>(null);
   const updateFeatures = useMutation(api.organizations.updateFeatures);
+  const { switchIntoOrg, switchingOrgId } = useSwitchIntoOrg();
+  const isSwitching = switchingOrgId === org.clerkId;
 
   // Compute current feature state from the live org prop
   const features: Record<FeatureKey, boolean> = {
@@ -185,25 +197,42 @@ export function RosterRow({ org }: { org: any }) {
     <>
       {/* ── Org row ── */}
       <div
-        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-white/[0.02] transition-colors select-none"
+        className="flex cursor-pointer select-none items-center gap-3 px-4 py-3 transition-colors hover:bg-v-bg"
         onClick={() => setIsExpanded((v) => !v)}
       >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/5 border border-white/10 text-xs font-bold text-white">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-v border border-v-line bg-v-bg font-v-mono text-xs text-v-ink">
           {org.name.charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-white truncate">{org.name}</p>
+          <p className="truncate text-sm text-v-ink">{org.name}</p>
           {org.slug && (
-            <p className="text-[10px] font-mono text-zinc-600 mt-0.5 truncate">/{org.slug}</p>
+            <p className="mt-0.5 truncate font-v-mono text-[10px] text-v-faint">/{org.slug}</p>
           )}
         </div>
-        <span className="text-xs text-zinc-500 tabular-nums shrink-0">
+        <span className="shrink-0 font-v-mono text-xs tabular-nums text-v-mut">
           {org.members?.length ?? 0}
         </span>
+        {/* Switch — join as org:admin (idempotent), setActive, land in /dashboard */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            switchIntoOrg(org.clerkId, org.name);
+          }}
+          disabled={switchingOrgId !== null}
+          title={`Switch into ${org.name}`}
+          className="v-t-micro v-press flex shrink-0 items-center gap-1.5 rounded-v border border-v-line px-2.5 py-1.5 text-v-mut transition-colors hover:border-v-faint hover:text-v-ink disabled:opacity-40"
+        >
+          {isSwitching ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <ArrowRightLeft className="h-3 w-3" />
+          )}
+          <span className="hidden sm:inline">Switch</span>
+        </button>
         <motion.div
           animate={{ rotate: isExpanded ? 180 : 0 }}
           transition={{ duration: 0.2, ease: "easeInOut" }}
-          className="shrink-0 text-zinc-600"
+          className="shrink-0 text-v-faint"
         >
           <ChevronDown className="h-3.5 w-3.5" />
         </motion.div>
@@ -219,14 +248,12 @@ export function RosterRow({ org }: { org: any }) {
             transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
             className="overflow-hidden"
           >
-            <div className="px-4 pb-4 pt-2 space-y-4 border-t border-white/8 bg-white/[0.01]">
+            <div className="space-y-4 border-t border-v-line bg-v-bg px-4 pb-4 pt-3">
 
               {/* Members grid */}
               {org.members && org.members.length > 0 ? (
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600 mb-2">
-                    Staff
-                  </p>
+                  <p className="v-t-micro mb-2 text-v-faint">Staff</p>
                   <div className="grid gap-2 sm:grid-cols-2">
                     {org.members.map((member: any) => (
                       <MemberCard
@@ -238,24 +265,19 @@ export function RosterRow({ org }: { org: any }) {
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-zinc-600">No members in this workspace.</p>
+                <p className="text-xs text-v-faint">No members in this workspace.</p>
               )}
 
               {/* Features */}
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600 mb-2">
-                  Features
-                </p>
-                <div className="grid gap-px grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 border border-white/8 rounded-lg overflow-hidden">
-                  {FEATURES.map((feat, idx) => (
+                <p className="v-t-micro mb-2 text-v-faint">Features</p>
+                <div className="grid grid-cols-1 gap-px overflow-hidden rounded-v border border-v-line bg-v-line sm:grid-cols-2 lg:grid-cols-3">
+                  {FEATURES.map((feat) => (
                     <div
                       key={feat.key}
-                      className={`flex items-center justify-between px-3 py-2.5 bg-black hover:bg-white/[0.02] transition-colors ${
-                        idx !== FEATURES.length - 1 ? "border-b border-white/8 sm:border-b-0 sm:border-r" : ""
-                      }`}
-                      style={{ borderColor: "rgba(255,255,255,0.06)" }}
+                      className="flex items-center justify-between bg-v-bg-raise px-3 py-2.5"
                     >
-                      <span className="text-xs text-zinc-300">{feat.label}</span>
+                      <span className="text-xs text-v-mut">{feat.label}</span>
                       <Toggle
                         enabled={features[feat.key]}
                         onChange={() => toggleFeature(feat.key)}
@@ -263,6 +285,8 @@ export function RosterRow({ org }: { org: any }) {
                       />
                     </div>
                   ))}
+                  {/* Filler keeps the hairline grid flush (5 items / 2-3 cols) */}
+                  <div className="hidden bg-v-bg-raise sm:block" aria-hidden />
                 </div>
               </div>
 

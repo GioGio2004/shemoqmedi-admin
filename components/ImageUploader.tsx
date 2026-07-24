@@ -29,6 +29,8 @@ function slugify(str: string): string {
 export interface ImageUploaderProps {
   itemName: string;
   cafeName: string;
+  /** ImageKit folder for the upload. Defaults to the menu-item folder. */
+  folder?: string;
   /** Called with the full UploadResponse once the upload succeeds. */
   onSuccess?: (response: UploadResponse) => void;
 }
@@ -38,6 +40,7 @@ export interface ImageUploaderProps {
 export function ImageUploader({
   itemName,
   cafeName,
+  folder = "/menu-items",
   onSuccess,
 }: ImageUploaderProps) {
   const [progress, setProgress] = useState<number>(0);
@@ -73,7 +76,7 @@ export function ImageUploader({
         signature,
         publicKey,
         fileName,
-        folder: "/menu-items",
+        folder,
         useUniqueFileName: true, // true ensures fresh URL and bypasses CDN cache
         overwriteFile: false, // no need to overwrite since we use unique names
         // Removed urlEndpoint here to satisfy TS UploadOptions

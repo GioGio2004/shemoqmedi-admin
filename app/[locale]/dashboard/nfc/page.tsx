@@ -51,12 +51,12 @@ const EMPTY_HUB: HubForm = {
 function GlassInput({ label, value, onChange, placeholder, type = "text", icon }: any) {
   return (
     <div className="space-y-1.5">
-      <label className="text-[10px] uppercase tracking-wider font-bold text-white/40">{label}</label>
+      <label className="v-t-micro text-v-faint">{label}</label>
       <div className="relative">
-        {icon && <div className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30">{icon}</div>}
+        {icon && <div className="absolute left-3 top-1/2 -translate-y-1/2 text-v-faint">{icon}</div>}
         <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
           style={{ fontSize: "16px" }}
-          className={`w-full bg-white/5 border border-white/10 rounded-xl py-3 text-base text-white placeholder:text-white/20 focus:outline-none focus:border-white/30 transition-colors ${icon ? "pl-10 pr-4" : "px-4"}`} />
+          className={`w-full rounded-v border border-v-line bg-white/[0.03] py-3 text-base text-v-ink placeholder:text-v-faint transition-colors focus:border-v-accent focus:outline-none ${icon ? "pl-10 pr-4" : "px-4"}`} />
       </div>
     </div>
   );
@@ -170,8 +170,8 @@ export default function NfcDashboard() {
 
   if (!isLoaded || allTags === undefined || orgSettings === undefined) {
     return (
-      <div className="min-h-screen bg-[#0a0a0a] flex flex-col items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-foreground mb-4" />
+      <div className="flex min-h-screen flex-col items-center justify-center bg-v-bg">
+        <Loader2 className="mb-4 h-8 w-8 animate-spin text-v-faint" />
       </div>
     );
   }
@@ -180,25 +180,25 @@ export default function NfcDashboard() {
   const activeTags = (allTags ?? []).filter((t: any) => t.isActive).length;
 
   return (
-    <div className="min-h-[100dvh] bg-[#111111] text-foreground flex flex-col font-sans selection:bg-primary/30">
+    <div className="min-h-[100dvh] bg-v-bg text-v-ink flex flex-col font-sans">
       <Toaster position="bottom-right" theme="dark" richColors />
 
       {/* ── DESKTOP TOP NAV / HEADER ── */}
-      <div className="sticky top-0 z-40 bg-[#161616]/90 backdrop-blur-xl border-b border-white/5 flex-shrink-0">
-        <div className="max-w-2xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex font-black tracking-widest text-lg items-center gap-2">
-            <Nfc className="w-5 h-5 text-emerald-500" />
-            NFC FLEET
+      <div className="sticky top-0 z-40 flex-shrink-0 border-b border-v-line bg-v-bg">
+        <div className="mx-auto flex h-16 max-w-2xl items-center justify-between px-4">
+          <div className="v-t-micro flex items-center gap-2 text-v-ink">
+            <Nfc className="w-5 h-5 text-v-accent" />
+            NFC Fleet
           </div>
           <div className="flex items-center gap-2">
             <LanguageSwitcher />
-            <Activity className="w-5 h-5 text-white/50 ml-1" />
+            <Activity className="ml-1 h-5 w-5 text-v-faint" />
           </div>
         </div>
       </div>
 
       {/* ── FOOTER TAB NAV (MOBILE) ── */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#151515] border-t border-white/5 pb-[env(safe-area-inset-bottom,0px)]">
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-v-line bg-v-bg pb-[env(safe-area-inset-bottom,0px)]">
         <div className="max-w-2xl mx-auto px-2 py-2 flex items-center justify-between">
           {[
             { id: "fleet", label: "Fleet", icon: Nfc },
@@ -210,11 +210,11 @@ export default function NfcDashboard() {
             const Icon = tab.icon;
             return (
               <button key={tab.id} onClick={() => setActiveTab(tab.id as any)}
-                className="flex-1 flex flex-col items-center justify-center gap-1.5 py-1 transition-all group">
-                <div className={`w-12 h-8 rounded-full flex items-center justify-center transition-all ${isActive ? 'bg-white/10' : 'group-hover:bg-white/5'}`}>
-                  <Icon className={`w-5 h-5 transition-colors ${isActive ? 'text-white' : 'text-white/40 group-hover:text-white/70'}`} />
+                className="v-press group flex min-w-0 flex-1 flex-col items-center justify-center gap-1.5 py-1 transition-all">
+                <div className="flex h-8 w-12 items-center justify-center transition-all">
+                  <Icon className={`w-5 h-5 transition-colors ${isActive ? 'text-v-accent' : 'text-v-faint group-hover:text-v-mut'}`} />
                 </div>
-                <span className={`text-[9px] font-black tracking-widest transition-colors uppercase ${isActive ? 'text-white' : 'text-white/40'}`}>
+                <span className={`max-w-full truncate font-v-mono text-[9px] uppercase tracking-[0.06em] transition-colors ${isActive ? 'text-v-accent' : 'text-v-faint'}`}>
                   {tab.label}
                 </span>
               </button>
@@ -226,8 +226,8 @@ export default function NfcDashboard() {
       {/* ── MAIN LAYOUT ── */}
       <div className="flex-1 overflow-hidden flex max-w-5xl mx-auto w-full">
         {/* DESKTOP SIDEBAR */}
-        <div className="hidden md:flex flex-col w-56 pt-8 pr-6 border-r border-white/5 mr-6 h-full overflow-y-auto">
-          <div className="space-y-2">
+        <div className="hidden md:flex flex-col w-56 pt-8 pr-6 border-r border-v-line mr-6 h-full overflow-y-auto">
+          <div className="space-y-1">
             {[
               { id: "fleet", label: "Fleet & Tables", icon: Nfc },
               { id: "config", label: "Global Settings", icon: Store },
@@ -238,10 +238,11 @@ export default function NfcDashboard() {
               const Icon = tab.icon;
               return (
                 <button key={tab.id} onClick={() => setActiveTab(tab.id as any)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all font-bold tracking-wide
-                    ${isActive ? 'bg-white/10 text-white' : 'text-white/40 hover:bg-white/5 hover:text-white/70'}`}>
-                  <Icon className="w-5 h-5" />
+                  className={`v-t-micro v-press w-full flex items-center gap-3 px-4 py-3 rounded-v transition-colors
+                    ${isActive ? 'text-v-accent' : 'text-v-mut hover:bg-white/[0.04] hover:text-v-ink'}`}>
+                  <Icon className="h-4 w-4" />
                   {tab.label}
+                  {isActive && <span className="ml-auto h-1 w-1 rounded-full bg-v-accent" />}
                 </button>
               );
             })}
@@ -255,29 +256,29 @@ export default function NfcDashboard() {
             {/* ════ FLEET TAB ════ */}
             {activeTab === "fleet" && (
               <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
-                <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-2xl font-black text-white tracking-tight">Active Chips</h2>
-                  <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full">{activeTags} Active</span>
+                <div className="mb-2 flex items-center justify-between border-b border-v-line pb-2">
+                  <h2 className="v-t-micro text-v-mut">01 — Active chips</h2>
+                  <span className="v-t-micro rounded-full border border-v-accent/40 px-3 py-1 tabular-nums text-v-accent">{activeTags} Active</span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 mb-6">
-                  <div className="bg-[#171717] border border-white/5 rounded-3xl p-5 flex flex-col justify-center">
-                    <h4 className="text-[10px] font-bold text-white/50 uppercase tracking-widest mb-1">Total Assigned</h4>
-                    <span className="text-3xl font-black tracking-tighter text-white">{allTags.length}</span>
+                  <div className="flex flex-col justify-center rounded-v border border-v-line bg-v-bg-raise p-5">
+                    <h4 className="v-t-micro mb-1 text-v-faint">Total Assigned</h4>
+                    <span className="font-v-display text-3xl font-medium tabular-nums tracking-tight text-v-ink">{allTags.length}</span>
                   </div>
-                  <div className="bg-[#171717] border border-white/5 rounded-3xl p-5 flex flex-col justify-center">
-                    <h4 className="text-[10px] font-bold text-white/50 uppercase tracking-widest mb-1">Fleet Taps</h4>
-                    <span className="text-3xl font-black tracking-tighter text-white">{totalTaps}</span>
+                  <div className="flex flex-col justify-center rounded-v border border-v-line bg-v-bg-raise p-5">
+                    <h4 className="v-t-micro mb-1 text-v-faint">Fleet Taps</h4>
+                    <span className="font-v-display text-3xl font-medium tabular-nums tracking-tight text-v-ink">{totalTaps}</span>
                   </div>
                 </div>
 
                 {allTags.length === 0 ? (
-                  <div className="text-center py-16 px-6 bg-[#171717] border border-white/5 rounded-3xl">
-                    <div className="w-16 h-16 mx-auto bg-white/5 rounded-full flex items-center justify-center mb-4">
-                      <Nfc className="w-8 h-8 text-white/30" />
+                  <div className="rounded-v border border-v-line bg-v-bg-raise px-6 py-16 text-center">
+                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-v border border-v-line">
+                      <Nfc className="h-8 w-8 text-v-faint" />
                     </div>
-                    <h3 className="text-lg font-bold text-white mb-2">No Chips Assigned</h3>
-                    <p className="text-sm text-white/50">Contact Shemoqmedi to provision hardware for your cafe.</p>
+                    <h3 className="mb-2 text-lg font-medium text-v-ink">No Chips Assigned</h3>
+                    <p className="text-sm text-v-mut">Contact Shemoqmedi to provision hardware for your cafe.</p>
                   </div>
                 ) : (
                   <div className="grid gap-4">
@@ -286,12 +287,12 @@ export default function NfcDashboard() {
                       const tapUrl = typeof window !== "undefined" ? `${window.location.origin}/t/${tag.volooTagsUUID}` : `/t/${tag.volooTagsUUID}`;
 
                       return (
-                        <div key={tag._id} className="relative w-full bg-[#171717] border border-white/10 rounded-[24px] overflow-hidden group hover:border-emerald-500/30 transition-colors shadow-lg">
+                        <div key={tag._id} className="relative w-full overflow-hidden rounded-v border border-v-line bg-v-bg-raise transition-colors group hover:border-v-accent/30">
                           <div className="p-5 flex flex-col gap-3">
                             {/* Header */}
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-3">
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center border ${tag.isActive ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-500' : 'bg-red-500/10 border-red-500/20 text-red-500'}`}>
+                                <div className={`flex h-10 w-10 items-center justify-center rounded-full border ${tag.isActive ? 'border-v-accent/40 bg-v-accent/10 text-v-accent' : 'border-red-400/25 bg-red-400/10 text-red-400'}`}>
                                   <Nfc className="w-5 h-5" />
                                 </div>
                                 <div>
@@ -303,40 +304,40 @@ export default function NfcDashboard() {
                                         onChange={e => setEditTableName(e.target.value)}
                                         onKeyDown={e => e.key === "Enter" && saveTableRename(tag._id)}
                                         placeholder="Table name..."
-                                        className="bg-black border border-white/10 rounded px-2 py-1 text-sm text-white w-32 outline-none focus:border-white/30"
+                                        className="w-32 rounded-v border border-v-line bg-v-bg px-2 py-1 text-sm text-v-ink outline-none focus:border-v-accent"
                                       />
-                                      <button onClick={() => saveTableRename(tag._id)} className="text-emerald-400 hover:text-emerald-300"><CheckCheck className="w-4 h-4" /></button>
-                                      <button onClick={() => setEditingTableId(null)} className="text-white/40 hover:text-white"><X className="w-4 h-4" /></button>
+                                      <button onClick={() => saveTableRename(tag._id)} className="text-v-accent hover:brightness-110"><CheckCheck className="w-4 h-4" /></button>
+                                      <button onClick={() => setEditingTableId(null)} className="text-v-faint hover:text-v-ink"><X className="w-4 h-4" /></button>
                                     </div>
                                   ) : (
                                     <div className="flex items-center gap-2 group/edit cursor-pointer" onClick={() => { setEditingTableId(tag._id); setEditTableName(tag.tableName || ""); }}>
-                                      <h3 className="text-lg font-bold text-white tracking-tight">{tag.tableName || `Chip ${i + 1}`}</h3>
-                                      <Edit3 className="w-3 h-3 text-white/20 group-hover/edit:text-white/80 transition-colors" />
+                                      <h3 className="text-lg font-medium tracking-tight text-v-ink">{tag.tableName || `Chip ${i + 1}`}</h3>
+                                      <Edit3 className="w-3 h-3 text-v-faint group-hover/edit:text-v-ink transition-colors" />
                                     </div>
                                   )}
-                                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400/80 mt-0.5">
+                                  <p className="v-t-micro mt-0.5 tabular-nums text-v-mut">
                                     {tag.tapCount} Taps
                                   </p>
                                 </div>
                               </div>
-                              <span className="text-[10px] uppercase font-bold text-white/30 bg-black/50 px-2 py-1 rounded-lg">
+                              <span className={`v-t-micro rounded-v border px-2 py-1 ${tag.isActive ? 'border-v-accent/40 text-v-accent' : 'border-v-line text-v-faint'}`}>
                                 {tag.isActive ? "Online" : "Offline"}
                               </span>
                             </div>
 
                             {/* UUID & Tap Info */}
-                            <div className="pt-3 border-t border-white/5 flex flex-col gap-2">
-                              <div className="flex items-center gap-2 bg-black/40 px-3 py-2 rounded-xl">
-                                <span className="text-[10px] uppercase text-white/40 font-bold shrink-0">UUID</span>
-                                <code className="text-xs font-mono text-white/70 flex-1 truncate">{tag.volooTagsUUID}</code>
-                                <button onClick={() => { navigator.clipboard.writeText(tag.volooTagsUUID); toast.success("UUID Copied"); }} className="text-white/30 hover:text-white"><Copy className="w-3.5 h-3.5" /></button>
+                            <div className="pt-3 border-t border-v-line flex flex-col gap-2">
+                              <div className="flex items-center gap-2 rounded-v border border-v-line bg-v-bg px-3 py-2">
+                                <span className="v-t-micro shrink-0 text-v-faint">UUID</span>
+                                <code className="flex-1 truncate font-v-mono text-xs text-v-mut">{tag.volooTagsUUID}</code>
+                                <button onClick={() => { navigator.clipboard.writeText(tag.volooTagsUUID); toast.success("UUID Copied"); }} className="text-v-faint hover:text-v-ink"><Copy className="w-3.5 h-3.5" /></button>
                               </div>
                               <div className="flex items-center gap-2 px-1">
-                                <a href={tapUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-400 hover:underline flex items-center gap-1">
+                                <a href={tapUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-v-accent hover:underline">
                                   Test Tap <ExternalLink className="w-3 h-3" />
                                 </a>
-                                <span className="text-white/20">•</span>
-                                <button onClick={() => window.open(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&format=png&margin=12&data=${encodeURIComponent(tapUrl)}`, "_blank")} className="text-xs text-white/50 hover:text-white flex items-center gap-1">
+                                <span className="text-v-faint">•</span>
+                                <button onClick={() => window.open(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&format=png&margin=12&data=${encodeURIComponent(tapUrl)}`, "_blank")} className="flex items-center gap-1 text-xs text-v-mut hover:text-v-ink">
                                   View QR <ScanLine className="w-3 h-3" />
                                 </button>
                               </div>
@@ -353,13 +354,13 @@ export default function NfcDashboard() {
             {/* ════ CONFIG TAB (Global Settings) ════ */}
             {activeTab === "config" && (
               <div className="space-y-8 animate-in fade-in zoom-in-95 duration-300">
-                <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-2xl font-black text-white tracking-tight">Hub Settings</h2>
-                  <span className="text-[10px] font-bold text-white/40 bg-white/5 px-3 py-1 rounded-full uppercase tracking-widest">Global Profile</span>
+                <div className="mb-2 flex items-center justify-between border-b border-v-line pb-2">
+                  <h2 className="v-t-micro text-v-mut">02 — Hub settings</h2>
+                  <span className="v-t-micro rounded-full border border-v-line px-3 py-1 text-v-faint">Global Profile</span>
                 </div>
 
-                <div className="bg-[#171717] border border-white/10 rounded-3xl p-6">
-                  <h3 className="text-lg font-black text-white mb-4 tracking-tight">Digital Menu Payload</h3>
+                <div className="rounded-v border border-v-line bg-v-bg-raise p-6">
+                  <h3 className="mb-4 font-v-display text-lg font-medium tracking-tight text-v-ink">Digital Menu Payload</h3>
                   <div className="space-y-4">
                     <GlassInput
                       label="Menu URL (Required)"
@@ -368,14 +369,14 @@ export default function NfcDashboard() {
                       placeholder="https://your-menu.com"
                       icon={<UtensilsCrossed className="w-4 h-4" />}
                     />
-                    <div className="h-px bg-white/5 my-4" />
-                    <h3 className="text-[10px] font-black text-white/40 mb-2 uppercase tracking-widest">Optional Social Links</h3>
+                    <div className="v-hairline my-4" />
+                    <h3 className="v-t-micro mb-2 text-v-faint">Optional Social Links</h3>
                     <GlassInput label="Instagram URL" value={hubForm.hubInstagramUrl || ""} onChange={(v: string) => setHubForm({ ...hubForm, hubInstagramUrl: v })} icon={<Hash className="w-4 h-4" />} />
                     <GlassInput label="TikTok URL" value={hubForm.hubTiktokUrl || ""} onChange={(v: string) => setHubForm({ ...hubForm, hubTiktokUrl: v })} icon={<Music className="w-4 h-4" />} />
                     <GlassInput label="Facebook URL" value={hubForm.hubFacebookUrl || ""} onChange={(v: string) => setHubForm({ ...hubForm, hubFacebookUrl: v })} icon={<Globe className="w-4 h-4" />} />
 
-                    <div className="h-px bg-white/5 my-4" />
-                    <h3 className="text-[10px] font-black text-white/40 mb-2 uppercase tracking-widest">Guest WiFi Info (Optional)</h3>
+                    <div className="v-hairline my-4" />
+                    <h3 className="v-t-micro mb-2 text-v-faint">Guest WiFi Info (Optional)</h3>
                     <GlassInput label="Network Name (SSID)" value={hubForm.wifiSsid} onChange={(v: string) => setHubForm({ ...hubForm, wifiSsid: v })} />
                     <GlassInput label="Password" type="text" value={hubForm.wifiPassword} onChange={(v: string) => setHubForm({ ...hubForm, wifiPassword: v })} />
                   </div>
@@ -383,7 +384,7 @@ export default function NfcDashboard() {
                   <button
                     onClick={saveHubConfig}
                     disabled={isSavingHub}
-                    className="w-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 py-4 rounded-xl text-sm font-black uppercase tracking-widest mt-6 hover:bg-emerald-500 hover:text-white transition-all flex items-center justify-center gap-2">
+                    className="v-press mt-6 flex w-full items-center justify-center gap-2 rounded-v bg-v-accent py-4 text-sm font-semibold text-v-accent-ink transition-[filter] hover:brightness-95 disabled:opacity-60">
                     {isSavingHub ? <Loader2 className="w-5 h-5 animate-spin" /> : "Save Hub Config"}
                   </button>
                 </div>
@@ -393,25 +394,24 @@ export default function NfcDashboard() {
             {/* ════ MOTION TAB ════ */}
             {activeTab === "motion" && (
               <div className="space-y-8 animate-in fade-in zoom-in-95 duration-500">
-                <div className="relative rounded-[32px] overflow-hidden border border-white/20 bg-white/10 backdrop-blur-3xl shadow-[0_8px_32px_0_rgba(0,0,0,0.3)]">
-                  <div className="absolute -top-24 -right-24 w-64 h-64 bg-emerald-500/20 rounded-full blur-[80px] pointer-events-none" />
-                  <div className="aspect-square w-full bg-black/20 relative flex items-center justify-center p-8 border-b border-white/10">
-                    <div className="w-full h-full relative z-10 flex items-center justify-center drop-shadow-2xl">
+                <div className="relative overflow-hidden rounded-v border border-v-line bg-v-bg-raise">
+                  <div className="aspect-square w-full relative flex items-center justify-center p-8 border-b border-v-line">
+                    <div className="w-full h-full relative z-10 flex items-center justify-center">
                       <DotLottieReact src={`/animations/${currentAnim.id}`} autoplay loop style={{ width: '80%', height: '80%' }} />
                     </div>
                   </div>
                   <div className="p-6 relative z-10">
-                    <div className="text-[10px] uppercase font-bold tracking-widest text-white/50 mb-2">Selected Animation</div>
-                    <h2 className="text-2xl font-black text-white tracking-tight mb-4 drop-shadow-md">{currentAnim.label}</h2>
+                    <div className="v-t-micro mb-2 text-v-faint">Selected Animation</div>
+                    <h2 className="mb-4 font-v-display text-2xl font-medium tracking-tight text-v-ink">{currentAnim.label}</h2>
 
                     <div className="grid grid-cols-2 gap-3">
-                      <button onClick={() => saveAnimation(currentAnim.id)} className="bg-white/10 backdrop-blur-md border border-white/20 text-white py-3.5 rounded-2xl text-[13px] font-bold hover:bg-white/20 transition-all shadow-lg">
+                      <button onClick={() => saveAnimation(currentAnim.id)} className={`v-press rounded-v border py-3.5 text-[13px] font-medium transition-colors ${currentAnim.id === savedAnim ? 'border-v-accent/40 text-v-accent' : 'border-v-line text-v-ink hover:bg-white/[0.04]'}`}>
                         {currentAnim.id === savedAnim ? "Currently Active" : "Set Active"}
                       </button>
-                      <button onClick={toggleAnimationVisibility} className="bg-white/10 backdrop-blur-md border border-white/20 text-white py-3.5 rounded-2xl flex items-center justify-between px-4 hover:bg-white/20 transition-all shadow-lg cursor-pointer">
-                        <span className="text-[13px] font-bold text-white/90">Play on scan</span>
-                        <div className={`w-10 h-6 rounded-full p-[2px] transition-colors duration-300 ease-in-out ${isAnimationVisible ? 'bg-emerald-500' : 'bg-black/40 border border-white/10'}`}>
-                          <div className={`w-5 h-5 rounded-full shadow-md transition-transform duration-300 ease-in-out ${isAnimationVisible ? 'translate-x-4 bg-white' : 'translate-x-0 bg-white/50'}`} />
+                      <button onClick={toggleAnimationVisibility} className="v-press flex cursor-pointer items-center justify-between rounded-v border border-v-line px-4 py-3.5 transition-colors hover:bg-white/[0.04]">
+                        <span className="text-[13px] font-medium text-v-mut">Play on scan</span>
+                        <div className={`h-6 w-10 rounded-full p-[2px] transition-colors duration-300 ease-in-out ${isAnimationVisible ? 'bg-v-accent' : 'border border-v-line bg-white/[0.06]'}`}>
+                          <div className={`h-5 w-5 rounded-full transition-transform duration-300 ease-in-out ${isAnimationVisible ? 'translate-x-4 bg-v-accent-ink' : 'translate-x-0 bg-white/50'}`} />
                         </div>
                       </button>
                     </div>
@@ -419,16 +419,18 @@ export default function NfcDashboard() {
                 </div>
 
                 <div>
-                  <h2 className="text-2xl font-black text-white tracking-tight mb-5 px-1">Library</h2>
+                  <div className="mb-5 border-b border-v-line px-1 pb-2">
+                    <h2 className="v-t-micro text-v-mut">03 — Library</h2>
+                  </div>
                   <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                     {ANIMATIONS.map((anim, idx) => (
-                      <div key={anim.id} onClick={() => saveAnimation(anim.id)} className={`group cursor-pointer rounded-3xl overflow-hidden border transition-all duration-300 backdrop-blur-xl shadow-lg ${carouselIdx === idx ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-white/10 bg-white/5 hover:border-white/30'}`}>
-                        <div className="aspect-square bg-transparent p-4 flex justify-center items-center drop-shadow-xl">
+                      <div key={anim.id} onClick={() => saveAnimation(anim.id)} className={`group cursor-pointer overflow-hidden rounded-v border transition-colors duration-300 ${carouselIdx === idx ? 'border-v-accent/50 bg-v-accent/[0.05]' : 'border-v-line bg-white/[0.02] hover:bg-white/[0.04]'}`}>
+                        <div className="aspect-square bg-transparent p-4 flex justify-center items-center">
                           <DotLottieReact src={`/animations/${anim.id}`} autoplay loop />
                         </div>
-                        <div className="px-4 pb-4 pt-2 flex items-center justify-between border-t border-white/5">
-                          <span className="text-xs font-bold text-white tracking-tight">{anim.label}</span>
-                          <ChevronRight className={`w-3 h-3 transition-colors ${carouselIdx === idx ? 'text-emerald-400' : 'text-white/30 group-hover:text-white/70'}`} />
+                        <div className="flex items-center justify-between border-t border-v-line px-4 pb-4 pt-2">
+                          <span className="text-xs font-medium tracking-tight text-v-ink">{anim.label}</span>
+                          <ChevronRight className={`w-3 h-3 transition-colors ${carouselIdx === idx ? 'text-v-accent' : 'text-v-faint group-hover:text-v-mut'}`} />
                         </div>
                       </div>
                     ))}
@@ -440,10 +442,10 @@ export default function NfcDashboard() {
             {/* ════ PREVIEW TAB ════ */}
             {activeTab === "preview" && (
               <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
-                <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-2xl font-black text-white tracking-tight">Hub Theme Preview</h2>
+                <div className="mb-2 flex items-center justify-between border-b border-v-line pb-2">
+                  <h2 className="v-t-micro text-v-mut">04 — Hub theme preview</h2>
                 </div>
-                <p className="text-sm text-white/40 -mt-2">Select the aesthetic for your digital menu linktree.</p>
+                <p className="-mt-2 text-sm text-v-mut">Select the aesthetic for your digital menu linktree.</p>
 
                 {([
                   {
@@ -451,20 +453,20 @@ export default function NfcDashboard() {
                     bg: "https://plus.unsplash.com/premium_photo-1675435644687-562e8042b9db?q=80&w=749&auto=format&fit=crop",
                     overlay: "bg-gradient-to-t from-black via-black/60 to-black/10",
                     imgFilter: "brightness(0.55) saturate(1.1)", badge: "bg-white/8 border-white/12 text-white/50",
-                    title: "text-white", pill: "bg-white/10 border-white/15 text-white", activeAccent: "border-emerald-500/50"
+                    title: "text-white", pill: "bg-white/10 border-white/15 text-white", activeAccent: "border-v-accent"
                   },
                   {
                     id: "light", label: "Light", desc: "Airy Nordic — cream bloom, glass card, dark text",
                     bg: "https://images.unsplash.com/photo-1669976907613-52f682ca3079?q=80&w=687&auto=format&fit=crop",
                     overlay: "bg-gradient-to-b from-white/55 via-white/10 to-black/40",
                     imgFilter: "brightness(0.78) saturate(0.9)", badge: "bg-black/6 border-black/8 text-zinc-500",
-                    title: "text-zinc-900", pill: "bg-white/70 border-black/10 text-zinc-800", activeAccent: "border-zinc-300"
+                    title: "text-zinc-900", pill: "bg-white/70 border-black/10 text-zinc-800", activeAccent: "border-v-accent"
                   },
                   {
                     id: "orange", label: "Orange", desc: "Golden-hour — warm amber radial, espresso tones",
                     bg: "https://plus.unsplash.com/premium_photo-1674327105076-36c4419864cf?w=600&auto=format&fit=crop&q=60",
                     overlay: "", imgFilter: "brightness(0.5) saturate(1.4)", badge: "bg-orange-500/15 border-orange-500/30 text-orange-400",
-                    title: "text-orange-50", pill: "bg-orange-500/12 border-orange-500/30 text-orange-50", activeAccent: "border-emerald-500/50"
+                    title: "text-orange-50", pill: "bg-orange-500/12 border-orange-500/30 text-orange-50", activeAccent: "border-v-accent"
                   },
                 ] as const).map((theme) => {
                   const isSelected = hubForm.hubTheme === theme.id;
@@ -473,7 +475,7 @@ export default function NfcDashboard() {
                   const previewLinks = links.length > 0 ? links : ["Menu", "Instagram"];
 
                   return (
-                    <div key={theme.id} className={`relative rounded-[28px] overflow-hidden border-2 transition-all duration-300 cursor-pointer ${isSelected ? theme.activeAccent + " shadow-lg" : "border-white/8 hover:border-white/20"}`} style={{ height: 360 }} onClick={() => { setHubForm({ ...hubForm, hubTheme: theme.id as any }); saveHubConfig(); }}>
+                    <div key={theme.id} className={`relative cursor-pointer overflow-hidden rounded-v border transition-all duration-300 ${isSelected ? theme.activeAccent : "border-v-line hover:border-white/25"}`} style={{ height: 360 }} onClick={() => { setHubForm({ ...hubForm, hubTheme: theme.id as any }); saveHubConfig(); }}>
                       <img src={theme.bg} alt={theme.label} className="absolute inset-0 w-full h-full object-cover scale-105" style={{ filter: theme.imgFilter }} />
                       {theme.id === "orange" ? <div className="absolute inset-0 z-10" style={{ background: "radial-gradient(ellipse 90% 60% at 50% 0%, rgba(234,88,12,0.35) 0%, transparent 65%), linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0.1) 100%)" }} /> : <div className={`absolute inset-0 z-10 ${theme.overlay}`} />}
 
@@ -488,7 +490,7 @@ export default function NfcDashboard() {
                       </div>
 
                       {isSelected && (
-                        <div className="absolute top-4 right-4 z-30 bg-emerald-500 text-white text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full shadow-lg flex items-center gap-1.5">
+                        <div className="v-t-micro absolute top-4 right-4 z-30 flex items-center gap-1.5 rounded-full bg-v-accent px-3 py-1 text-v-accent-ink">
                           <CheckCheck className="w-3 h-3" /> Active
                         </div>
                       )}

@@ -29,12 +29,12 @@ export default async function DashboardOverviewPage() {
 
   if (!orgId) {
     return (
-      <div className="space-y-6 text-zinc-50 font-sans">
+      <div className="space-y-6 font-sans text-v-ink">
         <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both">
-          <h1 className="text-3xl font-medium tracking-tight text-white">
+          <h1 className="font-v-display text-3xl font-medium tracking-tight text-v-ink">
             Overview
           </h1>
-          <p className="text-sm text-zinc-400 mt-1">
+          <p className="mt-1 text-sm text-v-mut">
             No active workspace on this session. Reopen the dashboard from your
             invitation link, or sign out and back in to activate your
             workspace.

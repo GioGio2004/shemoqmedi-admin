@@ -21,7 +21,7 @@ import {
   Plus,
   Loader2,
 } from "lucide-react";
-import { gel, tName, timeToEpochToday, discountPct } from "./lib";
+import { gel, tName, datetimeLocalToEpoch, toDatetimeLocal, discountPct } from "./lib";
 
 type Mode = "template" | "menu" | "freeform";
 
@@ -38,15 +38,20 @@ function gelToTetri(s: string): number | null {
   return Math.round(n * 100);
 }
 
-const defaultEnd = () => {
-  const d = new Date();
-  d.setHours(Math.min(d.getHours() + 3, 23), 0, 0, 0);
-  return `${String(d.getHours()).padStart(2, "0")}:00`;
-};
+// Defaults produce datetime-local strings ("YYYY-MM-DDTHH:mm"). Start = next
+// full hour, end = +2h — both roll to tomorrow's date automatically if that
+// crosses midnight, so overnight pickup windows just work.
 const defaultStart = () => {
   const d = new Date();
-  d.setHours(Math.min(d.getHours() + 1, 22), 0, 0, 0);
-  return `${String(d.getHours()).padStart(2, "0")}:00`;
+  d.setMinutes(0, 0, 0);
+  d.setHours(d.getHours() + 1);
+  return toDatetimeLocal(d);
+};
+const defaultEnd = () => {
+  const d = new Date();
+  d.setMinutes(0, 0, 0);
+  d.setHours(d.getHours() + 3);
+  return toDatetimeLocal(d);
 };
 
 export function PostBagDialog({
@@ -142,8 +147,8 @@ export function PostBagDialog({
 
   // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    const pickupStart = timeToEpochToday(startTime);
-    const pickupEnd = timeToEpochToday(endTime);
+    const pickupStart = datetimeLocalToEpoch(startTime);
+    const pickupEnd = datetimeLocalToEpoch(endTime);
     if (!pickupStart || !pickupEnd) {
       toast.error("Set a valid pickup window.");
       return;
@@ -248,29 +253,30 @@ export function PostBagDialog({
   ];
 
   const inputCls =
-    "w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white placeholder:text-zinc-600 outline-none transition-colors focus:border-emerald-400/40 focus:bg-white/[0.07]";
+    "w-full rounded-v border border-v-line bg-white/[0.03] px-3 py-2.5 text-sm text-v-ink placeholder:text-v-faint outline-none transition-colors focus:border-v-accent focus:bg-white/[0.05]";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92dvh] max-w-lg overflow-y-auto overscroll-y-contain border-white/10 border-t-white/20 bg-[#0b0b0d]/90 p-0 text-zinc-50 shadow-[0_8px_32px_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.12)] backdrop-blur-xl backdrop-saturate-150 sm:rounded-3xl">
-        <DialogHeader className="border-b border-white/10 px-5 pb-4 pt-5">
-          <DialogTitle className="text-lg font-semibold tracking-tight text-white">
+      <DialogContent className="max-h-[92dvh] max-w-lg overflow-y-auto overscroll-y-contain rounded-v border border-v-line bg-v-bg-raise p-0 text-v-ink shadow-none ring-0">
+        <DialogHeader className="border-b border-v-line px-5 pb-4 pt-5">
+          <p className="v-t-micro text-v-faint">Surprise Bags</p>
+          <DialogTitle className="font-v-display text-lg font-medium tracking-tight text-v-ink">
             Post a bag
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-5 px-5 pb-5">
           {/* Mode tabs */}
-          <div className="grid grid-cols-3 gap-1 rounded-2xl border border-white/10 border-t-white/20 bg-white/[0.06] p-1 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.10)] backdrop-blur-xl backdrop-saturate-150">
+          <div className="grid grid-cols-3 divide-x divide-v-line overflow-hidden rounded-v border border-v-line">
             {modeTabs.map((t) => (
               <button
                 key={t.key}
                 onClick={() => setMode(t.key)}
                 className={cn(
-                  "flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-medium transition-[color,background-color,transform] duration-150 ease-out active:scale-[0.97] motion-reduce:transform-none",
+                  "v-t-micro v-press flex items-center justify-center gap-1.5 px-2 py-2.5 transition-colors",
                   mode === t.key
-                    ? "bg-white/15 text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.25)] ring-1 ring-white/20"
-                    : "text-zinc-400 hover:text-white",
+                    ? "bg-white/[0.05] text-v-accent"
+                    : "text-v-mut hover:text-v-ink",
                 )}
               >
                 <t.icon className="h-3.5 w-3.5" />
@@ -283,9 +289,9 @@ export function PostBagDialog({
           {mode === "template" && (
             <div className="space-y-2">
               {templates === undefined ? (
-                <div className="h-16 animate-pulse rounded-xl bg-white/5" />
+                <div className="h-16 animate-pulse rounded-v border border-v-line bg-white/[0.03]" />
               ) : templates.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-xs text-zinc-500">
+                <p className="rounded-v border border-dashed border-v-line px-4 py-6 text-center text-xs text-v-faint">
                   No templates yet. Compose a bag and tick &quot;save as
                   template&quot; to reuse it next time.
                 </p>
@@ -295,17 +301,17 @@ export function PostBagDialog({
                     key={tpl._id}
                     onClick={() => setTemplateId(tpl._id)}
                     className={cn(
-                      "flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition-[color,background-color,border-color,transform] duration-150 ease-out active:scale-[0.97] motion-reduce:transform-none",
+                      "v-press flex w-full items-center justify-between gap-3 rounded-v border px-4 py-3 text-left transition-colors",
                       templateId === tpl._id
-                        ? "border-emerald-400/50 bg-emerald-400/10"
-                        : "border-white/10 bg-white/[0.03] hover:border-white/25",
+                        ? "border-v-accent bg-v-accent/[0.06]"
+                        : "border-v-line bg-white/[0.02] hover:bg-white/[0.04]",
                     )}
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-white">
+                      <p className="truncate text-sm font-medium text-v-ink">
                         {tName(tpl.title)}
                       </p>
-                      <p className="text-xs tabular-nums text-zinc-500">
+                      <p className="font-v-mono text-xs tabular-nums text-v-faint">
                         {gel(tpl.price)}{" "}
                         <span className="line-through">
                           {gel(tpl.originalValue)}
@@ -316,8 +322,8 @@ export function PostBagDialog({
                       className={cn(
                         "h-4 w-4 shrink-0 rounded-full border",
                         templateId === tpl._id
-                          ? "border-emerald-300 bg-emerald-300"
-                          : "border-zinc-600",
+                          ? "border-v-accent bg-v-accent"
+                          : "border-v-line",
                       )}
                     />
                   </button>
@@ -331,9 +337,9 @@ export function PostBagDialog({
             <div className="space-y-3">
               <div className="max-h-56 space-y-1.5 overflow-y-auto pr-1">
                 {menuItems === undefined ? (
-                  <div className="h-16 animate-pulse rounded-xl bg-white/5" />
+                  <div className="h-16 animate-pulse rounded-v border border-v-line bg-white/[0.03]" />
                 ) : menuItems.length === 0 ? (
-                  <p className="rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-xs text-zinc-500">
+                  <p className="rounded-v border border-dashed border-v-line px-4 py-6 text-center text-xs text-v-faint">
                     Your menu is empty — use the Custom tab instead.
                   </p>
                 ) : (
@@ -343,17 +349,17 @@ export function PostBagDialog({
                       <div
                         key={item._id}
                         className={cn(
-                          "flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5",
+                          "flex items-center justify-between gap-3 rounded-v border px-3 py-2.5",
                           qty > 0
-                            ? "border-emerald-400/40 bg-emerald-400/[0.07]"
-                            : "border-white/10 bg-white/[0.03]",
+                            ? "border-v-accent/50 bg-v-accent/[0.05]"
+                            : "border-v-line bg-white/[0.02]",
                         )}
                       >
                         <div className="min-w-0">
-                          <p className="truncate text-sm text-white">
+                          <p className="truncate text-sm text-v-ink">
                             {tName(item.name)}
                           </p>
-                          <p className="text-xs text-zinc-500">
+                          <p className="font-v-mono text-xs tabular-nums text-v-faint">
                             {gel(item.price)}
                           </p>
                         </div>
@@ -362,18 +368,18 @@ export function PostBagDialog({
                             <>
                               <button
                                 onClick={() => setItemQty(item._id, -1)}
-                                className="flex h-7 w-7 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-[background-color,transform] duration-150 ease-out hover:bg-white/10 active:scale-[0.97] motion-reduce:transform-none"
+                                className="v-press flex h-7 w-7 items-center justify-center rounded-full border border-v-line text-v-mut transition-colors hover:bg-white/[0.06]"
                               >
                                 <Minus className="h-3.5 w-3.5" />
                               </button>
-                              <span className="w-5 text-center text-sm font-semibold text-white">
+                              <span className="w-5 text-center font-v-mono text-sm font-medium tabular-nums text-v-ink">
                                 {qty}
                               </span>
                             </>
                           )}
                           <button
                             onClick={() => setItemQty(item._id, 1)}
-                            className="flex h-7 w-7 items-center justify-center rounded-full border border-emerald-400/30 bg-emerald-400/10 text-emerald-300 transition-[background-color,transform] duration-150 ease-out hover:bg-emerald-400/20 active:scale-[0.97] motion-reduce:transform-none"
+                            className="v-press flex h-7 w-7 items-center justify-center rounded-full border border-v-accent/40 bg-v-accent/10 text-v-accent transition-colors hover:bg-v-accent/20"
                           >
                             <Plus className="h-3.5 w-3.5" />
                           </button>
@@ -384,7 +390,7 @@ export function PostBagDialog({
                 )}
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-zinc-400">
+                <label className="v-t-micro mb-1 block text-v-faint">
                   Bag title (optional)
                 </label>
                 <input
@@ -394,9 +400,9 @@ export function PostBagDialog({
                   className={inputCls}
                 />
               </div>
-              <div className="flex items-center justify-between rounded-xl bg-white/5 px-4 py-2.5 text-sm">
-                <span className="text-zinc-400">Original value (auto)</span>
-                <span className="font-semibold tabular-nums text-white">
+              <div className="flex items-center justify-between rounded-v border border-v-line bg-white/[0.03] px-4 py-2.5 text-sm">
+                <span className="text-v-mut">Original value (auto)</span>
+                <span className="font-v-mono font-medium tabular-nums text-v-ink">
                   {gel(menuOriginalValue)}
                 </span>
               </div>
@@ -407,7 +413,7 @@ export function PostBagDialog({
           {mode === "freeform" && (
             <div className="space-y-3">
               <div>
-                <label className="mb-1 block text-xs font-medium text-zinc-400">
+                <label className="v-t-micro mb-1 block text-v-faint">
                   Bag title
                 </label>
                 <input
@@ -418,7 +424,7 @@ export function PostBagDialog({
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-zinc-400">
+                <label className="v-t-micro mb-1 block text-v-faint">
                   Original value (₾)
                 </label>
                 <input
@@ -433,10 +439,10 @@ export function PostBagDialog({
           )}
 
           {/* ── Shared: price / quantity / window ───────────────────────── */}
-          <div className="space-y-3 border-t border-white/10 pt-4">
+          <div className="space-y-3 border-t border-v-line pt-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1 block text-xs font-medium text-zinc-400">
+                <label className="v-t-micro mb-1 block text-v-faint">
                   Bag price (₾)
                 </label>
                 <input
@@ -451,28 +457,28 @@ export function PostBagDialog({
                   className={inputCls}
                 />
                 {pct !== null && pct > 0 && (
-                  <p className="mt-1 text-[11px] font-semibold tabular-nums text-emerald-400">
+                  <p className="v-t-micro mt-1 tabular-nums text-v-mut">
                     {pct}% off the original value
                   </p>
                 )}
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-zinc-400">
+                <label className="v-t-micro mb-1 block text-v-faint">
                   Quantity today
                 </label>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-[background-color,transform] duration-150 ease-out hover:bg-white/10 active:scale-[0.97] motion-reduce:transform-none"
+                    className="v-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-v-line text-v-mut transition-colors hover:bg-white/[0.06]"
                   >
                     <Minus className="h-4 w-4" />
                   </button>
-                  <span className="flex-1 text-center text-lg font-semibold tabular-nums text-white">
+                  <span className="flex-1 text-center font-v-mono text-lg font-medium tabular-nums text-v-ink">
                     {quantity}
                   </span>
                   <button
                     onClick={() => setQuantity((q) => q + 1)}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-[background-color,transform] duration-150 ease-out hover:bg-white/10 active:scale-[0.97] motion-reduce:transform-none"
+                    className="v-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-v-line text-v-mut transition-colors hover:bg-white/[0.06]"
                   >
                     <Plus className="h-4 w-4" />
                   </button>
@@ -480,25 +486,36 @@ export function PostBagDialog({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label className="mb-1 block text-xs font-medium text-zinc-400">
+                <label className="v-t-micro mb-1 block text-v-faint">
                   Pickup from
                 </label>
                 <input
-                  type="time"
+                  type="datetime-local"
                   value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
+                  min={toDatetimeLocal(new Date())}
+                  onChange={(e) => {
+                    setStartTime(e.target.value);
+                    // Keep end ≥ start: if the new start passes the end, push
+                    // end to +2h so the overnight case never inverts.
+                    const s = datetimeLocalToEpoch(e.target.value);
+                    const en = datetimeLocalToEpoch(endTime);
+                    if (s && (!en || en <= s)) {
+                      setEndTime(toDatetimeLocal(new Date(s + 2 * 60 * 60 * 1000)));
+                    }
+                  }}
                   className={cn(inputCls, "[color-scheme:dark]")}
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-zinc-400">
+                <label className="v-t-micro mb-1 block text-v-faint">
                   Pickup until
                 </label>
                 <input
-                  type="time"
+                  type="datetime-local"
                   value={endTime}
+                  min={startTime}
                   onChange={(e) => setEndTime(e.target.value)}
                   className={cn(inputCls, "[color-scheme:dark]")}
                 />
@@ -506,14 +523,14 @@ export function PostBagDialog({
             </div>
 
             {mode !== "template" && (
-              <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+              <label className="flex cursor-pointer items-center gap-2.5 rounded-v border border-v-line bg-white/[0.02] px-4 py-3">
                 <input
                   type="checkbox"
                   checked={saveAsTemplate}
                   onChange={(e) => setSaveAsTemplate(e.target.checked)}
-                  className="h-4 w-4 accent-emerald-400"
+                  className="h-4 w-4 accent-[#D8FF3A]"
                 />
-                <span className="text-sm text-zinc-300">
+                <span className="text-sm text-v-mut">
                   Save as template for one-tap posting
                 </span>
               </label>
@@ -523,7 +540,7 @@ export function PostBagDialog({
           <button
             onClick={handleSubmit}
             disabled={submitting}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white py-3 text-sm font-semibold text-black shadow-[0_8px_24px_rgba(255,255,255,0.12)] transition-[background-color,transform,box-shadow] duration-150 ease-out hover:bg-zinc-200 active:scale-[0.97] disabled:opacity-60 motion-reduce:transform-none"
+            className="v-press flex w-full items-center justify-center gap-2 rounded-v bg-v-accent py-3 text-sm font-semibold text-v-accent-ink transition-[filter] duration-150 ease-out hover:brightness-95 disabled:opacity-60"
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
             {submitting ? "Posting…" : "Post bag — go live"}

@@ -160,7 +160,9 @@ export default defineSchema({
   // A venue row is created from the org data but is independently managed.
   // isPublished: false = safe default; admin must explicitly publish each venue.
   venues: defineTable({
-    orgId:       v.string(),        // FK → organizations.clerkId
+    // FK → organizations.clerkId. OPTIONAL: seeded/unclaimed directory venues
+    // have no org until an owner claims them.
+    orgId:       v.optional(v.string()),
     slug:        v.string(),        // unique URL slug: "mtatsminda-coffee-tbilisi"
     name:        v.string(),
     category:    v.union(
@@ -194,6 +196,19 @@ export default defineSchema({
     googleReviewCount:      v.optional(v.number()),
     googleDataLastFetchedAt: v.optional(v.number()), // epoch ms
 
+    // ── Directory / enlisting (seeded venues + linked external menus) ────────
+    // "unclaimed": seeded from public data, no owner yet — page shows a
+    //   "claim this venue" CTA instead of partner features.
+    // "claimed": owner verified and linked to an org (or venue was org-born).
+    // undefined = legacy org-born venue → treated as "claimed".
+    claimStatus: v.optional(
+      v.union(v.literal("unclaimed"), v.literal("claimed")),
+    ),
+    // "native": menu lives on VOLOO (menuItems). "external": venue links out
+    // to an existing menu (PDF / Instagram / own site) via externalMenuUrl.
+    menuMode:        v.optional(v.union(v.literal("native"), v.literal("external"))),
+    externalMenuUrl: v.optional(v.string()),
+
     // ── Publishing gate ───────────────────────────────────────────────────────
     // false = draft (not indexed, not in sitemap).
     // Admin must explicitly set to true before venue appears publicly.
@@ -204,7 +219,8 @@ export default defineSchema({
   })
     .index("by_slug",      ["slug"])
     .index("by_org",       ["orgId"])
-    .index("by_published", ["isPublished"]),
+    .index("by_published", ["isPublished"])
+    .index("by_claim",     ["claimStatus"]),
 
 
   memberships: defineTable({

@@ -2,39 +2,39 @@
 
 import { useQuery, useConvexAuth } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { 
-  Building2, 
-  ShoppingBag, 
-  Wifi, 
-  UtensilsCrossed, 
-  MessageSquare, 
+import {
+  Building2,
+  ShoppingBag,
+  Wifi,
+  UtensilsCrossed,
+  MessageSquare,
   Bot,
   Star,
   Gift,
   ArrowRight,
 } from "lucide-react";
 import Link from "next/link";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { motion } from "framer-motion";
 
 export function DashboardOverviewClient({ orgId }: { orgId: string }) {
   const { isAuthenticated } = useConvexAuth();
   const stats = useQuery(
-    api.analytics.getOverviewStats, 
+    api.analytics.getOverviewStats,
     isAuthenticated ? { orgId } : "skip"
   );
 
   // Handle loading state
   if (stats === undefined) {
     return (
-      <div className="space-y-6 text-zinc-50 font-sans">
+      <div className="space-y-6 font-sans text-v-ink">
         <div className="animate-pulse">
-          <div className="h-8 w-48 bg-white/10 rounded mb-2" />
-          <div className="h-4 w-96 bg-white/5 rounded" />
+          <div className="mb-2 h-8 w-48 rounded-v bg-white/[0.06]" />
+          <div className="h-4 w-96 max-w-full rounded-v bg-white/[0.03]" />
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[1, 2, 3, 4].map((i) => (
-            <Card key={i} className="bg-[#09090b] border-white/10 shadow-none h-[116px] animate-pulse" />
+            <Card key={i} className="h-[116px] animate-pulse rounded-v border-v-line bg-v-bg-raise shadow-none" />
           ))}
         </div>
       </div>
@@ -44,23 +44,23 @@ export function DashboardOverviewClient({ orgId }: { orgId: string }) {
   // Handle org not found or no stats
   if (stats === null) {
     return (
-      <div className="text-zinc-400">
+      <div className="text-v-mut">
         Workspace not found. Please select a valid workspace.
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 text-zinc-50 font-sans">
+    <div className="space-y-8 font-sans text-v-ink">
       {/* Page header */}
       <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both">
-        <h1 className="text-3xl font-medium tracking-tight text-white">
+        <h1 className="font-v-display text-2xl font-medium tracking-tight text-v-ink sm:text-3xl">
           Overview
         </h1>
-        <p className="text-sm text-emerald-400 mt-1 flex items-center gap-2">
+        <p className="v-t-micro mt-2 flex items-center gap-2 text-v-mut">
           <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-v-accent opacity-60"></span>
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-v-accent"></span>
           </span>
           Live data feed active for {stats.orgName}
         </p>
@@ -69,91 +69,96 @@ export function DashboardOverviewClient({ orgId }: { orgId: string }) {
       {/* Surprise Bags promo card */}
       <Link
         href="/bags-dashboard"
-        className="group relative flex items-center justify-between overflow-hidden rounded-2xl border border-emerald-400/25 bg-gradient-to-br from-emerald-400/15 via-emerald-400/5 to-transparent p-5 backdrop-blur-xl transition-all hover:border-emerald-400/40 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-150 fill-mode-both"
+        className="v-press group relative flex items-center justify-between rounded-v border border-v-line bg-v-bg-raise p-5 transition-colors hover:border-v-accent/40 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-150 fill-mode-both"
       >
         <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-400/15 ring-1 ring-emerald-400/30">
-            <Gift className="h-6 w-6 text-emerald-300" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-v border border-v-line">
+            <Gift className="h-6 w-6 text-v-accent" />
           </div>
           <div>
-            <p className="text-base font-semibold text-white">Surprise Bags</p>
-            <p className="text-sm text-zinc-400">
+            <p className="text-base font-medium text-v-ink">Surprise Bags</p>
+            <p className="text-sm text-v-mut">
               Sell today&apos;s surplus food as discounted surprise bags
             </p>
           </div>
         </div>
-        <ArrowRight className="h-5 w-5 shrink-0 text-emerald-300 transition-transform group-hover:translate-x-1" />
+        <ArrowRight className="h-5 w-5 shrink-0 text-v-accent transition-transform group-hover:translate-x-1" />
       </Link>
 
       {/* General Stats Grid */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          {
-            label: "Menu Items",
-            value: stats.activeMenuItemsCount,
-            sub: "Active items",
-            icon: UtensilsCrossed,
-          },
-          {
-            label: "Open Orders",
-            value: stats.openOrdersCount,
-            sub: "Pending & preparing",
-            icon: ShoppingBag,
-          },
-          {
-            label: "Online Tags",
-            value: stats.activeTagsCount,
-            sub: "Active NFC terminals",
-            icon: Wifi,
-          },
-          {
-            label: "Workspace",
-            value: "Active",
-            sub: orgId.slice(0, 14) + "…",
-            icon: Building2,
-          },
-        ].map((stat, idx) => {
-          const Icon = stat.icon;
-          const delayClass = ["delay-200", "delay-300", "delay-500", "delay-700"][idx % 4];
+      <section className="space-y-3">
+        <div className="border-b border-v-line pb-2">
+          <h2 className="v-t-micro text-v-faint">01 — At a glance</h2>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            {
+              label: "Menu Items",
+              value: stats.activeMenuItemsCount,
+              sub: "Active items",
+              icon: UtensilsCrossed,
+            },
+            {
+              label: "Open Orders",
+              value: stats.openOrdersCount,
+              sub: "Pending & preparing",
+              icon: ShoppingBag,
+            },
+            {
+              label: "Online Tags",
+              value: stats.activeTagsCount,
+              sub: "Active NFC terminals",
+              icon: Wifi,
+            },
+            {
+              label: "Workspace",
+              value: "Active",
+              sub: orgId.slice(0, 14) + "…",
+              icon: Building2,
+            },
+          ].map((stat, idx) => {
+            const Icon = stat.icon;
+            const delayClass = ["delay-200", "delay-300", "delay-500", "delay-700"][idx % 4];
 
-          return (
-            <Card
-              key={stat.label}
-              className={`animate-in fade-in slide-in-from-bottom-4 duration-700 ${delayClass} fill-mode-both bg-[#09090b] border-white/10 shadow-none hover:border-white/20 transition-all`}
-            >
-              <CardHeader className="pb-2">
-                <CardDescription className="flex items-center gap-1.5 text-xs text-zinc-400 font-medium">
-                  <Icon className="h-3.5 w-3.5 text-zinc-400" />
-                  {stat.label}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <motion.div
-                  key={stat.value}
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="text-3xl font-medium tabular-nums text-white"
-                >
-                  {stat.value}
-                </motion.div>
-                <p className="text-xs text-zinc-500 mt-1 font-medium">{stat.sub}</p>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+            return (
+              <Card
+                key={stat.label}
+                className={`animate-in fade-in slide-in-from-bottom-4 duration-700 ${delayClass} fill-mode-both rounded-v border-v-line bg-v-bg-raise shadow-none`}
+              >
+                <CardHeader className="pb-2">
+                  <CardDescription className="v-t-micro flex items-center gap-1.5 text-v-faint">
+                    <Icon className="h-3.5 w-3.5 text-v-faint" />
+                    {stat.label}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <motion.div
+                    key={stat.value}
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="font-v-display text-3xl font-medium tabular-nums text-v-ink"
+                  >
+                    {stat.value}
+                  </motion.div>
+                  <p className="mt-1 text-xs text-v-faint">{stat.sub}</p>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      </section>
 
       {/* AI Consultation Analytics */}
-      <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-[800ms] fill-mode-both mt-8">
-        <h2 className="text-xl font-medium tracking-tight text-white mb-4 flex items-center gap-2">
-          <Bot className="h-5 w-5 text-emerald-400" />
-          VolooAI Consultation Analytics
-        </h2>
+      <section className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-[800ms] fill-mode-both space-y-3">
+        <div className="flex items-center gap-2 border-b border-v-line pb-2">
+          <Bot className="h-4 w-4 text-v-faint" />
+          <h2 className="v-t-micro text-v-faint">02 — VolooAI analytics</h2>
+        </div>
         <div className="grid gap-4 sm:grid-cols-3">
-          <Card className="bg-[#09090b] border-white/10 shadow-none hover:border-emerald-500/30 transition-all group">
+          <Card className="rounded-v border-v-line bg-v-bg-raise shadow-none">
             <CardHeader className="pb-2">
-              <CardDescription className="flex items-center gap-1.5 text-xs text-zinc-400 font-medium">
-                <MessageSquare className="h-3.5 w-3.5 text-zinc-400 group-hover:text-emerald-400 transition-colors" />
+              <CardDescription className="v-t-micro flex items-center gap-1.5 text-v-faint">
+                <MessageSquare className="h-3.5 w-3.5 text-v-faint" />
                 Total AI Sessions
               </CardDescription>
             </CardHeader>
@@ -162,18 +167,18 @@ export function DashboardOverviewClient({ orgId }: { orgId: string }) {
                 key={stats.aiAnalytics.totalSessions}
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="text-3xl font-medium tabular-nums text-emerald-50"
+                className="font-v-display text-3xl font-medium tabular-nums text-v-ink"
               >
                 {stats.aiAnalytics.totalSessions}
               </motion.div>
-              <p className="text-xs text-zinc-500 mt-1 font-medium">Anonymous customer threads</p>
+              <p className="mt-1 text-xs text-v-faint">Anonymous customer threads</p>
             </CardContent>
           </Card>
 
-          <Card className="bg-[#09090b] border-white/10 shadow-none hover:border-emerald-500/30 transition-all group">
+          <Card className="rounded-v border-v-line bg-v-bg-raise shadow-none">
             <CardHeader className="pb-2">
-              <CardDescription className="flex items-center gap-1.5 text-xs text-zinc-400 font-medium">
-                <Bot className="h-3.5 w-3.5 text-zinc-400 group-hover:text-emerald-400 transition-colors" />
+              <CardDescription className="v-t-micro flex items-center gap-1.5 text-v-faint">
+                <Bot className="h-3.5 w-3.5 text-v-faint" />
                 Messages Processed
               </CardDescription>
             </CardHeader>
@@ -182,18 +187,18 @@ export function DashboardOverviewClient({ orgId }: { orgId: string }) {
                 key={stats.aiAnalytics.totalMessages}
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="text-3xl font-medium tabular-nums text-emerald-50"
+                className="font-v-display text-3xl font-medium tabular-nums text-v-ink"
               >
                 {stats.aiAnalytics.totalMessages}
               </motion.div>
-              <p className="text-xs text-zinc-500 mt-1 font-medium">Messages exchanged</p>
+              <p className="mt-1 text-xs text-v-faint">Messages exchanged</p>
             </CardContent>
           </Card>
 
-          <Card className="bg-[#09090b] border-white/10 shadow-none hover:border-amber-500/30 transition-all group">
+          <Card className="rounded-v border-v-line bg-v-bg-raise shadow-none">
             <CardHeader className="pb-2">
-              <CardDescription className="flex items-center gap-1.5 text-xs text-zinc-400 font-medium">
-                <Star className="h-3.5 w-3.5 text-zinc-400 group-hover:text-amber-400 transition-colors" />
+              <CardDescription className="v-t-micro flex items-center gap-1.5 text-v-faint">
+                <Star className="h-3.5 w-3.5 text-v-faint" />
                 Average Rating
               </CardDescription>
             </CardHeader>
@@ -202,15 +207,15 @@ export function DashboardOverviewClient({ orgId }: { orgId: string }) {
                 key={stats.aiAnalytics.averageRating}
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="text-3xl font-medium tabular-nums text-amber-50"
+                className="font-v-display text-3xl font-medium tabular-nums text-v-ink"
               >
                 {stats.aiAnalytics.averageRating}
               </motion.div>
-              <p className="text-xs text-zinc-500 mt-1 font-medium">Customer satisfaction</p>
+              <p className="mt-1 text-xs text-v-faint">Customer satisfaction</p>
             </CardContent>
           </Card>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

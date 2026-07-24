@@ -3,69 +3,92 @@
 import { OrganizationProfile } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 
+// RULED tokens (mirrors app/globals.css — Clerk cannot read CSS variables
+// from appearance.variables, so the hex values are inlined here).
+const V = {
+  bg: "#0A0A0A",
+  raise: "#111110",
+  ink: "#F4F3F0",
+  mut: "rgba(244, 243, 240, 0.62)",
+  line: "rgba(244, 243, 240, 0.14)",
+  accent: "#D8FF3A",
+  accentInk: "#1A2000",
+};
+
 export function ClerkOrgPanel() {
   return (
-    <div className="w-full flex justify-center">
+    <div className="flex w-full justify-center">
       <OrganizationProfile
         routing="hash"
         appearance={{
           baseTheme: dark,
           variables: {
-            colorPrimary: "white",
+            colorPrimary: V.accent,
             colorBackground: "transparent",
-            colorText: "white",
-            colorTextSecondary: "#a1a1aa", // zinc-400 (highly legible gray)
-            colorDanger: "hsl(var(--destructive))",
-            colorInputBackground: "#09090b", // zinc-950 for input depth
-            colorInputText: "white",
-            borderRadius: "0.5rem", // Sharper, more minimalist borders
+            colorText: V.ink,
+            colorTextSecondary: V.mut,
+            colorDanger: "#f87171",
+            colorInputBackground: V.bg,
+            colorInputText: V.ink,
+            borderRadius: "2px", // RULED radius
           },
           elements: {
             rootBox: "w-full max-w-full",
             cardBox: "w-full",
-            // Use a solid black wrapper with a crisp border instead of blurry glass
-            card: "bg-black border border-white/10 shadow-xl w-full rounded-xl",
+            // Flat raised surface + hairline — no glass, no blur
+            card: "bg-[#111110] border border-[rgba(244,243,240,0.14)] shadow-none w-full rounded-[2px]",
 
             // Sidebar Navigation
-            navbar: "border-r border-white/10 bg-[#09090b]",
-            navbarButton: "text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors py-2 px-3",
-            navbarButtonActive: "text-white bg-white/10 font-medium",
-            navbarButtonIcon__active: "text-white",
+            navbar: "border-r border-[rgba(244,243,240,0.14)] bg-[#0A0A0A]",
+            navbarButton:
+              "text-[rgba(244,243,240,0.62)] hover:text-[#F4F3F0] hover:bg-white/5 rounded-[2px] transition-colors py-2 px-3",
+            navbarButtonActive: "text-[#F4F3F0] bg-white/10 font-medium",
+            navbarButtonIcon__active: "text-[#F4F3F0]",
 
             // Main Content
-            pageScrollBox: "p-8",
-            headerTitle: "text-white font-medium text-2xl tracking-tight",
-            headerSubtitle: "text-zinc-400",
+            pageScrollBox: "p-4 sm:p-8",
+            headerTitle: "text-[#F4F3F0] font-medium text-2xl tracking-tight",
+            headerSubtitle: "text-[rgba(244,243,240,0.62)]",
 
-            profileSection: "border-b border-white/10 pb-8",
-            profileSectionTitle: "text-white font-medium text-lg",
-            profileSectionTitleText: "text-white",
+            profileSection: "border-b border-[rgba(244,243,240,0.14)] pb-8",
+            profileSectionTitle: "text-[#F4F3F0] font-medium text-lg",
+            profileSectionTitleText: "text-[#F4F3F0]",
 
-            // Inputs
-            formFieldInput: "bg-[#09090b] border border-white/20 text-white focus:ring-1 focus:ring-white focus:border-white rounded-lg transition-all",
-            formFieldLabel: "text-zinc-300 text-sm font-medium",
+            // Inputs — flat stage-dark fields with hairline borders
+            formFieldInput:
+              "bg-[#0A0A0A] border border-[rgba(244,243,240,0.14)] text-[#F4F3F0] focus:ring-0 focus:border-[rgba(244,243,240,0.34)] rounded-[2px] transition-colors",
+            formFieldLabel:
+              "text-[rgba(244,243,240,0.62)] text-xs font-mono uppercase tracking-wider",
 
-            // Buttons - High contrast
-            formButtonPrimary: "bg-white text-black hover:bg-zinc-200 font-medium rounded-lg shadow-none transition-all",
-            formButtonReset: "text-zinc-400 hover:bg-white/5 hover:text-white rounded-lg",
-            dangerButton: "bg-destructive/10 text-destructive hover:bg-destructive/20 border border-destructive/20 rounded-lg shadow-none",
+            // Buttons — accent primary, quiet everything else
+            formButtonPrimary:
+              "bg-[#D8FF3A] text-[#1A2000] hover:opacity-90 font-medium rounded-[2px] shadow-none transition-opacity",
+            formButtonReset:
+              "text-[rgba(244,243,240,0.62)] hover:bg-white/5 hover:text-[#F4F3F0] rounded-[2px]",
+            dangerButton:
+              "bg-transparent text-red-400 hover:bg-red-500/10 border border-red-500/40 rounded-[2px] shadow-none",
 
             // Tables
-            tableHead: "text-zinc-400 text-xs uppercase font-medium tracking-wider bg-white/5",
-            tableRow: "border-b border-white/10 hover:bg-white/5 transition-colors",
-            tableCell: "text-white text-sm",
+            tableHead:
+              "text-[rgba(244,243,240,0.34)] text-[11px] uppercase font-mono tracking-wider bg-transparent",
+            tableRow:
+              "border-b border-[rgba(244,243,240,0.14)] hover:bg-white/5 transition-colors",
+            tableCell: "text-[#F4F3F0] text-sm",
 
-            // Badges
-            badge: "bg-white/10 text-white border border-white/20 font-medium px-2.5 py-0.5 rounded-md",
+            // Badges — mono micro-label voice
+            badge:
+              "bg-transparent text-[rgba(244,243,240,0.62)] border border-[rgba(244,243,240,0.14)] font-mono uppercase text-[10px] tracking-wider px-2 py-0.5 rounded-[2px]",
 
-            // Modals
-            modalContent: "bg-[#09090b] border border-white/10 shadow-2xl rounded-xl",
-            modalBackdrop: "bg-black/90 backdrop-blur-sm",
+            // Modals — flat, no blur
+            modalContent:
+              "bg-[#111110] border border-[rgba(244,243,240,0.14)] shadow-none rounded-[2px]",
+            modalBackdrop: "bg-black/70",
 
-            avatarBox: "rounded-lg border border-white/10",
-            avatarImage: "rounded-lg",
+            avatarBox: "rounded-[2px] border border-[rgba(244,243,240,0.14)]",
+            avatarImage: "rounded-[2px]",
 
-            membersPageInviteButton: "bg-white text-black hover:bg-zinc-200 shadow-none transition-all font-medium px-4 py-2 rounded-lg",
+            membersPageInviteButton:
+              "bg-[#D8FF3A] text-[#1A2000] hover:opacity-90 shadow-none transition-opacity font-medium px-4 py-2 rounded-[2px]",
           },
         }}
       />

@@ -4,7 +4,67 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ═══ RULED design tokens (source of truth: consumer app globals.css) ═══════
+ * The admin shares the storefront's design DNA: #0A0A0A stage, warm ink,
+ * ONE accent (#D8FF3A), 1px hairlines, mono micro-labels, 2px radii.
+ * ═════════════════════════════════════════════════════════════════════════ */
+:root {
+  --v-bg:        #0A0A0A;
+  --v-bg-raise:  #111110;
+  --v-ink:       #F4F3F0;
+  --v-mut:       rgba(244, 243, 240, 0.62);
+  --v-faint:     rgba(244, 243, 240, 0.34);
+  --v-line:      rgba(244, 243, 240, 0.14);
+  --v-accent:    #D8FF3A;
+  --v-accent-ink:#1A2000;
+
+  --v-font-display: var(--font-display), var(--font-ka), var(--font-sans), sans-serif;
+  --v-font-mono:    var(--font-geist-mono), var(--font-ka), ui-monospace, monospace;
+
+  --v-t-mono: 0.72rem;
+  --v-pad: clamp(16px, 3vw, 40px); /* admin gutter — tighter than storefront */
+  --v-radius: 2px;
+}
+
+/* Mono micro-label voice — the RULED signature. */
+.v-t-micro {
+  font-family: var(--v-font-mono);
+  font-size: var(--v-t-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+
+/* Hairline separators */
+.v-hairline    { height: 1px; background: var(--v-line); }
+.v-hairline-v  { width: 1px;  background: var(--v-line); }
+
+/* Press feedback (mobile-first admin: managers use phones) */
+.v-press { transition: transform 0.12s ease; }
+.v-press:active { transform: scale(0.97); }
+@media (prefers-reduced-motion: reduce) {
+  .v-press, .v-press:active { transition: none; transform: none; }
+}
+
 @theme inline {
+  /* ─── RULED tokens → Tailwind utilities (ported from the consumer app) ───
+   * One design language across storefront + admin. Generates: bg-v-bg,
+   * bg-v-bg-raise, text-v-ink, text-v-mut, text-v-faint, border-v-line,
+   * text-v-accent / bg-v-accent, text-v-accent-ink, font-v-display,
+   * font-v-mono, rounded-v.
+   * ──────────────────────────────────────────────────────────────────────── */
+  --color-v-bg:         var(--v-bg);
+  --color-v-bg-raise:   var(--v-bg-raise);
+  --color-v-ink:        var(--v-ink);
+  --color-v-mut:        var(--v-mut);
+  --color-v-faint:      var(--v-faint);
+  --color-v-line:       var(--v-line);
+  --color-v-accent:     var(--v-accent);
+  --color-v-accent-ink: var(--v-accent-ink);
+  --font-v-display:     var(--v-font-display);
+  --font-v-mono:        var(--v-font-mono);
+  --radius-v:           2px;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);

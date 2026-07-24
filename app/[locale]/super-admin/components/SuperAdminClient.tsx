@@ -4,14 +4,49 @@ import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { RosterRow } from "./RosterRow";
 import { ClerkOrgPanel } from "./ClerkOrgPanel";
+import { CreateOrgDialog } from "./CreateOrgDialog";
 import { NTagFleetPanel } from "./NTagFleetPanel";
 import { BulkImportPanel } from "./BulkImportPanel";
 import { AiTrainingPanel } from "./AiTrainingPanel";
+import { EnlistingPanel } from "./EnlistingPanel";
 import { Toaster } from "sonner";
 import { useState } from "react";
-import { Shield, Building2, Nfc, Loader2, FileJson, Database } from "lucide-react";
+import { Shield, Building2, Loader2 } from "lucide-react";
 
-type Tab = "workspaces" | "ntags" | "import" | "ai_training";
+type Tab = "workspaces" | "ntags" | "import" | "ai_training" | "enlisting";
+
+const TABS: { id: Tab; index: string; label: string }[] = [
+  { id: "workspaces", index: "01", label: "Roster" },
+  { id: "ntags", index: "02", label: "NFC Fleet" },
+  { id: "import", index: "03", label: "Import" },
+  { id: "ai_training", index: "04", label: "AI Training" },
+  { id: "enlisting", index: "05", label: "Enlisting" },
+];
+
+/** RULED section header — mono index label + display title. */
+function SectionHeader({
+  index,
+  label,
+  title,
+  desc,
+}: {
+  index: string;
+  label: string;
+  title: string;
+  desc?: string;
+}) {
+  return (
+    <div>
+      <p className="v-t-micro text-v-faint">
+        {index} — {label}
+      </p>
+      <h1 className="mt-1.5 font-v-display text-lg tracking-tight text-v-ink">
+        {title}
+      </h1>
+      {desc && <p className="mt-0.5 text-xs text-v-mut">{desc}</p>}
+    </div>
+  );
+}
 
 export function SuperAdminClient() {
   const [activeTab, setActiveTab] = useState<Tab>("workspaces");
@@ -23,93 +58,93 @@ export function SuperAdminClient() {
   const orgs = organizations ?? [];
   const totalMembers = orgs.reduce((sum, org: any) => sum + (org.members?.length ?? 0), 0);
 
-  const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
-    { id: "workspaces", label: "Workspaces", icon: Building2 },
-    { id: "ntags", label: "NFC Fleet", icon: Nfc },
-    { id: "import", label: "Import Menu", icon: FileJson },
-    { id: "ai_training", label: "AI Training", icon: Database },
-  ];
-
   return (
-    <div className="min-h-screen bg-black text-zinc-50 font-sans">
-      <Toaster position="bottom-right" theme="dark" richColors />
+    <div className="min-h-screen bg-v-bg text-v-ink">
+      <Toaster position="bottom-right" theme="dark" />
 
-      {/* ── Top bar ── */}
-      <header className="sticky top-0 z-50 border-b border-white/8 bg-black/90 backdrop-blur-xl">
+      {/* ── Top bar — flat surface, hairline below ── */}
+      <header className="sticky top-0 z-50 border-b border-v-line bg-v-bg">
         <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/8 border border-white/12">
-              <Shield className="h-3.5 w-3.5 text-zinc-300" />
+          <div className="flex items-center gap-3">
+            <div className="flex h-7 w-7 items-center justify-center rounded-v border border-v-line bg-v-bg-raise">
+              <Shield className="h-3.5 w-3.5 text-v-mut" />
             </div>
             <div>
-              <p className="text-sm font-medium text-white leading-none">Super Admin</p>
-              <p className="text-[10px] text-zinc-500 mt-0.5">Shemoqmedi Platform</p>
+              <p className="v-t-micro leading-none text-v-ink">Super Admin</p>
+              <p className="v-t-micro mt-0.5 text-v-faint">Shemoqmedi Platform</p>
             </div>
           </div>
 
-          {/* Stats pill */}
-          <div className="hidden sm:flex items-center gap-4 text-xs text-zinc-500">
-            <span>
-              <span className="text-white font-medium tabular-nums">{orgs.length}</span>
-              {" "}workspaces
+          {/* Stats — mono numbers */}
+          <div className="hidden items-center gap-4 sm:flex">
+            <span className="v-t-micro text-v-faint">
+              <span className="font-v-mono tabular-nums text-v-ink">{orgs.length}</span>{" "}
+              Workspaces
             </span>
-            <span className="text-zinc-700">·</span>
-            <span>
-              <span className="text-white font-medium tabular-nums">{totalMembers}</span>
-              {" "}members
+            <span className="v-hairline-v h-3" aria-hidden />
+            <span className="v-t-micro text-v-faint">
+              <span className="font-v-mono tabular-nums text-v-ink">{totalMembers}</span>{" "}
+              Members
             </span>
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 flex gap-0 overflow-x-auto">
+        {/* Tabs — mono micro-labels, accent underline on active, scrolls at 375px */}
+        <nav
+          aria-label="Sections"
+          className="mx-auto flex max-w-5xl overflow-x-auto px-4 sm:px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
           {TABS.map((tab) => {
-            const Icon = tab.icon;
             const active = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-xs font-medium transition-all border-b-2 -mb-px ${
+                className={`v-t-micro v-press shrink-0 whitespace-nowrap border-b-2 px-4 py-3 transition-colors ${
                   active
-                    ? "text-white border-white"
-                    : "text-zinc-500 border-transparent hover:text-zinc-300"
+                    ? "border-v-accent text-v-ink"
+                    : "border-transparent text-v-faint hover:text-v-mut"
                 }`}
               >
-                <Icon className="h-3.5 w-3.5" />
-                {tab.label}
+                <span className={active ? "text-v-accent" : "text-v-faint"}>
+                  {tab.index}
+                </span>
+                <span className="ml-1.5">{tab.label}</span>
               </button>
             );
           })}
-        </div>
+        </nav>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 sm:px-6 py-8 space-y-8">
-
-        {/* ── TAB: WORKSPACES ── */}
+      <main className="mx-auto max-w-5xl space-y-10 px-4 py-8 sm:px-6">
+        {/* ── 01 — ROSTER ── */}
         {activeTab === "workspaces" && (
           <>
-            {/* ── Org roster ── */}
-            <section className="space-y-2">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h1 className="text-sm font-medium text-white">Active Workspaces</h1>
-                  <p className="text-xs text-zinc-500 mt-0.5">Click a row to expand roster and feature controls</p>
-                </div>
+            <section className="space-y-4">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <SectionHeader
+                  index="01"
+                  label="Roster"
+                  title="Active workspaces"
+                  desc="Tap a row to expand roster and feature controls"
+                />
+                <CreateOrgDialog />
               </div>
 
               {isLoading ? (
                 <div className="flex items-center justify-center py-20">
-                  <Loader2 className="h-5 w-5 animate-spin text-zinc-600" />
+                  <Loader2 className="h-5 w-5 animate-spin text-v-faint" />
                 </div>
               ) : orgs.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 text-center border border-dashed border-white/8 rounded-xl">
-                  <Building2 className="h-8 w-8 text-zinc-700 mb-3" />
-                  <p className="text-sm text-zinc-400 font-medium">No workspaces yet</p>
-                  <p className="text-xs text-zinc-600 mt-1">Create an organization in Clerk to get started.</p>
+                <div className="flex flex-col items-center justify-center rounded-v border border-dashed border-v-line py-20 text-center">
+                  <Building2 className="mb-3 h-8 w-8 text-v-faint" />
+                  <p className="text-sm text-v-ink">No workspaces yet</p>
+                  <p className="mt-1 text-xs text-v-mut">
+                    Create an organization in Clerk to get started.
+                  </p>
                 </div>
               ) : (
-                <div className="border border-white/8 rounded-xl overflow-hidden divide-y divide-white/8">
+                <div className="divide-y divide-v-line overflow-hidden rounded-v border border-v-line bg-v-bg-raise">
                   {orgs.map((org: any) => (
                     <RosterRow key={org._id} org={org} />
                   ))}
@@ -117,41 +152,71 @@ export function SuperAdminClient() {
               )}
             </section>
 
-            {/* ── Invite via Clerk ── */}
-            <section className="space-y-3">
-              <div>
-                <h2 className="text-sm font-medium text-white">Organization Management</h2>
-                <p className="text-xs text-zinc-500 mt-0.5">Invite staff and manage membership via Clerk</p>
-              </div>
-              <div className="border border-white/8 rounded-xl overflow-hidden">
+            <section className="space-y-4">
+              <SectionHeader
+                index="01.1"
+                label="Org Management"
+                title="Invitations & membership"
+                desc="Invite staff and manage membership via Clerk"
+              />
+              <div className="overflow-hidden rounded-v border border-v-line">
                 <ClerkOrgPanel />
               </div>
             </section>
           </>
         )}
 
-        {/* ── TAB: NFC FLEET ── */}
+        {/* ── 02 — NFC FLEET ── */}
         {activeTab === "ntags" && (
-          <section className="space-y-3">
-            <div>
-              <h1 className="text-sm font-medium text-white">NFC Fleet</h1>
-              <p className="text-xs text-zinc-500 mt-0.5">Provision and manage NTAG216 chips across all locations</p>
-            </div>
+          <section className="space-y-4">
+            <SectionHeader
+              index="02"
+              label="NFC Fleet"
+              title="Physical tag fleet"
+              desc="Provision and manage NTAG216 chips across all locations"
+            />
             <NTagFleetPanel organizations={orgs} />
           </section>
         )}
 
-        {/* ── TAB: IMPORT MENU ── */}
+        {/* ── 03 — IMPORT ── */}
         {activeTab === "import" && (
-          <section className="border border-white/8 rounded-xl p-6">
-            <BulkImportPanel organizations={orgs} />
+          <section className="space-y-4">
+            <SectionHeader
+              index="03"
+              label="Import"
+              title="Bulk menu import"
+              desc="Paste a structured JSON payload to seed an entire menu in one operation"
+            />
+            <div className="rounded-v border border-v-line bg-v-bg-raise p-4 sm:p-6">
+              <BulkImportPanel organizations={orgs} />
+            </div>
           </section>
         )}
 
-        {/* ── TAB: AI TRAINING ── */}
+        {/* ── 04 — AI TRAINING ── */}
         {activeTab === "ai_training" && (
-          <section className="border border-white/8 rounded-xl p-6">
+          <section className="space-y-4">
+            <SectionHeader
+              index="04"
+              label="AI Training"
+              title="Global training logs"
+              desc="Monitor Nootype telemetry and export SFT-ready JSONL datasets"
+            />
             <AiTrainingPanel />
+          </section>
+        )}
+
+        {/* ── 05 — ENLISTING ── */}
+        {activeTab === "enlisting" && (
+          <section className="space-y-4">
+            <SectionHeader
+              index="05"
+              label="Enlisting"
+              title="Venue directory"
+              desc="Seed, claim and manage the public venue directory"
+            />
+            <EnlistingPanel organizations={orgs} />
           </section>
         )}
       </main>

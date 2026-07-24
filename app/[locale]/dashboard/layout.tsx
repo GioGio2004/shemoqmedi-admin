@@ -18,8 +18,6 @@ import {
   Menu,
   X,
   Store,
-  Nfc,
-  Bot,
   ChevronLeft,
   ChevronRight,
   MessageSquare,
@@ -52,8 +50,6 @@ const NAV_ITEMS = [
     icon: ShoppingBag,
     exact: false,
   },
-  { label: "NFC", href: "/dashboard/nfc", icon: Nfc, exact: false },
-  { label: "VolooAI", href: "/dashboard/ai-manager", icon: Bot, exact: false },
   {
     label: "Chat",
     href: "/dashboard/chat-theme",
@@ -92,26 +88,24 @@ function NavLink({
       onClick={onClick}
       title={collapsed ? item.label : undefined}
       className={cn(
-        "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150",
+        "v-t-micro v-press group flex items-center gap-3 rounded-v px-3 py-2.5 transition-colors",
         collapsed ? "justify-center px-2" : "",
         isActive
-          ? "bg-white/10 text-white"
-          : "text-zinc-400 hover:bg-white/5 hover:text-white",
+          ? "text-v-accent"
+          : "text-v-mut hover:bg-white/[0.04] hover:text-v-ink",
       )}
     >
-      <div
+      <Icon
         className={cn(
-          "flex shrink-0 h-6 w-6 items-center justify-center rounded-lg transition-colors",
+          "h-4 w-4 shrink-0 transition-colors",
           isActive
-            ? "bg-white/15 text-white"
-            : "bg-white/5 text-zinc-500 group-hover:bg-white/10 group-hover:text-white",
+            ? "text-v-accent"
+            : "text-v-faint group-hover:text-v-ink",
         )}
-      >
-        <Icon className="h-3.5 w-3.5" />
-      </div>
+      />
       {!collapsed && <span className="truncate">{item.label}</span>}
       {!collapsed && isActive && (
-        <div className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-white" />
+        <div className="ml-auto h-1 w-1 shrink-0 rounded-full bg-v-accent" />
       )}
     </Link>
   );
@@ -124,33 +118,32 @@ function BottomTab({ item }: { item: (typeof NAV_ITEMS)[number] }) {
   return (
     <Link
       href={item.href}
-      className="flex flex-col items-center gap-1 flex-1 py-2 relative group"
+      className="v-press group relative flex min-w-0 flex-1 flex-col items-center gap-1 py-2"
     >
       <div
         className={cn(
-          "relative flex items-center justify-center w-10 h-10 rounded-2xl transition-all duration-200",
+          "relative flex h-9 w-9 items-center justify-center transition-colors",
           isActive
-            ? "bg-white text-black shadow-lg shadow-white/10"
-            : "text-zinc-500 group-active:bg-white/8",
+            ? "text-v-accent"
+            : "text-v-faint group-active:text-v-mut",
         )}
       >
         <Icon className="h-5 w-5" />
-        {/* VolooAI active pulse */}
-        {isActive && item.label === "VolooAI" && (
-          <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-40" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-white" />
-          </span>
-        )}
       </div>
       <span
         className={cn(
-          "text-[10px] font-semibold tracking-wide transition-colors",
-          isActive ? "text-white" : "text-zinc-600",
+          "max-w-full truncate font-v-mono text-[9px] uppercase tracking-[0.06em] transition-colors",
+          isActive ? "text-v-accent" : "text-v-faint",
         )}
       >
         {item.label}
       </span>
+      <span
+        className={cn(
+          "h-1 w-1 rounded-full",
+          isActive ? "bg-v-accent" : "bg-transparent",
+        )}
+      />
     </Link>
   );
 }
@@ -159,19 +152,19 @@ function BottomTab({ item }: { item: (typeof NAV_ITEMS)[number] }) {
 function WorkspaceDisplay() {
   const { organization, isLoaded } = useOrganization();
   return (
-    <div className="flex items-center gap-3 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/20">
-        <span className="text-sm font-bold text-white">
+    <div className="flex items-center gap-3 rounded-v border border-v-line bg-v-bg-raise px-3 py-2.5">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-v border border-v-line bg-white/[0.04]">
+        <span className="font-v-mono text-sm font-medium text-v-ink">
           {isLoaded && organization
             ? organization.name.charAt(0).toUpperCase()
             : "—"}
         </span>
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-white leading-none truncate">
+        <p className="truncate text-sm font-medium leading-none text-v-ink">
           {isLoaded && organization ? organization.name : "Loading…"}
         </p>
-        <p className="text-[11px] text-zinc-500 mt-0.5">Active workspace</p>
+        <p className="v-t-micro mt-0.5 text-v-faint">Active workspace</p>
       </div>
     </div>
   );
@@ -182,8 +175,8 @@ function ImpersonationBanner() {
   const { actor } = useAuth();
   if (!actor) return null;
   return (
-    <div className="bg-destructive text-destructive-foreground px-4 py-2 text-center text-sm font-semibold flex items-center justify-center gap-3 z-50 shrink-0 shadow-md">
-      <span className="animate-pulse h-2 w-2 rounded-full bg-white" />
+    <div className="z-50 flex shrink-0 items-center justify-center gap-3 border-b border-red-400/40 bg-red-500/10 px-4 py-2 text-center text-sm font-medium text-red-300">
+      <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
       You are currently impersonating this user.
       <div className="ml-2">
         <UserButton
@@ -214,19 +207,21 @@ function SidebarContent({
         )}
       >
         {collapsed ? (
-          <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/10 border border-white/20">
-            <span className="text-sm font-bold text-white">S</span>
+          <div className="flex h-8 w-8 items-center justify-center rounded-v border border-v-line bg-v-bg-raise">
+            <span className="font-v-mono text-sm font-medium text-v-ink">S</span>
           </div>
         ) : (
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-white/10 border border-white/20">
-              <span className="text-sm font-bold text-white">S</span>
+            <div className="flex h-8 w-8 items-center justify-center rounded-v border border-v-line bg-v-bg-raise">
+              <span className="font-v-mono text-sm font-medium text-v-ink">
+                S
+              </span>
             </div>
             <div>
-              <p className="text-[13px] font-medium leading-none text-white">
+              <p className="font-v-display text-[13px] font-medium leading-none text-v-ink">
                 Shemoqmedi
               </p>
-              <p className="text-[10px] text-zinc-500 mt-0.5">Admin Console</p>
+              <p className="v-t-micro mt-0.5 text-v-faint">Admin Console</p>
             </div>
           </div>
         )}
@@ -235,20 +230,16 @@ function SidebarContent({
       {/* Workspace display */}
       {!collapsed && (
         <div className="px-3 mb-4">
-          <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-600">
-            Workspace
-          </p>
+          <p className="v-t-micro mb-2 px-1 text-v-faint">Workspace</p>
           <WorkspaceDisplay />
         </div>
       )}
 
-      <div className="mx-3 mb-3 h-px bg-white/10" />
+      <div className="v-hairline mx-3 mb-3" />
 
       <nav className="flex-1 px-3">
         {!collapsed && (
-          <p className="mb-2 px-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-zinc-600">
-            Navigation
-          </p>
+          <p className="v-t-micro mb-2 px-1 text-v-faint">Navigation</p>
         )}
         <div className="flex flex-col gap-0.5">
           {allowedNavItems.map((item) => (
@@ -258,10 +249,8 @@ function SidebarContent({
       </nav>
 
       {!collapsed && (
-        <div className="px-4 py-4 mt-auto border-t border-white/10">
-          <p className="text-[10px] text-zinc-600 text-center font-mono">
-            v1.0.0
-          </p>
+        <div className="px-4 py-4 mt-auto border-t border-v-line">
+          <p className="v-t-micro text-center text-v-faint">v1.0.0</p>
         </div>
       )}
     </div>
@@ -277,7 +266,6 @@ export default function DashboardLayout({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const pathname = usePathname();
-  const isAiManager = pathname.includes("ai-manager");
 
   const { organization, membership, isLoaded } = useOrganization();
   const convexRole = useQuery(
@@ -331,7 +319,6 @@ export default function DashboardLayout({
 
   const role = convexRole || membership?.role;
   const showAiManager = orgSettings?.features?.hasAiManager !== false;
-  const showNfc = orgSettings?.features?.hasNfcHardware !== false;
   const showLiveOrdering = orgSettings?.features?.hasLiveOrdering !== false;
   const showDigitalMenu = orgSettings?.features?.hasDigitalMenu !== false;
 
@@ -339,9 +326,7 @@ export default function DashboardLayout({
 
   const allowedNavItems = NAV_ITEMS.filter((item) => {
     if (!showSurpriseBags && item.label === "Surprise Bags") return false;
-    if (!showAiManager && (item.label === "VolooAI" || item.label === "Chat"))
-      return false;
-    if (!showNfc && item.label === "NFC") return false;
+    if (!showAiManager && item.label === "Chat") return false;
     if (!showLiveOrdering && item.label === "Orders") return false;
     if (
       !showDigitalMenu &&
@@ -370,7 +355,7 @@ export default function DashboardLayout({
   // dashboard chrome with the invitation-only explainer.
   if (showNoWorkspace) {
     return (
-      <div className="flex h-[100dvh] flex-col overflow-hidden bg-black">
+      <div className="flex h-[100dvh] flex-col overflow-hidden bg-v-bg">
         <ImpersonationBanner />
         <NoWorkspace />
       </div>
@@ -382,22 +367,22 @@ export default function DashboardLayout({
   // NoWorkspace flashes at the wrong audience.
   if (orgAccessPending) {
     return (
-      <div className="flex h-[100dvh] items-center justify-center bg-black">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+      <div className="flex h-[100dvh] items-center justify-center bg-v-bg">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-v-line border-t-v-accent" />
       </div>
     );
   }
 
   return (
     <SidebarCtx.Provider value={sidebarCollapsed}>
-      <div className="flex h-[100dvh] flex-col overflow-hidden bg-black">
+      <div className="flex h-[100dvh] flex-col overflow-hidden bg-v-bg text-v-ink">
         <ImpersonationBanner />
 
         <div className="flex flex-1 overflow-hidden">
           {/* ── Desktop sidebar ─────────────────────────────────────────────── */}
           <aside
             className={cn(
-              "hidden lg:flex shrink-0 flex-col border-r border-white/10 bg-[#09090b] py-5 relative transition-all duration-300",
+              "hidden lg:flex shrink-0 flex-col border-r border-v-line bg-v-bg py-5 relative transition-all duration-300",
               sidebarCollapsed ? "w-[56px]" : "w-[220px]",
             )}
           >
@@ -408,7 +393,7 @@ export default function DashboardLayout({
               aria-label={
                 sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
               }
-              className="absolute -right-3 top-[72px] z-10 flex h-6 w-6 items-center justify-center rounded-full border border-white/15 bg-[#09090b] text-zinc-500 hover:text-white shadow-md transition-colors"
+              className="absolute -right-3 top-[72px] z-10 flex h-6 w-6 items-center justify-center rounded-full border border-v-line bg-v-bg text-v-faint transition-colors hover:text-v-ink"
             >
               {sidebarCollapsed ? (
                 <ChevronRight className="h-3 w-3" />
@@ -427,12 +412,12 @@ export default function DashboardLayout({
               role="dialog"
             >
               <div
-                className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                className="absolute inset-0 bg-black/70"
                 onClick={() => setMobileOpen(false)}
               />
-              <aside className="absolute left-0 top-0 bottom-0 w-[220px] bg-[#09090b] border-r border-white/10 py-5 flex flex-col z-50 shadow-2xl">
+              <aside className="absolute left-0 top-0 bottom-0 w-[220px] bg-v-bg border-r border-v-line py-5 flex flex-col z-50">
                 <button
-                  className="absolute top-4 right-3 rounded-lg p-1.5 text-zinc-500 hover:text-white hover:bg-white/5 transition-colors"
+                  className="absolute top-4 right-3 rounded-v p-1.5 text-v-faint hover:text-v-ink hover:bg-white/[0.04] transition-colors"
                   onClick={() => setMobileOpen(false)}
                   aria-label="Close sidebar"
                 >
@@ -448,9 +433,9 @@ export default function DashboardLayout({
 
           <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
             {/* ── Top header ───────────────────────────────────────────────────── */}
-            <header className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 bg-black/80 px-4 backdrop-blur-xl">
+            <header className="flex h-14 shrink-0 items-center justify-between border-b border-v-line bg-v-bg px-4">
               <button
-                className="flex lg:hidden items-center justify-center rounded-lg p-1.5 text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
+                className="flex lg:hidden items-center justify-center rounded-v p-1.5 text-v-mut hover:text-v-ink hover:bg-white/[0.04] transition-colors"
                 onClick={() => setMobileOpen(true)}
                 aria-label="Open sidebar"
               >
@@ -458,67 +443,54 @@ export default function DashboardLayout({
               </button>
 
               <div className="flex lg:hidden absolute left-1/2 -translate-x-1/2 items-center gap-2">
-                <span className="text-sm font-semibold text-white">
-                  {isAiManager
-                    ? "VolooAI"
-                    : (pathname
-                        .split("/")
-                        .pop()
-                        ?.replace(/-/g, " ")
-                        .replace(/\b\w/g, (c) => c.toUpperCase()) ??
-                      "Dashboard")}
+                <span className="v-t-micro text-v-ink">
+                  {pathname
+                    .split("/")
+                    .pop()
+                    ?.replace(/-/g, " ")
+                    .replace(/\b\w/g, (c) => c.toUpperCase()) ?? "Dashboard"}
                 </span>
               </div>
 
               <div className="hidden lg:block" />
 
               <div className="flex items-center gap-2.5">
-                <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-white/20 bg-white/5 px-2.5 py-1">
+                <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-v-line px-2.5 py-1">
                   <span className="relative flex h-1.5 w-1.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-50" />
-                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-white" />
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-v-accent opacity-60" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-v-accent" />
                   </span>
-                  <span className="text-[11px] font-medium text-white">
-                    Live
-                  </span>
+                  <span className="v-t-micro text-v-mut">Live</span>
                 </div>
                 <UserButton
-                  appearance={{ elements: { avatarBox: "h-8 w-8 rounded-xl" } }}
+                  appearance={{
+                    elements: { avatarBox: "h-8 w-8 rounded-none" },
+                  }}
                 />
               </div>
             </header>
 
             {/* ── Page content ─────────────────────────────────────────────────── */}
-            <main
-              className={cn(
-                "flex-1 min-h-0",
-                isAiManager ? "overflow-hidden" : "overflow-y-auto bg-black",
-              )}
-            >
+            <main className="flex-1 min-h-0 overflow-y-auto bg-v-bg">
               {isAllowed ? (
-                isAiManager ? (
-                  // AI Manager gets full height, no padding wrapper
-                  children
-                ) : (
-                  <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 pb-28 lg:pb-8 bg-black min-h-full">
-                    {children}
-                  </div>
-                )
+                <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 pb-28 lg:pb-8 bg-v-bg min-h-full">
+                  {children}
+                </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full pt-32 text-center px-4">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/5 border border-white/10 mb-6">
-                    <X className="h-8 w-8 text-zinc-500" />
+                  <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-v border border-v-line bg-v-bg-raise">
+                    <X className="h-8 w-8 text-v-faint" />
                   </div>
-                  <h2 className="text-xl font-medium text-white mb-2">
+                  <h2 className="mb-2 font-v-display text-xl font-medium text-v-ink">
                     Feature Disabled
                   </h2>
-                  <p className="text-zinc-400 text-sm max-w-md">
+                  <p className="max-w-md text-sm text-v-mut">
                     This module has been deactivated by the platform
                     administrator.
                   </p>
                   <Link
                     href="/dashboard"
-                    className="mt-8 px-4 py-2 bg-white text-black font-medium text-sm rounded-lg hover:bg-zinc-200 transition-colors"
+                    className="v-press mt-8 rounded-v bg-v-accent px-4 py-2 text-sm font-semibold text-v-accent-ink transition-[filter] hover:brightness-95"
                   >
                     Return to Overview
                   </Link>
@@ -533,7 +505,7 @@ export default function DashboardLayout({
           className="lg:hidden fixed bottom-0 inset-x-0 z-30 flex items-end"
           style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
         >
-          <div className="w-full border-t border-white/10 bg-black/90 backdrop-blur-xl px-2 pt-1">
+          <div className="w-full border-t border-v-line bg-v-bg px-2 pt-1">
             <div className="flex items-center justify-around">
               {allowedNavItems.map((item) => (
                 <BottomTab key={item.href} item={item} />

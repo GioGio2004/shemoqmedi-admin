@@ -63,14 +63,14 @@ function ColorControl({
 }) {
   const isValid = value.startsWith("#") && (value.length === 4 || value.length === 7);
   return (
-    <div className="flex items-center justify-between gap-4 py-3 border-b border-white/5 last:border-0">
+    <div className="flex items-center justify-between gap-4 border-b border-v-line py-3 last:border-0">
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-white">{label}</p>
-        <p className="text-[11px] text-zinc-500 mt-0.5">{description}</p>
+        <p className="text-sm font-medium text-v-ink">{label}</p>
+        <p className="mt-0.5 text-[11px] text-v-faint">{description}</p>
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <div
-          className="relative h-9 w-9 rounded-lg border border-white/20 overflow-hidden cursor-pointer shrink-0"
+          className="relative h-9 w-9 shrink-0 cursor-pointer overflow-hidden rounded-v border border-v-line"
           style={{ backgroundColor: isValid ? value : "#ffffff" }}
         >
           <input
@@ -84,7 +84,7 @@ function ColorControl({
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-[92px] rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-mono text-white placeholder:text-zinc-600 focus:outline-none focus:border-white/30 transition-all"
+          className="w-[92px] rounded-v border border-v-line bg-white/[0.03] px-2.5 py-1.5 font-v-mono text-xs text-v-ink transition-all placeholder:text-v-faint focus:border-v-accent focus:outline-none"
           placeholder="#000000"
           spellCheck={false}
         />

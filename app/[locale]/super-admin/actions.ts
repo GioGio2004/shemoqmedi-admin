@@ -80,6 +80,105 @@ export async function inviteUserToOrganizationAction(formData: FormData) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CREATE ORGANIZATION ACTION
+// Creates a Clerk organization with the super admin as its first admin member
+// (via `createdBy`). The Clerk webhook (organization.created) syncs the org to
+// Convex + creates a draft venue — no extra backend work is needed here.
+// ─────────────────────────────────────────────────────────────────────────────
+export async function createOrganizationAction(params: {
+  name: string;
+  slug?: string;
+}): Promise<
+  | { ok: true; organizationId: string; name: string; slug: string | null }
+  | { ok: false; error: string }
+> {
+  const { userId, client } = await assertSuperAdmin();
+
+  const name = params.name?.trim();
+  const slug = params.slug?.trim();
+
+  if (!name) {
+    return { ok: false, error: "Organization name is required." };
+  }
+
+  try {
+    const organization = await client.organizations.createOrganization({
+      name,
+      ...(slug ? { slug } : {}),
+      // `createdBy` makes the super admin the org's first admin member,
+      // which is also what makes client-side setActive (switching) work.
+      createdBy: userId,
+    });
+
+    console.log(
+      `✅ Organization "${organization.name}" (${organization.id}) created by super admin ${userId}`
+    );
+    revalidatePath("/super-admin");
+    return {
+      ok: true,
+      organizationId: organization.id,
+      name: organization.name,
+      slug: organization.slug ?? null,
+    };
+  } catch (error: any) {
+    console.error("Failed to create organization:", error);
+    return {
+      ok: false,
+      error:
+        error.errors?.[0]?.message ??
+        error.message ??
+        "Failed to create organization.",
+    };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JOIN ORGANIZATION ACTION
+// Adds the super admin to the target org as org:admin so they can switch into
+// it. Idempotent: "already a member" errors are treated as success.
+// ─────────────────────────────────────────────────────────────────────────────
+export async function joinOrganizationAction(params: {
+  organizationId: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { userId, client } = await assertSuperAdmin();
+
+  const organizationId = params.organizationId?.trim();
+  if (!organizationId) {
+    return { ok: false, error: "Organization ID is required." };
+  }
+
+  try {
+    await client.organizations.createOrganizationMembership({
+      organizationId,
+      userId,
+      role: "org:admin",
+    });
+
+    console.log(
+      `✅ Super admin ${userId} joined organization ${organizationId} as org:admin`
+    );
+    revalidatePath("/super-admin");
+    return { ok: true };
+  } catch (error: any) {
+    const code: string | undefined = error?.errors?.[0]?.code;
+    const message: string =
+      error?.errors?.[0]?.message ?? error?.message ?? "";
+
+    // Idempotent: already being a member counts as success.
+    if (
+      code === "already_a_member_in_organization" ||
+      code === "duplicate_record" ||
+      /already.*member/i.test(message)
+    ) {
+      return { ok: true };
+    }
+
+    console.error("Failed to join organization:", error);
+    return { ok: false, error: message || "Failed to join organization." };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // IMPERSONATE USER ACTION
 // Generates an actor token to securely log in as the target user.
 // ─────────────────────────────────────────────────────────────────────────────

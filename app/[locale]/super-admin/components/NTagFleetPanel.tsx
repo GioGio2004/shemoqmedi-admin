@@ -8,24 +8,17 @@ import { toast } from "sonner";
 import {
   Nfc, Plus, RefreshCw, Search, Copy, Check,
   Trash2, Edit3, X, Loader2, Wifi, WifiOff,
-  Tag, Activity, AlertTriangle, ChevronDown,
-  ChevronUp, ScanLine, ExternalLink,
+  ChevronDown, ChevronUp, ScanLine, ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// ─── SHARED STYLE ATOMS ──────────────────────────────────────────────────────
+const inputCls =
+  "w-full bg-v-bg border border-v-line rounded-v px-3 py-2.5 text-sm text-v-ink placeholder:text-v-faint outline-none focus:border-v-faint transition-colors";
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function generateUUID() {
   return `shemo-${crypto.randomUUID()}`;
-}
-
-function timeAgo(ts: number) {
-  const d = Date.now() - ts;
-  const m = Math.floor(d / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(d / 3600000);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(d / 86400000)}d ago`;
 }
 
 // ─── PROVISION FORM ───────────────────────────────────────────────────────────
@@ -83,73 +76,63 @@ function ProvisionForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="p-5 bg-white/[0.02] border border-white/10 rounded-2xl space-y-4"
+      className="space-y-4 rounded-v border border-v-line bg-v-bg p-4"
     >
-      <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-3">
-        Provision new chip
-      </p>
+      <p className="v-t-micro text-v-faint">Provision new chip</p>
 
       {/* UUID row */}
       <div>
-        <p className="text-[10px] uppercase tracking-widest font-semibold text-zinc-600 mb-1.5">
-          Chip UUID
-        </p>
+        <p className="v-t-micro mb-1.5 text-v-faint">Chip UUID</p>
         <div className="flex gap-2">
-          <code className="flex-1 text-[11px] font-mono text-white bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 truncate">
+          <code className="flex-1 truncate rounded-v border border-v-line bg-v-bg-raise px-3 py-2.5 font-v-mono text-[11px] text-v-ink">
             {uuid}
           </code>
           <button
             type="button"
             onClick={handleCopy}
             title="Copy"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-zinc-400 hover:text-white text-xs transition-colors shrink-0"
+            className="v-press flex shrink-0 items-center rounded-v border border-v-line px-3 py-2 text-v-mut transition-colors hover:border-v-faint hover:text-v-ink"
           >
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied ? <Check className="h-3.5 w-3.5 text-v-accent" /> : <Copy className="h-3.5 w-3.5" />}
           </button>
           <button
             type="button"
             onClick={() => setUuid(generateUUID())}
             title="Regenerate"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-white/10 text-zinc-400 hover:text-white text-xs transition-colors shrink-0"
+            className="v-press flex shrink-0 items-center rounded-v border border-v-line px-3 py-2 text-v-mut transition-colors hover:border-v-faint hover:text-v-ink"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            <RefreshCw className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
 
       {/* Table + org row */}
-      <div className="grid sm:grid-cols-3 gap-3">
+      <div className="grid gap-3 sm:grid-cols-3">
         <div>
-          <p className="text-[10px] uppercase tracking-widest font-semibold text-zinc-600 mb-1.5">
-            Table / Location
-          </p>
+          <p className="v-t-micro mb-1.5 text-v-faint">Table / Location</p>
           <input
             value={tableName}
             onChange={(e) => setTableName(e.target.value)}
             placeholder="e.g. Table 7, Bar"
-            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-white/25"
+            className={inputCls}
           />
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-widest font-semibold text-zinc-600 mb-1.5">
-            Seat Number
-          </p>
+          <p className="v-t-micro mb-1.5 text-v-faint">Seat Number</p>
           <input
             type="number"
             value={seatNumber}
             onChange={(e) => setSeatNumber(e.target.value)}
             placeholder="e.g. 7"
-            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-white/25"
+            className={`${inputCls} font-v-mono`}
           />
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-widest font-semibold text-zinc-600 mb-1.5">
-            Assign to Org
-          </p>
+          <p className="v-t-micro mb-1.5 text-v-faint">Assign to Org</p>
           <select
             value={orgId}
             onChange={(e) => setOrgId(e.target.value)}
-            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white outline-none focus:border-white/25"
+            className={`${inputCls} cursor-pointer`}
           >
             <option value="">— Unassigned —</option>
             {organizations.map((o: any) => (
@@ -162,28 +145,26 @@ function ProvisionForm({
       </div>
 
       {/* QR + URL preview */}
-      <div className="flex items-center gap-4 p-3 bg-white/[0.02] border border-white/10 rounded-xl">
+      <div className="flex items-center gap-4 rounded-v border border-v-line bg-v-bg-raise p-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={qrUrl}
           alt="NFC UUID QR"
-          className="w-[64px] h-[64px] rounded-md bg-white p-1 shrink-0"
+          className="h-[64px] w-[64px] shrink-0 rounded-v bg-white p-1"
         />
         <div className="min-w-0 flex-1 space-y-1.5">
-          <p className="text-[10px] uppercase tracking-widest font-semibold text-zinc-600">
-            Tap URL
-          </p>
-          <code className="text-[10px] font-mono text-zinc-300 bg-white/5 border border-white/10 px-2 py-1 rounded-md block truncate">
+          <p className="v-t-micro text-v-faint">Tap URL</p>
+          <code className="block truncate rounded-v border border-v-line bg-v-bg px-2 py-1 font-v-mono text-[10px] text-v-mut">
             {fullUrl}
           </code>
-          <div className="flex gap-2">
+          <div className="flex gap-3">
             <a
               href={fullUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-white transition-colors"
+              className="v-t-micro flex items-center gap-1 text-v-mut transition-colors hover:text-v-ink"
             >
-              <ExternalLink className="w-3 h-3" /> Test URL
+              <ExternalLink className="h-3 w-3" /> Test URL
             </a>
             <button
               type="button"
@@ -191,9 +172,9 @@ function ProvisionForm({
                 const qrBig = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&format=png&margin=12&data=${encodeURIComponent(fullUrl)}`;
                 window.open(qrBig, "_blank");
               }}
-              className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-white transition-colors"
+              className="v-t-micro flex items-center gap-1 text-v-mut transition-colors hover:text-v-ink"
             >
-              <ScanLine className="w-3 h-3" /> Full QR
+              <ScanLine className="h-3 w-3" /> Full QR
             </button>
           </div>
         </div>
@@ -202,12 +183,12 @@ function ProvisionForm({
       <button
         type="submit"
         disabled={busy}
-        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-white text-black font-bold text-sm hover:bg-zinc-100 transition-colors disabled:opacity-50"
+        className="v-t-micro v-press flex w-full items-center justify-center gap-2 rounded-v bg-v-accent py-3 text-v-accent-ink disabled:opacity-40"
       >
         {busy ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
+          <Loader2 className="h-4 w-4 animate-spin" />
         ) : (
-          <Nfc className="w-4 h-4" />
+          <Nfc className="h-4 w-4" />
         )}
         {busy ? "Provisioning…" : "Register NFC Tag"}
       </button>
@@ -274,100 +255,101 @@ function TagRow({
   return (
     <div
       className={cn(
-        "border rounded-xl overflow-hidden transition-all",
+        "overflow-hidden rounded-v border transition-colors",
         tag.isActive
-          ? "border-white/10 bg-[#09090b]"
-          : "border-red-500/20 bg-red-950/10"
+          ? "border-v-line bg-v-bg-raise"
+          : "border-red-500/30 bg-v-bg-raise",
       )}
     >
       {/* Main row */}
       <div className="flex items-center gap-3 px-4 py-3">
+        {/* Live-state dot: accent = live in the field */}
         <div
           className={cn(
-            "w-2 h-2 rounded-full shrink-0",
-            tag.isActive ? "bg-emerald-500" : "bg-red-500"
+            "h-1.5 w-1.5 shrink-0 rounded-full",
+            tag.isActive ? "bg-v-accent" : "bg-red-400",
           )}
         />
 
-        <code className="text-[11px] font-mono text-zinc-300 min-w-0 truncate flex-1">
+        <code className="min-w-0 flex-1 truncate font-v-mono text-[11px] text-v-mut">
           {tag.volooTagsUUID}
         </code>
 
-        <span className="text-xs text-zinc-400 shrink-0 hidden sm:block">
+        <span className="hidden shrink-0 text-xs text-v-mut sm:block">
           {tag.tableName ?? (
-            <span className="text-zinc-600 italic">no table</span>
+            <span className="italic text-v-faint">no table</span>
           )}
           {tag.seatNumber !== undefined && ` (Seat ${tag.seatNumber})`}
         </span>
 
         <span
           className={cn(
-            "text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0 hidden md:block",
+            "v-t-micro hidden shrink-0 rounded-v border px-2 py-0.5 md:block",
             org
-              ? "bg-white/5 border-white/10 text-white"
-              : "bg-zinc-900 border-white/5 text-zinc-600"
+              ? "border-v-line text-v-ink"
+              : "border-v-line text-v-faint",
           )}
         >
           {org?.name ?? "unassigned"}
         </span>
 
-        <span className="text-xs text-zinc-500 tabular-nums shrink-0">
+        <span className="shrink-0 font-v-mono text-xs tabular-nums text-v-mut">
           {tag.tapCount ?? 0} taps
         </span>
 
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex shrink-0 items-center gap-1">
           <button
             onClick={handleToggleActive}
             title={tag.isActive ? "Deactivate" : "Activate"}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-white/5 transition-colors"
+            className="v-press rounded-v p-1.5 text-v-faint transition-colors hover:bg-v-bg hover:text-v-ink"
           >
             {tag.isActive ? (
-              <Wifi className="w-3.5 h-3.5" />
+              <Wifi className="h-3.5 w-3.5" />
             ) : (
-              <WifiOff className="w-3.5 h-3.5" />
+              <WifiOff className="h-3.5 w-3.5" />
             )}
           </button>
           <button
             onClick={() => setEditing((v) => !v)}
             title="Edit"
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-white hover:bg-white/5 transition-colors"
+            className="v-press rounded-v p-1.5 text-v-faint transition-colors hover:bg-v-bg hover:text-v-ink"
           >
             {editing ? (
-              <X className="w-3.5 h-3.5" />
+              <X className="h-3.5 w-3.5" />
             ) : (
-              <Edit3 className="w-3.5 h-3.5" />
+              <Edit3 className="h-3.5 w-3.5" />
             )}
           </button>
           <button
             onClick={handleDelete}
             title="Delete"
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            className="v-press rounded-v p-1.5 text-v-faint transition-colors hover:bg-red-500/10 hover:text-red-400"
           >
-            <Trash2 className="w-3.5 h-3.5" />
+            <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
 
       {/* Edit row */}
       {editing && (
-        <div className="px-4 pb-4 border-t border-white/5 pt-3 flex flex-col sm:flex-row gap-2">
+        <div className="flex flex-col gap-2 border-t border-v-line px-4 pb-4 pt-3 sm:flex-row">
           <input
             value={tableName}
             onChange={(e) => setTableName(e.target.value)}
             placeholder="Table name…"
-            className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-white/25"
+            className={`${inputCls} flex-1 py-2`}
           />
           <input
             type="number"
             value={seatNumber}
             onChange={(e) => setSeatNumber(e.target.value)}
             placeholder="Seat number…"
-            className="w-32 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-white/25"
+            className={`${inputCls} py-2 font-v-mono sm:w-32`}
           />
           <select
             value={orgId}
             onChange={(e) => setOrgId(e.target.value)}
-            className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-white/25"
+            className={`${inputCls} flex-1 cursor-pointer py-2`}
           >
             <option value="">— Unassigned —</option>
             {organizations.map((o: any) => (
@@ -379,12 +361,12 @@ function TagRow({
           <button
             onClick={handleSave}
             disabled={busy}
-            className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-lg text-sm font-semibold hover:bg-zinc-100 transition-colors disabled:opacity-50 shrink-0"
+            className="v-t-micro v-press flex shrink-0 items-center justify-center gap-2 rounded-v bg-v-accent px-4 py-2 text-v-accent-ink disabled:opacity-40"
           >
             {busy ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
-              <Check className="w-3.5 h-3.5" />
+              <Check className="h-3.5 w-3.5" />
             )}
             Save
           </button>
@@ -434,66 +416,58 @@ export function NTagFleetPanel({
 
   const STATS = stats
     ? [
-        { label: "Total chips", value: stats.totalTags, icon: Tag },
-        { label: "Active", value: stats.activeTags, icon: Wifi },
-        { label: "Total taps", value: stats.totalTaps, icon: Activity },
-        {
-          label: "Unassigned",
-          value: stats.unassignedTags,
-          icon: AlertTriangle,
-        },
+        { label: "Total chips", value: stats.totalTags },
+        { label: "Active", value: stats.activeTags },
+        { label: "Total taps", value: stats.totalTaps },
+        { label: "Unassigned", value: stats.unassignedTags },
       ]
     : [];
 
   return (
     <div className="space-y-6">
-      {/* Stats */}
+      {/* Stats — hairline grid, mono numbers */}
       {stats && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {STATS.map(({ label, value, icon: Icon }) => (
-            <div
-              key={label}
-              className="p-4 bg-[#09090b] border border-white/10 rounded-xl"
-            >
-              <Icon className="w-3.5 h-3.5 text-zinc-500 mb-2" />
-              <p className="text-2xl font-medium text-white tabular-nums">
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-v border border-v-line bg-v-line sm:grid-cols-4">
+          {STATS.map(({ label, value }) => (
+            <div key={label} className="bg-v-bg-raise p-4">
+              <p className="v-t-micro text-v-faint">{label}</p>
+              <p className="mt-1 font-v-mono text-2xl tabular-nums text-v-ink">
                 {value}
               </p>
-              <p className="text-xs text-zinc-500 mt-0.5">{label}</p>
             </div>
           ))}
         </div>
       )}
 
       {/* Provision toggle & Domain config */}
-      <div className="bg-[#09090b] border border-white/10 rounded-xl p-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="rounded-v border border-v-line bg-v-bg-raise p-4">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <button
             onClick={() => setShowProvision((v) => !v)}
-            className="flex items-center gap-2 text-sm font-medium text-zinc-300 hover:text-white transition-colors"
+            className="v-t-micro v-press flex items-center gap-2 text-v-mut transition-colors hover:text-v-ink"
           >
             {showProvision ? (
-              <ChevronUp className="w-4 h-4" />
+              <ChevronUp className="h-4 w-4" />
             ) : (
-              <ChevronDown className="w-4 h-4" />
+              <ChevronDown className="h-4 w-4" />
             )}
-            <Plus className="w-4 h-4" />
+            <Plus className="h-4 w-4" />
             {showProvision ? "Hide provisioning form" : "Provision a new chip"}
           </button>
 
           <div className="flex items-center gap-2">
-            <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-widest shrink-0">Tap Domain</span>
+            <span className="v-t-micro shrink-0 text-v-faint">Tap Domain</span>
             <input
               value={baseDomain}
               onChange={(e) => handleDomainChange(e.target.value)}
               placeholder="e.g. https://ngrok.app"
-              className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-zinc-600 outline-none focus:border-white/25 w-[200px]"
+              className="w-full min-w-0 rounded-v border border-v-line bg-v-bg px-3 py-1.5 font-v-mono text-xs text-v-ink outline-none transition-colors placeholder:text-v-faint focus:border-v-faint sm:w-[200px]"
             />
           </div>
         </div>
 
         {showProvision && (
-          <div className="mt-4 border-t border-white/10 pt-4">
+          <div className="mt-4 border-t border-v-line pt-4">
             <ProvisionForm
               organizations={organizations}
               baseDomain={baseDomain}
@@ -507,20 +481,20 @@ export function NTagFleetPanel({
       </div>
 
       {/* Filter bar */}
-      <div className="flex flex-col sm:flex-row gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none" />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-v-faint" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search UUID or table name…"
-            className="w-full pl-9 pr-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder:text-zinc-600 outline-none focus:border-white/25"
+            className={`${inputCls} pl-9`}
           />
         </div>
         <select
           value={filterOrg ?? ""}
           onChange={(e) => setFilterOrg(e.target.value || undefined)}
-          className="bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white outline-none focus:border-white/25"
+          className={`${inputCls} cursor-pointer sm:w-auto`}
         >
           <option value="">All organizations</option>
           {organizations.map((o: any) => (
@@ -534,15 +508,15 @@ export function NTagFleetPanel({
       {/* Tag list */}
       {tags === undefined ? (
         <div className="flex items-center justify-center py-16">
-          <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
+          <Loader2 className="h-5 w-5 animate-spin text-v-faint" />
         </div>
       ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center gap-3 border border-dashed border-white/10 rounded-2xl">
-          <Nfc className="w-9 h-9 text-zinc-700" />
-          <p className="text-zinc-400 font-medium text-sm">
+        <div className="flex flex-col items-center justify-center gap-3 rounded-v border border-dashed border-v-line py-16 text-center">
+          <Nfc className="h-9 w-9 text-v-faint" />
+          <p className="text-sm text-v-ink">
             {search ? "No tags match your search" : "No chips provisioned yet"}
           </p>
-          <p className="text-xs text-zinc-600">
+          <p className="text-xs text-v-mut">
             Click &ldquo;Provision a new chip&rdquo; above to register your
             first NTAG216.
           </p>

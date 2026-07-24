@@ -9,8 +9,11 @@ export default async function BagsOrdersPage() {
   if (!orgId) {
     return (
       <div className="pt-16 text-center">
-        <h1 className="text-xl font-medium text-white">No workspace selected</h1>
-        <p className="mt-2 text-sm text-zinc-400">
+        <p className="v-t-micro mb-2 text-v-faint">Surprise Bags</p>
+        <h1 className="font-v-display text-xl font-medium text-v-ink">
+          No workspace selected
+        </h1>
+        <p className="mt-2 text-sm text-v-mut">
           Select a workspace to see incoming bag orders.
         </p>
       </div>

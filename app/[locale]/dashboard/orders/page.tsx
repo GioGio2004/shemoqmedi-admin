@@ -41,19 +41,19 @@ const STATUS_CONFIG = {
   pending: {
     label: "Pending",
     icon: Clock,
-    classes: "bg-amber-500/10 text-amber-400 border border-amber-500/20",
-    dot: "bg-amber-400 animate-pulse",
+    classes: "border border-v-accent/40 text-v-accent",
+    dot: "bg-v-accent animate-pulse",
   },
   completed: {
     label: "Completed",
     icon: CheckCircle,
-    classes: "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20",
-    dot: "bg-emerald-400",
+    classes: "border border-v-line text-v-mut",
+    dot: "bg-v-faint",
   },
   cancelled: {
     label: "Cancelled",
     icon: XCircle,
-    classes: "bg-red-500/10 text-red-400 border border-red-500/20",
+    classes: "border border-red-400/25 text-red-400/90",
     dot: "bg-red-400",
   },
 } as const;
@@ -68,7 +68,7 @@ export default function OrdersPage() {
   if (!isLoaded || orders === undefined) {
     return (
       <div className="flex items-center justify-center py-32">
-        <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+        <Loader2 className="h-6 w-6 animate-spin text-v-faint" />
       </div>
     );
   }
@@ -76,8 +76,8 @@ export default function OrdersPage() {
   if (!orgSlug) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
-        <p className="font-medium text-white">No workspace selected</p>
-        <p className="text-sm text-zinc-400 max-w-xs">
+        <p className="font-medium text-v-ink">No workspace selected</p>
+        <p className="max-w-xs text-sm text-v-mut">
           Select a workspace from the sidebar to view its orders.
         </p>
       </div>
@@ -88,54 +88,54 @@ export default function OrdersPage() {
   const others = orders.filter((o) => o.status !== "pending");
 
   return (
-    <div className="space-y-6 max-w-5xl text-zinc-50 pb-20">
+    <div className="max-w-5xl space-y-8 pb-20 text-v-ink">
       {/* Header */}
       <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both flex items-start justify-between gap-4 flex-wrap">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <ShoppingBag className="h-5 w-5 text-white" />
-            <h1 className="text-3xl font-medium tracking-tight text-white">Orders</h1>
+            <ShoppingBag className="h-5 w-5 text-v-mut" />
+            <h1 className="font-v-display text-2xl font-medium tracking-tight text-v-ink sm:text-3xl">
+              Orders
+            </h1>
           </div>
-          <p className="text-sm text-zinc-400">
+          <p className="text-sm text-v-mut">
             Real-time orders placed by customers at {organization?.name}.
           </p>
         </div>
 
         {/* Summary chips */}
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-semibold">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+          <div className="v-t-micro flex items-center gap-1.5 rounded-full border border-v-accent/40 px-3 py-1.5 tabular-nums text-v-accent">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-v-accent" />
             {pending.length} pending
           </div>
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-zinc-400 text-xs font-semibold">
-            <Receipt className="w-3 h-3" />
+          <div className="v-t-micro flex items-center gap-1.5 rounded-full border border-v-line px-3 py-1.5 tabular-nums text-v-mut">
+            <Receipt className="h-3 w-3" />
             {orders.length} total
           </div>
         </div>
       </div>
 
       {orders.length === 0 ? (
-        <div className="p-16 border border-white/5 bg-white/[0.02] rounded-2xl flex flex-col items-center text-center gap-4">
-          <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
-            <ShoppingBag className="w-8 h-8 text-zinc-700" />
+        <div className="flex flex-col items-center gap-4 rounded-v border border-dashed border-v-line p-16 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-v border border-v-line bg-v-bg-raise">
+            <ShoppingBag className="h-8 w-8 text-v-faint" />
           </div>
           <div>
-            <p className="text-zinc-300 font-medium text-lg">No orders yet</p>
-            <p className="text-sm text-zinc-500 mt-1 max-w-xs">
+            <p className="text-lg font-medium text-v-mut">No orders yet</p>
+            <p className="mt-1 max-w-xs text-sm text-v-faint">
               When customers place an order from the AI chat, it will appear here in real-time.
             </p>
           </div>
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-8">
           {/* Pending orders first */}
           {pending.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-3">
-                <Timer className="w-4 h-4 text-amber-400" />
-                <h2 className="text-sm font-semibold text-amber-400 uppercase tracking-widest">
-                  Awaiting Action
-                </h2>
+              <div className="mb-3 flex items-center gap-2 border-b border-v-line pb-2">
+                <Timer className="h-4 w-4 text-v-accent" />
+                <h2 className="v-t-micro text-v-mut">01 — Awaiting action</h2>
               </div>
               <div className="grid gap-3">
                 {pending.map((order) => (
@@ -148,11 +148,9 @@ export default function OrdersPage() {
           {/* Completed / cancelled */}
           {others.length > 0 && (
             <section>
-              <div className="flex items-center gap-2 mb-3">
-                <ChefHat className="w-4 h-4 text-zinc-500" />
-                <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-widest">
-                  History
-                </h2>
+              <div className="mb-3 flex items-center gap-2 border-b border-v-line pb-2">
+                <ChefHat className="h-4 w-4 text-v-faint" />
+                <h2 className="v-t-micro text-v-faint">02 — History</h2>
               </div>
               <div className="grid gap-3">
                 {others.map((order) => (
@@ -182,76 +180,67 @@ function OrderCard({
   return (
     <div
       className={cn(
-        "border rounded-2xl overflow-hidden transition-all duration-300",
-        order.status === "pending"
-          ? "border-amber-500/20 bg-[#0f0d09]"
-          : "border-white/[0.06] bg-[#09090b]"
+        "overflow-hidden rounded-v border bg-v-bg-raise transition-colors duration-300",
+        order.status === "pending" ? "border-v-accent/30" : "border-v-line"
       )}
     >
       {/* Card header */}
-      <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-4 border-b border-white/[0.06]">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="flex items-center justify-between gap-3 border-b border-v-line px-4 py-4 sm:px-5">
+        <div className="flex min-w-0 items-center gap-3">
           {/* Seat badge */}
-          <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex flex-col items-center justify-center shrink-0">
-            <Hash className="w-3 h-3 text-zinc-600 mb-0" />
-            <span className="text-sm font-black text-white leading-none">{order.seatNumber}</span>
+          <div className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-v border border-v-line bg-white/[0.03]">
+            <Hash className="mb-0 h-3 w-3 text-v-faint" />
+            <span className="font-v-mono text-sm leading-none text-v-ink">{order.seatNumber}</span>
           </div>
 
           <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-semibold text-white">Table {order.seatNumber}</span>
-              <span className={cn("flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold", status.classes)}>
-                <span className={cn("w-1.5 h-1.5 rounded-full", status.dot)} />
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-v-ink">Table {order.seatNumber}</span>
+              <span className={cn("v-t-micro flex items-center gap-1.5 rounded-v px-2 py-0.5", status.classes)}>
+                <span className={cn("h-1.5 w-1.5 rounded-full", status.dot)} />
                 {status.label}
               </span>
             </div>
-            <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-[11px] text-zinc-500 font-mono">{formatTime(order.createdAt)}</span>
-              <span className="text-zinc-700">·</span>
-              <span className="text-[11px] text-zinc-500">{formatRelativeTime(order.createdAt)}</span>
+            <div className="mt-0.5 flex items-center gap-2">
+              <span className="font-v-mono text-[11px] tabular-nums text-v-faint">{formatTime(order.createdAt)}</span>
+              <span className="text-v-faint">·</span>
+              <span className="text-[11px] text-v-faint">{formatRelativeTime(order.createdAt)}</span>
             </div>
           </div>
         </div>
 
         {/* Total */}
-        <div className="text-right shrink-0">
-          <p className="text-xs text-zinc-500 font-medium mb-0.5">
+        <div className="shrink-0 text-right">
+          <p className="mb-0.5 text-xs tabular-nums text-v-faint">
             {order.items.length} item{order.items.length !== 1 ? "s" : ""}
           </p>
-          <p className="text-lg font-black font-mono text-white tabular-nums">
+          <p className="font-v-mono text-lg font-medium tabular-nums text-v-ink">
             ${(order.totalPrice / 100).toFixed(2)}
           </p>
         </div>
       </div>
 
       {/* Items breakdown */}
-      <div className="px-4 sm:px-5 py-4">
+      <div className="px-4 py-4 sm:px-5">
         <div className="space-y-2.5">
           {order.items.map((item: any, idx: number) => (
             <div key={idx} className="flex items-start gap-3">
               {/* Quantity chip */}
-              <div
-                className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black text-white border"
-                style={{
-                  backgroundColor: "rgba(234,88,12,0.12)",
-                  borderColor: "rgba(234,88,12,0.2)",
-                  color: "#f97316",
-                }}
-              >
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-v border border-v-line bg-white/[0.03] font-v-mono text-xs tabular-nums text-v-ink">
                 {item.quantity}
               </div>
 
-              <div className="flex-1 min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-white truncate">{item.name}</p>
-                  <p className="text-sm font-mono text-zinc-300 font-medium shrink-0 tabular-nums">
+                  <p className="truncate text-sm font-medium text-v-ink">{item.name}</p>
+                  <p className="shrink-0 font-v-mono text-sm tabular-nums text-v-mut">
                     ${((item.price * item.quantity) / 100).toFixed(2)}
                   </p>
                 </div>
-                <p className="text-[11px] text-zinc-500 mt-0.5">
+                <p className="mt-0.5 text-[11px] tabular-nums text-v-faint">
                   ${(item.price / 100).toFixed(2)} each
                   {item.quantity > 1 && (
-                    <span className="text-zinc-600"> · {item.quantity}×</span>
+                    <span> · {item.quantity}×</span>
                   )}
                 </p>
               </div>
@@ -260,9 +249,9 @@ function OrderCard({
         </div>
 
         {/* Subtotal breakdown */}
-        <div className="mt-4 pt-3 border-t border-white/[0.06] flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-widest text-zinc-600">Order Total</span>
-          <span className="text-base font-black font-mono text-white tabular-nums">
+        <div className="mt-4 flex items-center justify-between border-t border-v-line pt-3">
+          <span className="v-t-micro text-v-faint">Order Total</span>
+          <span className="font-v-mono text-base font-medium tabular-nums text-v-ink">
             ${(order.totalPrice / 100).toFixed(2)}
           </span>
         </div>
@@ -270,19 +259,19 @@ function OrderCard({
 
       {/* Actions */}
       {order.status === "pending" && (
-        <div className="px-4 sm:px-5 pb-4 flex gap-2">
+        <div className="flex gap-2 px-4 pb-4 sm:px-5">
           <button
             onClick={() => updateStatus({ orderId: order._id, status: "completed" })}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-emerald-500 text-emerald-950 font-bold text-sm transition-all hover:bg-emerald-400 active:scale-95"
+            className="v-press flex flex-1 items-center justify-center gap-2 rounded-v bg-v-accent px-4 py-2.5 text-sm font-semibold text-v-accent-ink transition-[filter] hover:brightness-95"
           >
-            <CheckCircle className="w-4 h-4" />
+            <CheckCircle className="h-4 w-4" />
             Mark Complete
           </button>
           <button
             onClick={() => updateStatus({ orderId: order._id, status: "cancelled" })}
-            className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-transparent border border-red-500/30 text-red-400 font-bold text-sm transition-all hover:bg-red-500/10 active:scale-95"
+            className="v-press flex items-center justify-center gap-2 rounded-v border border-red-400/25 bg-transparent px-4 py-2.5 text-sm font-medium text-red-400/90 transition-colors hover:bg-red-400/10"
           >
-            <XCircle className="w-4 h-4" />
+            <XCircle className="h-4 w-4" />
             Cancel
           </button>
         </div>
@@ -290,7 +279,7 @@ function OrderCard({
 
       {order.status === "completed" && order.completedAt && (
         <div className="px-5 pb-4">
-          <p className="text-[11px] text-zinc-600 font-mono">
+          <p className="font-v-mono text-[11px] tabular-nums text-v-faint">
             Completed at {formatTime(order.completedAt)}
           </p>
         </div>
