@@ -1,7 +1,7 @@
-import { v } from "convex/values";
+import { v, ConvexError } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { GenericQueryCtx } from "convex/server";
-import { verifyOrgAccess } from "./authHelpers";
+import { verifyOrgAccess, requireSuperAdmin } from "./authHelpers";
 
 // Helper to find an org quickly
 async function getOrgByClerkId(ctx: GenericQueryCtx<any>, clerkId: string) {
@@ -38,6 +38,12 @@ export const upsertFromClerk = internalMutation({
         createdAt: Date.now(),
       });
     } else {
+      // CONVEX OWNS THE SLUG. Clerk's slug is only an initial value — renames
+      // happen via migrateOrgSlug (super admin), and a Clerk-side update event
+      // must never clobber a custom slug back to the auto-generated one.
+      if (existingOrg.slug) {
+        orgAttributes.slug = existingOrg.slug;
+      }
       console.log("📝 Updating existing organization:", orgAttributes.name);
       await ctx.db.patch(existingOrg._id, orgAttributes);
     }
@@ -271,6 +277,130 @@ export const updateStorefrontConfig = mutation({
       `🏪 storefrontConfig updated for org ${orgId}. Keys:`,
       Object.keys(patch).join(", "),
     );
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MIGRATE_ORG_SLUG — super-admin only. CONVEX IS THE SOURCE OF TRUTH for the
+// org slug: Clerk's slug is only the initial value at creation, and the
+// webhook (upsertFromClerk) preserves the Convex slug on updates. Clerk's own
+// slug is never read at runtime, so it may drift — that's fine.
+//
+// The org slug is load-bearing beyond the organizations row:
+//   • /menu/{slug} resolves via publicMenu.get → organizations.by_slug
+//   • the org-born venues row shares the same slug (directory + sitemap + SEO)
+//   • chatSessions / chatMessages / chatRatings / tableOrders / ai_training_logs
+//     store it literally as `cafeId` (tenant-isolation key)
+// This mutation cascades all of that so history is never orphaned.
+// ─────────────────────────────────────────────────────────────────────────────
+const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export const migrateOrgSlug = mutation({
+  args: {
+    orgClerkId: v.string(),
+    newSlug: v.string(),
+  },
+  handler: async (ctx, { orgClerkId, newSlug }) => {
+    await requireSuperAdmin(ctx);
+
+    if (!SLUG_RE.test(newSlug) || newSlug.length > 60) {
+      throw new ConvexError(
+        "Slug must be lowercase letters/numbers separated by hyphens (max 60 chars).",
+      );
+    }
+
+    const org = await getOrgByClerkId(ctx, orgClerkId);
+    if (!org) throw new ConvexError(`Organization "${orgClerkId}" not found in Convex.`);
+
+    const oldSlug = org.slug;
+    if (oldSlug === newSlug) return { migrated: 0 };
+
+    // Guard against Convex-side drift: another org row already holding newSlug.
+    const clash = await ctx.db
+      .query("organizations")
+      .withIndex("by_slug", (q) => q.eq("slug", newSlug))
+      .unique();
+    if (clash && clash.clerkId !== orgClerkId) {
+      throw new ConvexError(`Slug "${newSlug}" is already used by "${clash.name}".`);
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(org._id, { slug: newSlug, updatedAt: now });
+
+    // Org-born venue rows that were URL-coupled to the old slug follow it,
+    // so /menu/{newSlug} metadata + the sitemap entry stay in lockstep.
+    const venues = await ctx.db
+      .query("venues")
+      .withIndex("by_org", (q) => q.eq("orgId", orgClerkId))
+      .collect();
+    for (const venue of venues) {
+      if (venue.slug !== oldSlug) continue;
+      const taken = await ctx.db
+        .query("venues")
+        .withIndex("by_slug", (q) => q.eq("slug", newSlug))
+        .unique();
+      if (taken && taken._id !== venue._id) {
+        throw new ConvexError(
+          `Venue slug "${newSlug}" is already used by "${taken.name}" in the directory.`,
+        );
+      }
+      await ctx.db.patch(venue._id, { slug: newSlug, updatedAt: now });
+    }
+
+    // cafeId-keyed history. Volumes are small enough for one mutation today;
+    // if a table ever nears the per-mutation write limit, batch by table.
+    let migrated = 0;
+
+    const sessions = await ctx.db
+      .query("chatSessions")
+      .withIndex("byCafeId", (q) => q.eq("cafeId", oldSlug))
+      .collect();
+    for (const session of sessions) {
+      const messages = await ctx.db
+        .query("chatMessages")
+        .withIndex("bySession", (q) =>
+          q.eq("sessionId", session.sessionId).eq("cafeId", oldSlug),
+        )
+        .collect();
+      for (const message of messages) {
+        await ctx.db.patch(message._id, { cafeId: newSlug });
+        migrated++;
+      }
+      await ctx.db.patch(session._id, { cafeId: newSlug });
+      migrated++;
+    }
+
+    const ratings = await ctx.db
+      .query("chatRatings")
+      .withIndex("byCafeId", (q) => q.eq("cafeId", oldSlug))
+      .collect();
+    for (const rating of ratings) {
+      await ctx.db.patch(rating._id, { cafeId: newSlug });
+      migrated++;
+    }
+
+    const orders = await ctx.db
+      .query("tableOrders")
+      .withIndex("by_cafe", (q) => q.eq("cafeId", oldSlug))
+      .collect();
+    for (const order of orders) {
+      await ctx.db.patch(order._id, { cafeId: newSlug });
+      migrated++;
+    }
+
+    const trainingLogs = await ctx.db
+      .query("ai_training_logs")
+      .withIndex("byCafe", (q) => q.eq("cafeId", oldSlug))
+      .collect();
+    for (const log of trainingLogs) {
+      await ctx.db.patch(log._id, { cafeId: newSlug });
+      migrated++;
+    }
+
+    console.log(
+      `🔀 Org slug migrated: "${oldSlug}" → "${newSlug}" (${migrated} cafeId rows).`,
+    );
+    return { migrated };
   },
 });
 

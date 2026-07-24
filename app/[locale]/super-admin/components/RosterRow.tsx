@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowRightLeft,
   ChevronDown,
+  Link2,
   LogIn,
   Mail,
   UserCircle,
@@ -161,6 +162,82 @@ function MemberCard({
   );
 }
 
+// ── Slug editor — renames the /menu/{slug} URL via Clerk + Convex cascade ─────
+/** Mirror of the server-side slug rules, for live preview only. */
+function slugify(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+function SlugEditor({ org }: { org: any }) {
+  const [value, setValue] = useState<string>(org.slug ?? "");
+  const [saving, setSaving] = useState(false);
+  const migrateOrgSlug = useMutation(api.organizations.migrateOrgSlug);
+  const normalized = slugify(value);
+  const dirty = normalized.length > 0 && normalized !== (org.slug ?? "");
+
+  const save = async () => {
+    if (!dirty || saving) return;
+    setSaving(true);
+    try {
+      const { migrated } = await migrateOrgSlug({
+        orgClerkId: org.clerkId,
+        newSlug: normalized,
+      });
+      toast.success(
+        `Menu URL is now /menu/${normalized}` +
+          (migrated > 0 ? ` — ${migrated} history rows migrated.` : "."),
+      );
+      setValue(normalized);
+    } catch (error: any) {
+      // ConvexError carries its message in .data
+      toast.error(
+        typeof error?.data === "string" ? error.data : "Failed to update slug.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <p className="v-t-micro mb-2 text-v-faint">Menu URL slug</p>
+      <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-v border border-v-line bg-v-bg-raise px-3 py-2">
+          <Link2 className="h-3 w-3 shrink-0 text-v-faint" />
+          <span className="shrink-0 font-v-mono text-xs text-v-faint">/menu/</span>
+          <input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            spellCheck={false}
+            placeholder={org.slug || "slug"}
+            className="w-full min-w-0 bg-transparent font-v-mono text-xs text-v-ink placeholder:text-v-faint outline-none"
+          />
+        </div>
+        <button
+          onClick={(e) => { e.stopPropagation(); save(); }}
+          disabled={!dirty || saving}
+          className="v-t-micro v-press flex shrink-0 items-center gap-1.5 rounded-v border border-v-line px-3 py-2 text-v-mut transition-colors hover:border-v-faint hover:text-v-ink disabled:opacity-40"
+        >
+          {saving && <Loader2 className="h-3 w-3 animate-spin" />}
+          Rename
+        </button>
+      </div>
+      {dirty && (
+        <p className="mt-1.5 text-[10px] text-v-faint">
+          Will change to <span className="font-v-mono text-v-mut">/menu/{normalized}</span> — the
+          old link stops working (NFC tags keep working; printed QR codes with the old URL break).
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Main row ──────────────────────────────────────────────────────────────────
 export function RosterRow({ org }: { org: any }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -267,6 +344,9 @@ export function RosterRow({ org }: { org: any }) {
               ) : (
                 <p className="text-xs text-v-faint">No members in this workspace.</p>
               )}
+
+              {/* Menu URL slug */}
+              <SlugEditor org={org} />
 
               {/* Features */}
               <div>
