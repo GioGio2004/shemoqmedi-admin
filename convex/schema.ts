@@ -91,8 +91,28 @@ export default defineSchema({
         textColor: v.optional(v.string()),
         fontFamily: v.string(),
         buttonRadius: v.string(),
-        menuType: v.optional(v.union(v.literal("basic"), v.literal("dragable"))),
+        menuType: v.optional(
+          v.union(v.literal("basic"), v.literal("dragable"), v.literal("ruled")),
+        ),
         categoryLayout: v.optional(v.union(v.literal("pills"), v.literal("cards"))),
+      }),
+    ),
+
+    // "Signature" (RULED) menu template — the landing-design menu page.
+    // Every field is optional; the template auto-hides a section when its
+    // content is empty, so a brand-new org still renders a complete page.
+    ruledMenuConfig: v.optional(
+      v.object({
+        tickerText: v.optional(translatedText), // marquee strip under the hero
+        storyText: v.optional(translatedText), // brand story paragraph (bone section)
+        storyImageUrl: v.optional(v.string()),
+        galleryImageUrls: v.optional(v.array(v.string())), // drift-wall gallery; falls back to venues.galleryImages
+        accentColor: v.optional(v.string()), // overrides the default accent for this venue's menu
+        showTicker: v.optional(v.boolean()), // all default true when unset
+        showTunnel: v.optional(v.boolean()), // the 3D corridor flythrough
+        showFeatured: v.optional(v.boolean()),
+        showStory: v.optional(v.boolean()),
+        showGallery: v.optional(v.boolean()),
       }),
     ),
     // Custom branding for the end-user's glassy mobile PWA
@@ -316,6 +336,9 @@ export default defineSchema({
 
     // NEW: Maps perfectly to his `color: "bg-amber-700"`
     accentColor: v.optional(v.string()),
+
+    // Surfaces the item in the RULED template's featured drag-strip
+    isFeatured: v.optional(v.boolean()),
   })
     .index("by_org", ["orgId"])
     .index("by_category", ["categoryId"]),

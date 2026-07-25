@@ -19,6 +19,9 @@ import {
   Mail,
   ChevronDown,
   Bell,
+  Sparkles,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ImageUploader } from "@/components/ImageUploader";
@@ -66,8 +69,21 @@ interface ThemeSettings {
   textColor?: string;
   fontFamily: string;
   buttonRadius: string;
-  menuType?: "basic" | "dragable";
+  menuType?: "basic" | "dragable" | "ruled";
   categoryLayout?: "pills" | "cards";
+}
+
+interface RuledMenuSettings {
+  tickerText: Record<string, string>;
+  storyText: Record<string, string>;
+  storyImageUrl: string;
+  galleryImageUrls: string[];
+  accentColor: string;
+  showTicker: boolean;
+  showTunnel: boolean;
+  showFeatured: boolean;
+  showStory: boolean;
+  showGallery: boolean;
 }
 
 interface Announcement {
@@ -110,15 +126,29 @@ const DEFAULT_THEME: ThemeSettings = {
   categoryLayout: "pills",
 };
 
+const DEFAULT_RULED: RuledMenuSettings = {
+  tickerText: {},
+  storyText: {},
+  storyImageUrl: "",
+  galleryImageUrls: [],
+  accentColor: "",
+  showTicker: true,
+  showTunnel: true,
+  showFeatured: true,
+  showStory: true,
+  showGallery: true,
+};
+
 // ─── Tab Config ───────────────────────────────────────────────────────────────
 
-type TabId = "hero" | "hours" | "socials" | "theme" | "announcements";
+type TabId = "hero" | "hours" | "socials" | "theme" | "signature" | "announcements";
 
 const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: "hero", label: "Hero & Location", icon: Store },
   { id: "hours", label: "Hours", icon: Clock },
   { id: "socials", label: "Socials", icon: Share2 },
   { id: "theme", label: "Theme", icon: Palette },
+  { id: "signature", label: "Signature Menu", icon: Sparkles },
   { id: "announcements", label: "Announcements", icon: Bell },
 ];
 
@@ -750,7 +780,32 @@ function ThemeTab({
       </Field>
 
       <Field label="Menu Layout" hint="Choose the navigation style for your public menu.">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
+          {/* Signature (RULED) Layout Card — the flagship */}
+          <button
+            onClick={() => onChange({ ...data, menuType: "ruled" })}
+            className={cn(
+              "flex flex-col items-start gap-2 p-4 rounded-v border text-left transition-all relative overflow-hidden group",
+              data.menuType === "ruled"
+                ? "border-v-accent/50 bg-v-accent/[0.07]"
+                : "border-v-line bg-white/[0.02] hover:bg-white/[0.04]"
+            )}
+          >
+            <div className="flex items-center justify-between w-full">
+              <span className={cn(
+                "text-sm font-semibold flex items-center gap-1.5",
+                data.menuType === "ruled" ? "text-v-accent" : "text-v-ink"
+              )}>
+                <Sparkles className="h-3.5 w-3.5" />
+                Signature
+              </span>
+              {data.menuType === "ruled" && (
+                <Check className="h-4 w-4 text-v-accent" />
+              )}
+            </div>
+            <p className="text-xs text-v-mut">Award-grade editorial menu with smooth scroll and cinematic reveals. Configure it in the Signature Menu tab.</p>
+          </button>
+
           {/* Basic Layout Card */}
           <button
             onClick={() => onChange({ ...data, menuType: "basic" })}
@@ -871,6 +926,296 @@ function ThemeTab({
   );
 }
 
+// ─── Signature (RULED) Menu Template tab ─────────────────────────────────────
+
+function SignatureToggleRow({
+  label,
+  hint,
+  value,
+  onToggle,
+}: {
+  label: string;
+  hint: string;
+  value: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={cn(
+        "flex w-full items-center justify-between rounded-v border p-4 text-left transition-all",
+        value
+          ? "border-v-accent/30 bg-v-accent/[0.04]"
+          : "border-v-line bg-white/[0.02] hover:bg-white/[0.04]",
+      )}
+    >
+      <span>
+        <span className="block text-sm font-medium text-v-ink">{label}</span>
+        <span className="block text-xs text-v-faint mt-0.5">{hint}</span>
+      </span>
+      {value ? (
+        <ToggleRight className="h-5 w-5 text-v-accent shrink-0" />
+      ) : (
+        <ToggleLeft className="h-5 w-5 text-v-faint shrink-0" />
+      )}
+    </button>
+  );
+}
+
+function SignatureTab({
+  data,
+  onChange,
+  cafeName,
+  isActive,
+}: {
+  data: RuledMenuSettings;
+  onChange: (d: RuledMenuSettings) => void;
+  cafeName: string;
+  isActive: boolean;
+}) {
+  const set = <K extends keyof RuledMenuSettings>(key: K, val: RuledMenuSettings[K]) =>
+    onChange({ ...data, [key]: val });
+
+  const setTicker = (lang: string, val: string) =>
+    set("tickerText", updateI18nStr(data.tickerText, lang, val));
+  const setStory = (lang: string, val: string) =>
+    set("storyText", updateI18nStr(data.storyText, lang, val));
+
+  const MAX_GALLERY = 8;
+
+  return (
+    <div className="space-y-6">
+      {!isActive && (
+        <div className="flex items-start gap-3 rounded-v border border-v-accent/30 bg-v-accent/[0.05] p-4">
+          <Sparkles className="h-4 w-4 text-v-accent shrink-0 mt-0.5" />
+          <p className="text-xs text-v-mut">
+            The Signature template is not your active menu layout yet. Switch{" "}
+            <span className="text-v-ink font-medium">Theme → Menu Layout</span> to{" "}
+            <span className="text-v-accent font-medium">Signature</span> to publish it —
+            everything you configure here is saved either way.
+          </p>
+        </div>
+      )}
+
+      {/* Ticker */}
+      <Field
+        label="Marquee Ticker"
+        hint="One scrolling line under the hero — announcements, taglines, seasonal hours. Leave empty to auto-fill with your venue name."
+      >
+        <div className="space-y-2">
+          <Input
+            value={getI18nStr(data.tickerText, "en")}
+            onChange={(e) => setTicker("en", e.target.value)}
+            placeholder="Fresh pastries every morning — Est. 2019 — Tbilisi"
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <Input
+              value={getI18nStr(data.tickerText, "ka")}
+              onChange={(e) => setTicker("ka", e.target.value)}
+              placeholder="ტიკერი (KA)"
+            />
+            <Input
+              value={getI18nStr(data.tickerText, "ru")}
+              onChange={(e) => setTicker("ru", e.target.value)}
+              placeholder="Тикер (RU)"
+            />
+          </div>
+        </div>
+      </Field>
+
+      {/* Story */}
+      <Field
+        label="Story"
+        hint="A short brand paragraph shown in the light editorial section. Keep it under ~300 characters."
+      >
+        <div className="space-y-2">
+          <TextArea
+            rows={3}
+            value={getI18nStr(data.storyText, "en")}
+            onChange={(e) => setStory("en", e.target.value)}
+            placeholder="We started with one espresso machine and a stubborn belief that Tbilisi deserved better mornings…"
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <TextArea
+              rows={3}
+              value={getI18nStr(data.storyText, "ka")}
+              onChange={(e) => setStory("ka", e.target.value)}
+              placeholder="ისტორია (KA)"
+            />
+            <TextArea
+              rows={3}
+              value={getI18nStr(data.storyText, "ru")}
+              onChange={(e) => setStory("ru", e.target.value)}
+              placeholder="История (RU)"
+            />
+          </div>
+        </div>
+      </Field>
+
+      {/* Story image */}
+      <Field label="Story Image" hint="Shown beside the story text. Portrait or square works best.">
+        <div className="rounded-v border border-v-line bg-white/[0.02] p-4 flex flex-col sm:flex-row gap-4">
+          <div className="relative aspect-[3/4] w-24 shrink-0 overflow-hidden rounded-v border border-v-line bg-v-bg">
+            {data.storyImageUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={data.storyImageUrl} alt="Story" className="object-cover w-full h-full" />
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center text-v-faint">
+                <ImageIcon className="mb-1 h-4 w-4" />
+                <span className="v-t-micro">No Image</span>
+              </div>
+            )}
+          </div>
+          <div className="flex-1 space-y-3 flex flex-col justify-center">
+            <div className="flex items-center gap-2">
+              <ImageUploader
+                itemName="signature-story"
+                cafeName={cafeName}
+                folder="/menu-gallery"
+                onSuccess={(res) => set("storyImageUrl", res.url || "")}
+              />
+              {data.storyImageUrl && (
+                <button
+                  type="button"
+                  onClick={() => set("storyImageUrl", "")}
+                  className="rounded-v border border-transparent p-2 text-v-mut transition-colors hover:border-red-400/20 hover:bg-red-400/10 hover:text-red-400"
+                  title="Remove Image"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            <Input
+              value={data.storyImageUrl}
+              onChange={(e) => set("storyImageUrl", e.target.value)}
+              placeholder="Or paste image URL manually…"
+              className="text-xs font-mono h-9"
+            />
+          </div>
+        </div>
+      </Field>
+
+      {/* Gallery */}
+      <Field
+        label={`Gallery Wall (${data.galleryImageUrls.length}/${MAX_GALLERY})`}
+        hint="Interior shots, food close-ups, people. The template drifts these as a parallax wall — 4–6 images feel best."
+      >
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {data.galleryImageUrls.map((url, idx) => (
+            <div
+              key={`${url}-${idx}`}
+              className="group relative aspect-[4/5] overflow-hidden rounded-v border border-v-line bg-v-bg"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt={`Gallery ${idx + 1}`} className="object-cover w-full h-full" />
+              <button
+                type="button"
+                onClick={() =>
+                  set(
+                    "galleryImageUrls",
+                    data.galleryImageUrls.filter((_, i) => i !== idx),
+                  )
+                }
+                className="absolute right-1.5 top-1.5 rounded-v bg-black/60 p-1.5 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                title="Remove"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+              <span className="v-t-micro absolute left-1.5 bottom-1.5 rounded-v bg-black/60 px-1.5 py-0.5 text-white/80">
+                {String(idx + 1).padStart(2, "0")}
+              </span>
+            </div>
+          ))}
+          {data.galleryImageUrls.length < MAX_GALLERY && (
+            <div className="aspect-[4/5] rounded-v border border-dashed border-v-line bg-white/[0.02] flex flex-col items-center justify-center gap-2 p-2">
+              <ImageUploader
+                itemName={`signature-gallery-${data.galleryImageUrls.length + 1}`}
+                cafeName={cafeName}
+                folder="/menu-gallery"
+                onSuccess={(res) => {
+                  if (res.url) set("galleryImageUrls", [...data.galleryImageUrls, res.url]);
+                }}
+              />
+            </div>
+          )}
+        </div>
+      </Field>
+
+      {/* Accent color */}
+      <Field
+        label="Accent Color"
+        hint="Optional override for the template's electric-lime accent. Leave empty to keep the default."
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className="relative h-10 w-10 shrink-0 cursor-pointer overflow-hidden rounded-v border border-v-line"
+            style={{ backgroundColor: data.accentColor || "#D8FF3A" }}
+          >
+            <input
+              type="color"
+              value={data.accentColor || "#D8FF3A"}
+              onChange={(e) => set("accentColor", e.target.value)}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            />
+          </div>
+          <Input
+            value={data.accentColor}
+            onChange={(e) => set("accentColor", e.target.value)}
+            placeholder="#D8FF3A (default)"
+            className="font-v-mono"
+          />
+          {data.accentColor && (
+            <button
+              type="button"
+              onClick={() => set("accentColor", "")}
+              className="v-t-micro shrink-0 rounded-v border border-v-line px-3 py-2 text-v-mut transition-colors hover:text-v-ink"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </Field>
+
+      {/* Section toggles */}
+      <Field label="Sections" hint="Turn template sections on or off. Sections with no content hide automatically.">
+        <div className="space-y-2">
+          <SignatureToggleRow
+            label="Marquee ticker"
+            hint="The scrolling text strip under the hero."
+            value={data.showTicker}
+            onToggle={() => set("showTicker", !data.showTicker)}
+          />
+          <SignatureToggleRow
+            label="Corridor flythrough"
+            hint="The 3D tunnel built from your dish and venue photos, flown through on scroll."
+            value={data.showTunnel}
+            onToggle={() => set("showTunnel", !data.showTunnel)}
+          />
+          <SignatureToggleRow
+            label="Featured strip"
+            hint="Horizontal drag carousel of items you star in the Menu page."
+            value={data.showFeatured}
+            onToggle={() => set("showFeatured", !data.showFeatured)}
+          />
+          <SignatureToggleRow
+            label="Story section"
+            hint="The light editorial block with your story text and image."
+            value={data.showStory}
+            onToggle={() => set("showStory", !data.showStory)}
+          />
+          <SignatureToggleRow
+            label="Gallery wall"
+            hint="The drifting parallax image wall."
+            value={data.showGallery}
+            onToggle={() => set("showGallery", !data.showGallery)}
+          />
+        </div>
+      </Field>
+    </div>
+  );
+}
+
 function AnnouncementsTab({
   data,
   onChange,
@@ -986,6 +1331,7 @@ export default function StorefrontPage() {
   const [hours, setHours] = useState<OperatingHour[]>(DEFAULT_HOURS);
   const [socials, setSocials] = useState<SocialLinks>(DEFAULT_SOCIALS);
   const [theme, setTheme] = useState<ThemeSettings>(DEFAULT_THEME);
+  const [ruled, setRuled] = useState<RuledMenuSettings>(DEFAULT_RULED);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [lat, setLat] = useState<number | undefined>();
   const [lng, setLng] = useState<number | undefined>();
@@ -999,6 +1345,21 @@ export default function StorefrontPage() {
     if (config.operatingHours) setHours(config.operatingHours);
     if (config.socialLinks) setSocials({ whatsapp: "", instagram: "", email: "", ...config.socialLinks });
     if (config.themeSettings) setTheme(config.themeSettings);
+    if (config.ruledMenuConfig) {
+      const r = config.ruledMenuConfig;
+      setRuled({
+        tickerText: r.tickerText ?? {},
+        storyText: r.storyText ?? {},
+        storyImageUrl: r.storyImageUrl ?? "",
+        galleryImageUrls: r.galleryImageUrls ?? [],
+        accentColor: r.accentColor ?? "",
+        showTicker: r.showTicker ?? true,
+        showTunnel: r.showTunnel ?? true,
+        showFeatured: r.showFeatured ?? true,
+        showStory: r.showStory ?? true,
+        showGallery: r.showGallery ?? true,
+      });
+    }
     if (config.announcements) setAnnouncements(config.announcements);
   }, [config]);
 
@@ -1022,6 +1383,14 @@ export default function StorefrontPage() {
         announcements,
       });
 
+      // Strip empty locales from a translated record; undefined when empty
+      const cleanRecord = (r: Record<string, string>) => {
+        const out = Object.fromEntries(
+          Object.entries(r).filter(([, v]) => v && v.trim()),
+        );
+        return Object.keys(out).length ? out : undefined;
+      };
+
       // ── Wire up to Convex ────────────────────────────────────
       await saveConfig({
         orgId,
@@ -1033,6 +1402,20 @@ export default function StorefrontPage() {
           email: socials.email || undefined,
         },
         themeSettings: theme,
+        ruledMenuConfig: {
+          tickerText: cleanRecord(ruled.tickerText),
+          storyText: cleanRecord(ruled.storyText),
+          storyImageUrl: ruled.storyImageUrl || undefined,
+          galleryImageUrls: ruled.galleryImageUrls.length
+            ? ruled.galleryImageUrls
+            : undefined,
+          accentColor: ruled.accentColor || undefined,
+          showTicker: ruled.showTicker,
+          showTunnel: ruled.showTunnel,
+          showFeatured: ruled.showFeatured,
+          showStory: ruled.showStory,
+          showGallery: ruled.showGallery,
+        },
         announcements,
       });
 
@@ -1156,6 +1539,14 @@ export default function StorefrontPage() {
         )}
         {activeTab === "theme" && (
           <ThemeTab data={theme} onChange={setTheme} />
+        )}
+        {activeTab === "signature" && (
+          <SignatureTab
+            data={ruled}
+            onChange={setRuled}
+            cafeName={organization?.name || "cafe"}
+            isActive={theme.menuType === "ruled"}
+          />
         )}
         {activeTab === "announcements" && (
           <AnnouncementsTab data={announcements} onChange={setAnnouncements} />

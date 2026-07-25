@@ -22,6 +22,7 @@ import type * as categories from "../categories.js";
 import type * as chat from "../chat.js";
 import type * as cleanup from "../cleanup.js";
 import type * as crons from "../crons.js";
+import type * as devSeed from "../devSeed.js";
 import type * as flitt from "../flitt.js";
 import type * as http from "../http.js";
 import type * as lib_utils from "../lib/utils.js";
@@ -61,6 +62,7 @@ declare const fullApi: ApiFromModules<{
   chat: typeof chat;
   cleanup: typeof cleanup;
   crons: typeof crons;
+  devSeed: typeof devSeed;
   flitt: typeof flitt;
   http: typeof http;
   "lib/utils": typeof lib_utils;

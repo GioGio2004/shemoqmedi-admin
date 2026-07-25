@@ -27,6 +27,7 @@ import {
   Trash2,
   ArrowUp,
   ArrowDown,
+  Star,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -73,6 +74,7 @@ type MenuItem = {
   price: number;
   imageUrl?: string;
   isAvailable: boolean;
+  isFeatured?: boolean;
   sortOrder: number;
   tags?: string[];
   categoryId: Id<"categories">;
@@ -269,6 +271,7 @@ function MenuItemDialog({
   const [tags, setTags] = useState<string[]>(existing?.tags ?? []);
   const [tagInput, setTagInput] = useState("");
   const [imageUrl, setImageUrl] = useState(existing?.imageUrl ?? "");
+  const [isFeatured, setIsFeatured] = useState(existing?.isFeatured ?? false);
   const [saving, setSaving] = useState(false);
 
   function addTag() {
@@ -302,6 +305,7 @@ function MenuItemDialog({
           price,
           imageUrl: imageUrl || undefined,
           tags: tags.length ? tags : undefined,
+          isFeatured,
         });
       } else {
         await createItem({
@@ -312,6 +316,7 @@ function MenuItemDialog({
           price,
           imageUrl: imageUrl || undefined,
           tags: tags.length ? tags : undefined,
+          isFeatured,
         });
       }
       onClose();
@@ -478,6 +483,40 @@ function MenuItemDialog({
             </div>
           </div>
 
+          {/* Featured toggle — surfaces the item in the RULED template's featured strip */}
+          <button
+            type="button"
+            onClick={() => setIsFeatured(!isFeatured)}
+            className={cn(
+              "flex w-full items-center justify-between rounded-v border p-4 text-left transition-all",
+              isFeatured
+                ? "border-v-accent/40 bg-v-accent/[0.06]"
+                : "border-v-line bg-white/[0.02] hover:bg-white/[0.04]",
+            )}
+          >
+            <span className="flex items-center gap-3">
+              <Star
+                className={cn(
+                  "h-4 w-4 transition-colors",
+                  isFeatured ? "fill-v-accent text-v-accent" : "text-v-faint",
+                )}
+              />
+              <span>
+                <span className="block text-sm font-medium text-v-ink">
+                  Featured item
+                </span>
+                <span className="block text-xs text-v-faint mt-0.5">
+                  Shown in the spotlight carousel on the Signature menu template.
+                </span>
+              </span>
+            </span>
+            {isFeatured ? (
+              <ToggleRight className="h-5 w-5 text-v-accent shrink-0" />
+            ) : (
+              <ToggleLeft className="h-5 w-5 text-v-faint shrink-0" />
+            )}
+          </button>
+
           {/* Image Upload Area */}
           <div className="space-y-2 border border-v-line rounded-v p-5 bg-white/[0.02]">
             <Label className="v-t-micro text-v-faint flex items-center gap-1.5 mb-2">
@@ -544,6 +583,7 @@ function MenuItemCard({
   const toggleAvailable = useMutation(api.menuItems.update);
   const [editing, setEditing] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [starring, setStarring] = useState(false);
 
   async function handleToggle() {
     setToggling(true);
@@ -555,6 +595,19 @@ function MenuItemCard({
       });
     } finally {
       setToggling(false);
+    }
+  }
+
+  async function handleStar() {
+    setStarring(true);
+    try {
+      await toggleAvailable({
+        orgId,
+        menuItemId: item._id,
+        isFeatured: !item.isFeatured,
+      });
+    } finally {
+      setStarring(false);
     }
   }
 
@@ -622,6 +675,27 @@ function MenuItemCard({
 
         {/* Actions */}
         <div className="flex items-center gap-1 transition-opacity shrink-0">
+          <button
+            onClick={handleStar}
+            disabled={starring}
+            title={
+              item.isFeatured
+                ? "Remove from featured strip"
+                : "Feature on the Signature menu"
+            }
+            className="p-1.5 rounded-v text-v-mut hover:text-v-ink hover:bg-white/[0.04] transition-all"
+          >
+            {starring ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Star
+                className={cn(
+                  "h-4 w-4",
+                  item.isFeatured ? "fill-v-accent text-v-accent" : "",
+                )}
+              />
+            )}
+          </button>
           <button
             onClick={handleToggle}
             disabled={toggling}

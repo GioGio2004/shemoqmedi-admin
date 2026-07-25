@@ -66,6 +66,7 @@ export const create = mutation({
     price: v.number(),          // tetri/cents — e.g. 550 = 5.50 GEL
     imageUrl: v.optional(v.string()),
     tags: v.optional(v.array(v.string())),
+    isFeatured: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { orgId, categoryId } = args;
@@ -105,6 +106,7 @@ export const create = mutation({
       price: args.price,
       imageUrl: args.imageUrl,
       tags: args.tags,
+      isFeatured: args.isFeatured ?? false,
       isAvailable: true,
       sortOrder: maxSort + 1,
     });
@@ -133,6 +135,7 @@ export const update = mutation({
     categoryId: v.optional(v.id("categories")),
     tags: v.optional(v.array(v.string())),
     isAvailable: v.optional(v.boolean()),
+    isFeatured: v.optional(v.boolean()),
   },
   handler: async (ctx, { orgId, menuItemId, ...fields }) => {
     await verifyOrgAccess(ctx, orgId);

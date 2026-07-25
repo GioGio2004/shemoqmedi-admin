@@ -238,8 +238,27 @@ export const updateStorefrontConfig = mutation({
         textColor: v.optional(v.string()), // e.g. "#111827"
         fontFamily: v.string(), // e.g. "Inter"
         buttonRadius: v.string(), // e.g. "0.5rem" | "9999px"
-        menuType: v.optional(v.union(v.literal("basic"), v.literal("dragable"))),
+        menuType: v.optional(
+          v.union(v.literal("basic"), v.literal("dragable"), v.literal("ruled")),
+        ),
         categoryLayout: v.optional(v.union(v.literal("pills"), v.literal("cards"))),
+      }),
+    ),
+
+    // "Signature" (RULED) menu template settings — multilingual content is a
+    // Record<locale, string> exactly like the schema's translatedText.
+    ruledMenuConfig: v.optional(
+      v.object({
+        tickerText: v.optional(v.record(v.string(), v.string())),
+        storyText: v.optional(v.record(v.string(), v.string())),
+        storyImageUrl: v.optional(v.string()),
+        galleryImageUrls: v.optional(v.array(v.string())),
+        accentColor: v.optional(v.string()),
+        showTicker: v.optional(v.boolean()),
+        showTunnel: v.optional(v.boolean()),
+        showFeatured: v.optional(v.boolean()),
+        showStory: v.optional(v.boolean()),
+        showGallery: v.optional(v.boolean()),
       }),
     ),
 
@@ -425,6 +444,7 @@ export const getStorefrontConfig = query({
       socialLinks: org.socialLinks ?? null,
       themeSettings: org.themeSettings ?? null,
       announcements: org.announcements ?? [],
+      ruledMenuConfig: org.ruledMenuConfig ?? null,
     };
   },
 });

@@ -63,6 +63,7 @@ export const get = query({
           imageUrl: item.imageUrl ?? null,
           tags: item.tags ?? [],
           accentColor: item.accentColor ?? null,
+          isFeatured: item.isFeatured ?? false,
           sortOrder: item.sortOrder,
         })),
     }));
@@ -86,11 +87,26 @@ export const get = query({
         announcements: org.announcements ?? [],
         storefrontAlert: org.storefrontAlert ?? null,
         features: org.features ?? null,
+        ruledMenuConfig: org.ruledMenuConfig ?? null,
       },
       venue: venue && venue.lat && venue.lng ? {
         lat: venue.lat,
         lng: venue.lng,
       } : null,
+      // Additive block for the RULED template — kept separate from `venue`
+      // so the existing lat/lng contract above never changes shape.
+      venueMedia: venue
+        ? {
+            description: venue.description ?? null,
+            coverImage: venue.coverImage ?? null,
+            galleryImages: venue.galleryImages ?? [],
+            phone: venue.phone ?? null,
+            address: venue.address ?? null,
+            category: venue.category ?? null,
+            googleRating: venue.googleRating ?? null,
+            googleReviewCount: venue.googleReviewCount ?? null,
+          }
+        : null,
       categories,
     };
   },
