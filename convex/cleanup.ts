@@ -1,9 +1,12 @@
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 
-export const removeExpiredSessions = mutation({
+// Cron target ONLY — internalMutation is not callable from any client.
+// As a public mutation this was an unauthenticated, repeatable cascading
+// delete of chatSessions + chatMessages.
+export const removeExpiredSessions = internalMutation({
   handler: async (ctx) => {
     const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
-    
+
     // Query sessions older than 24 hours
     // Alternatively, we could use q.lt(q.field("expiresAt"), Date.now()) if we wanted 7 days,
     // but the strict 24-hour retention requirement takes precedence.
@@ -16,7 +19,7 @@ export const removeExpiredSessions = mutation({
       // 1. Cascading deletion: find and delete all messages associated with this session
       const messages = await ctx.db
         .query("chatMessages")
-        .withIndex("bySession", (q) => 
+        .withIndex("bySession", (q) =>
           q.eq("sessionId", session.sessionId).eq("cafeId", session.cafeId)
         )
         .collect();

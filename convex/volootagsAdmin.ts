@@ -5,25 +5,21 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
+import { verifyOrgAccess } from "./authHelpers";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AUTH GUARDS
 //
-// ensureAuthenticated — used for READ queries on the super-admin panel.
-//   The page-level server redirect (super-admin/page.tsx) already blocks
-//   anyone without role === "super_admin" before React even mounts.
-//   Convex just needs to confirm the user has a valid session.
+// Reads are gated by AUDIENCE, never by "has a session":
+//   • one org's fleet/settings → verifyOrgAccess (membership in that org)
+//   • platform-wide fleet/stats → ensureSuperAdmin
+// A page-level redirect is not a backend guard — Convex functions are
+// callable directly by anyone holding the deployment URL.
 //
-// ensureSuperAdmin — used for WRITE mutations (provision, update, delete).
+// ensureSuperAdmin — also used for WRITE mutations (provision, update, delete).
 //   Checks the Convex users table role field. Seed it once with:
 //   npx convex run backfill:setRole '{"clerkUserId":"user_XXX","role":"super_admin"}'
 // ─────────────────────────────────────────────────────────────────────────────
-
-async function ensureAuthenticated(ctx: MutationCtx | QueryCtx) {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new ConvexError("Authentication required");
-  return identity;
-}
 
 const ADMIN_ROLES = new Set(["super_admin", "admin"]);
 
@@ -143,15 +139,19 @@ export const deletePhysicalTag = mutation({
 export const getAllPhysicalTags = query({
   args: { orgId: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    await ensureAuthenticated(ctx);
-
+    // Scoped read needs org membership; the unfiltered "whole fleet across
+    // every venue" read is super-admin only. `ensureAuthenticated` alone let
+    // any signed-in user enumerate every org's hardware.
     if (args.orgId) {
+      await verifyOrgAccess(ctx, args.orgId);
       return await ctx.db
         .query("physicalTags")
         .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
         .order("desc")
         .collect();
     }
+
+    await ensureSuperAdmin(ctx);
 
     // All tags across all orgs
     return await ctx.db
@@ -254,7 +254,8 @@ export const updateTagUUID = mutation({
 export const getOrgTagSettings = query({
   args: { orgId: v.string() },
   handler: async (ctx, args) => {
-    await ensureAuthenticated(ctx);
+    // Returns wifiSsid/wifiPassword — membership required, not just a session.
+    await verifyOrgAccess(ctx, args.orgId);
 
     return await ctx.db
       .query("orgTagSettings")
@@ -327,7 +328,8 @@ export const upsertOrgTagSettings = mutation({
 export const getPhysicalTagStats = query({
   args: {},
   handler: async (ctx) => {
-    await ensureAuthenticated(ctx);
+    // Platform-wide totals — super-admin only.
+    await ensureSuperAdmin(ctx);
 
     const allTags = await ctx.db.query("physicalTags").collect();
     const activeTags = allTags.filter((t) => t.isActive);

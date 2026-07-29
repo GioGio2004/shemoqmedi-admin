@@ -7,15 +7,15 @@
 //   1. Send message to Gemini 2.5 Flash with a strict JSON system instruction.
 //   2. Parse the JSON intent from the model.
 //   3. If intent === "mutate_menu", execute the Convex toggleMenuItem mutation
-//      via ConvexHttpClient (calls internal mutations, no Clerk JWT required).
+//      via a per-request ConvexHttpClient carrying the caller's Clerk token.
 //   4. Log both the chat turn and the action in Convex for audit trail.
 //   5. Return the spoken_response + full aiLogic for the client to synthesize.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from "next/server";
-import { ConvexHttpClient } from "convex/browser";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { api } from "@/convex/_generated/api";
+import { authedConvexClient } from "@/lib/convexServer";
 
 // ── Type contract for Gemini's structured output ─────────────────────────────
 interface VolooAIResponse {
@@ -24,9 +24,6 @@ interface VolooAIResponse {
   targetName: string | null;
   spoken_response: string;
 }
-
-// ── Convex HTTP client (server-side, no auth token needed for internal calls) -
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 // ── Gemini client ─────────────────────────────────────────────────────────────
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
@@ -95,6 +92,23 @@ export async function POST(request: NextRequest) {
         { status: 503 },
       );
     }
+
+    // ── Auth: per-request Convex client carrying the caller's Clerk token,
+    //    so the volooAi functions can enforce org membership themselves. ─────
+    const authed = await authedConvexClient();
+    if (!authed) {
+      return NextResponse.json(
+        { success: false, error: "Not signed in." },
+        { status: 401 },
+      );
+    }
+    if (authed.orgId && authed.orgId !== orgId) {
+      return NextResponse.json(
+        { success: false, error: "You are not a member of that venue." },
+        { status: 403 },
+      );
+    }
+    const convex = authed.client;
 
     console.log(
       `🎙️ [VolooAI] Received command from org "${orgId}": "${message}"`,

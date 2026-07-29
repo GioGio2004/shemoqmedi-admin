@@ -17,7 +17,7 @@
 //   - The SFTSanitizer in lib/ai/sftSanitizer.ts handles all validation.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useQuery, useMutation, useConvex } from "convex/react";
+import { useConvex, useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useState, useMemo } from "react";
 import {
@@ -50,8 +50,15 @@ const ghostBtnCls =
 
 export function AiTrainingPanel() {
   const convex = useConvex();
-  const stats = useQuery(api.aiTrainingLogs.getGlobalStats);
-  const recentLogs = useQuery(api.aiTrainingLogs.getRecentLogs, {});
+  const { isAuthenticated } = useConvexAuth();
+  const stats = useQuery(
+    api.aiTrainingLogs.getGlobalStats,
+    isAuthenticated ? {} : "skip",
+  );
+  const recentLogs = useQuery(
+    api.aiTrainingLogs.getRecentLogs,
+    isAuthenticated ? {} : "skip",
+  );
   const markExported = useMutation(api.aiTrainingLogs.markExported);
   const [isExporting, setIsExporting] = useState(false);
   const [exportMode, setExportMode] = useState<"positive" | "all">("positive");

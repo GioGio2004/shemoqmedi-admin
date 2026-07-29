@@ -17,7 +17,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useCallback, useRef, useState } from "react";
-import { ConvexHttpClient } from "convex/browser";
+import { useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -90,8 +90,6 @@ const SYSTEM_INSTRUCTION =
   "CRITICAL: If the manager asks to see, show, or list menu items, you MUST immediately use the showcase_on_screen tool to display them visually after calling query_menu. Do not just list them in text. " +
   "Never make up menu data — always call query_menu first.";
 
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-
 // ── Gemini Live message shapes ────────────────────────────────────────────────
 interface GeminiServerContent {
   serverContent: {
@@ -124,6 +122,11 @@ export function useGeminiLive({
   onShowcase?: (items: ShowcaseItem[]) => void;
   onThemeUpdate?: (theme: ThemeUpdate) => void;
 } = {}): UseGeminiLiveReturn {
+  // The provider-bound client carries the signed-in user's Clerk token, so the
+  // volooAi mutations can verify org membership. (A bare ConvexHttpClient sends
+  // no identity — which is why those functions used to run unauthenticated.)
+  const convex = useConvex();
+
   const [status, setStatus] = useState<LiveStatus>("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [actionLog, setActionLog] = useState<ActionLogEntry[]>([]);
@@ -531,7 +534,7 @@ export function useGeminiLive({
         );
       }
     },
-    [scheduleAudioChunk, stopAllAudio, addLog, fail],
+    [scheduleAudioChunk, stopAllAudio, addLog, fail, convex],
   );
 
   // ── Mic capture ───────────────────────────────────────────────────────────

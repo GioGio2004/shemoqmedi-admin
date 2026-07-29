@@ -9,7 +9,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
 import { ConvexError } from "convex/values";
@@ -468,7 +468,11 @@ function VenueForm({
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
 export function EnlistingPanel({ organizations }: { organizations: any[] }) {
-  const venues = useQuery(api.venueDirectory.listDirectory, {});
+  const { isAuthenticated } = useConvexAuth();
+  const venues = useQuery(
+    api.venueDirectory.listDirectory,
+    isAuthenticated ? {} : "skip",
+  );
   const seedVenue = useMutation(api.venueDirectory.seedVenue);
   const updateVenue = useMutation(api.venueDirectory.updateVenue);
   const claimVenue = useMutation(api.venueDirectory.claimVenue);

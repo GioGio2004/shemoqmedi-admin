@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "convex/react";
+import { useConvexAuth, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { RosterRow } from "./RosterRow";
 import { ClerkOrgPanel } from "./ClerkOrgPanel";
@@ -11,7 +11,8 @@ import { AiTrainingPanel } from "./AiTrainingPanel";
 import { EnlistingPanel } from "./EnlistingPanel";
 import { Toaster } from "sonner";
 import { useState } from "react";
-import { Shield, Building2, Loader2 } from "lucide-react";
+import { Shield, Building2, Loader2, Wand2 } from "lucide-react";
+import Link from "next/link";
 
 type Tab = "workspaces" | "ntags" | "import" | "ai_training" | "enlisting";
 
@@ -52,7 +53,11 @@ export function SuperAdminClient() {
   const [activeTab, setActiveTab] = useState<Tab>("workspaces");
 
   // ── Real-time — reacts instantly to any Convex mutation ──
-  const organizations = useQuery(api.organizations.getAllOrganizationsWithMembers);
+  const { isAuthenticated } = useConvexAuth();
+  const organizations = useQuery(
+    api.organizations.getAllOrganizationsWithMembers,
+    isAuthenticated ? {} : "skip",
+  );
 
   const isLoading = organizations === undefined;
   const orgs = organizations ?? [];
@@ -76,16 +81,23 @@ export function SuperAdminClient() {
           </div>
 
           {/* Stats — mono numbers */}
-          <div className="hidden items-center gap-4 sm:flex">
-            <span className="v-t-micro text-v-faint">
+          <div className="flex items-center gap-4">
+            <span className="v-t-micro hidden text-v-faint sm:inline">
               <span className="font-v-mono tabular-nums text-v-ink">{orgs.length}</span>{" "}
               Workspaces
             </span>
-            <span className="v-hairline-v h-3" aria-hidden />
-            <span className="v-t-micro text-v-faint">
+            <span className="v-hairline-v hidden h-3 sm:block" aria-hidden />
+            <span className="v-t-micro hidden text-v-faint sm:inline">
               <span className="font-v-mono tabular-nums text-v-ink">{totalMembers}</span>{" "}
               Members
             </span>
+            <Link
+              href="/dashboard/storefront"
+              className="v-t-micro v-press flex items-center gap-1.5 rounded-v border border-v-line px-2.5 py-1.5 text-v-mut transition-colors hover:border-white/25 hover:text-v-ink"
+            >
+              <Wand2 className="h-3 w-3 text-v-accent" />
+              Studio
+            </Link>
           </div>
         </div>
 

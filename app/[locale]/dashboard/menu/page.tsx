@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useOrganization } from "@clerk/nextjs";
-import { useQuery, useMutation } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
 import { ImageUploader } from "@/components/ImageUploader";
@@ -926,7 +926,11 @@ export default function MenuPage() {
   // Build the public menu preview URL using the org's Clerk slug
   const previewUrl = orgSlug ? `/en/test-menu/${orgSlug}` : null;
 
-  const categories = useQuery(api.categories.list, orgId ? { orgId } : "skip");
+  const { isAuthenticated } = useConvexAuth();
+  const categories = useQuery(
+    api.categories.list,
+    orgId && isAuthenticated ? { orgId } : "skip",
+  );
 
   const [addingCategory, setAddingCategory] = useState(false);
   const [expandKey, setExpandKey] = useState(0);

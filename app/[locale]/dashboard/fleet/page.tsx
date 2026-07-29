@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { useOrganization } from "@clerk/nextjs";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
@@ -232,9 +232,19 @@ export default function FleetPage() {
   const [showProvision, setShowProvision] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const tags = useQuery(api.volootagsAdmin.getAllPhysicalTags, { orgId: filterOrg });
-  const stats = useQuery(api.volootagsAdmin.getPhysicalTagStats, {});
-  const orgsData = useQuery(api.organizations.getAllOrganizationsWithMembers, {});
+  const { isAuthenticated } = useConvexAuth();
+  const tags = useQuery(
+    api.volootagsAdmin.getAllPhysicalTags,
+    isAuthenticated ? { orgId: filterOrg } : "skip",
+  );
+  const stats = useQuery(
+    api.volootagsAdmin.getPhysicalTagStats,
+    isAuthenticated ? {} : "skip",
+  );
+  const orgsData = useQuery(
+    api.organizations.getAllOrganizationsWithMembers,
+    isAuthenticated ? {} : "skip",
+  );
   const organizations = (orgsData ?? []) as any[];
 
   const filtered = (tags ?? []).filter(t =>

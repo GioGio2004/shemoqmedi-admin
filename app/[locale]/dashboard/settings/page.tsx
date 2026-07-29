@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useOrganization } from "@clerk/nextjs";
-import { useQuery, useMutation } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import {
   Settings,
@@ -163,11 +163,12 @@ function LoadingSkeleton() {
 
 export default function SettingsPage() {
   const { organization, isLoaded } = useOrganization();
+  const { isAuthenticated } = useConvexAuth();
   const orgId = organization?.id;
 
   const settings = useQuery(
     api.organizations.getOrgSettings,
-    orgId ? { orgId } : "skip"
+    orgId && isAuthenticated ? { orgId } : "skip"
   );
 
   const updateTheme = useMutation(api.organizations.updateThemeSettings);

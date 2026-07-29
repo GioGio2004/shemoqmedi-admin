@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useMutation } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useOrganization } from "@clerk/nextjs";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
@@ -65,12 +65,13 @@ function GlassInput({ label, value, onChange, placeholder, type = "text", icon }
 // ─── MAIN FLEET DASHBOARD ───────────────────────────────────────────────────
 export default function NfcDashboard() {
   const { organization, isLoaded } = useOrganization();
+  const { isAuthenticated } = useConvexAuth();
   const router = useRouter();
   const params = useParams();
 
   // Queries
-  const allTags = useQuery(api.volootagsAdmin.getAllPhysicalTags, isLoaded && organization ? { orgId: organization.id } : "skip");
-  const orgSettings = useQuery(api.volootagsAdmin.getOrgTagSettings, isLoaded && organization ? { orgId: organization.id } : "skip");
+  const allTags = useQuery(api.volootagsAdmin.getAllPhysicalTags, isLoaded && organization && isAuthenticated ? { orgId: organization.id } : "skip");
+  const orgSettings = useQuery(api.volootagsAdmin.getOrgTagSettings, isLoaded && organization && isAuthenticated ? { orgId: organization.id } : "skip");
 
   // Mutations
   const updateTag = useMutation(api.volootagsAdmin.updatePhysicalTag);

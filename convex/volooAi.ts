@@ -1,15 +1,22 @@
 // convex/volooAi.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// VolooAI Admin Backend — Internal Mutations
+// VolooAI Admin Backend
 //
-// These are called exclusively by the Next.js API route (/api/voloo-ai) via
-// ConvexHttpClient. They are declared as `internalMutation` so they bypass
-// the Clerk JWT auth requirement — authentication is enforced at the API-route
-// layer instead, keeping the voice loop latency tight.
+// Called by the Next.js API routes (/api/voloo-ai, /api/voloo-ai/chat) and the
+// dashboard's live-voice hook via ConvexHttpClient.
+//
+// SECURITY: every function here reads or writes tenant data keyed by a
+// caller-supplied `orgId`, so every one calls verifyOrgAccess. The old header
+// claimed these were `internalMutation` and therefore exempt — they never were:
+// they are public `mutation`/`query`, and Convex functions are callable by
+// anyone holding the deployment URL. Enforcing auth only at the API-route layer
+// left the menu, storefront theme and diner-facing alerts world-writable.
+// Callers must therefore attach a Clerk token (see setAuth in the API routes).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { verifyOrgAccess } from "./authHelpers";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // logChat — persists one turn of the manager ↔ VolooAI conversation.
@@ -30,6 +37,7 @@ export const logChat = mutation({
     actionExecuted: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await verifyOrgAccess(ctx, args.orgId);
     const id = await ctx.db.insert("adminChats", {
       orgId: args.orgId,
       role: args.role,
@@ -59,6 +67,7 @@ export const logAction = mutation({
     details: v.string(),
   },
   handler: async (ctx, args) => {
+    await verifyOrgAccess(ctx, args.orgId);
     const id = await ctx.db.insert("aiActionLogs", {
       orgId: args.orgId,
       actionType: args.actionType,
@@ -89,6 +98,7 @@ export const toggleMenuItem = mutation({
     action: v.union(v.literal("hide"), v.literal("show")),
   },
   handler: async (ctx, { orgId, targetName, action }) => {
+    await verifyOrgAccess(ctx, orgId);
     // Fetch all menu items for this org
     const allItems = await ctx.db
       .query("menuItems")
@@ -161,6 +171,7 @@ export const getMenuStatus = query({
     isAvailable: v.optional(v.boolean()),
   },
   handler: async (ctx, { orgId, searchTerm, isAvailable }) => {
+    await verifyOrgAccess(ctx, orgId);
     // 1. Fetch categories to map IDs to actual names
     const categoriesRaw = await ctx.db
       .query("categories")
@@ -230,6 +241,7 @@ export const updateItemDescription = mutation({
     newDescription: v.string(),
   },
   handler: async (ctx, { orgId, targetId, newDescription }) => {
+    await verifyOrgAccess(ctx, orgId);
     // Resolve string → typed Id (ConvexHttpClient sends ids as strings)
     const item = await ctx.db.get(targetId as Parameters<typeof ctx.db.get>[0]);
 
@@ -266,8 +278,9 @@ export const updateItemDescription = mutation({
 //                           fontFamily, buttonRadius }
 //
 // The mutation merges partial updates — AI can change a single field without
-// overwriting the rest. No verifyOrgAccess needed because this is called via
-// the ConvexHttpClient inside the VolooAI hook (already org-scoped by orgId).
+// overwriting the rest. verifyOrgAccess IS required: an `orgId` argument is
+// caller-supplied input, not a security boundary — Convex functions are
+// callable directly by anyone holding the deployment URL.
 // ─────────────────────────────────────────────────────────────────────────────
 export const updateStorefrontTheme = mutation({
   args: {
@@ -279,6 +292,7 @@ export const updateStorefrontTheme = mutation({
     buttonRadius:    v.optional(v.string()),  // e.g. "9999px" | "0.5rem"
   },
   handler: async (ctx, { orgId, primaryColor, backgroundColor, textColor, fontFamily, buttonRadius }) => {
+    await verifyOrgAccess(ctx, orgId);
     const org = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", orgId))
@@ -348,6 +362,7 @@ export const getAdminChatHistory = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, { orgId, limit = 60 }) => {
+    await verifyOrgAccess(ctx, orgId);
     const rows = await ctx.db
       .query("adminChats")
       .withIndex("by_org", (q) => q.eq("orgId", orgId))
@@ -370,6 +385,7 @@ export const broadcastStorefrontAlert = mutation({
     alertMessage: v.string(), // empty string = clear
   },
   handler: async (ctx, { orgId, alertMessage }) => {
+    await verifyOrgAccess(ctx, orgId);
     const org = await ctx.db
       .query("organizations")
       .withIndex("by_clerk_id", (q) => q.eq("clerkId", orgId))

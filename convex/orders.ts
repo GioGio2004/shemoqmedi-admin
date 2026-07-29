@@ -106,25 +106,38 @@ export const placeOrder = mutation({
 
 export const getOrders = query({
   args: {
+    // Clerk org ID (preferred — immune to slug drift) or a venue slug
+    // (legacy callers). CONVEX OWNS THE SLUG: after a rename, Clerk's own
+    // slug keeps the old value, so slug-keyed lookups from Clerk data break.
     cafeId: v.string(),
   },
   handler: async (ctx, args) => {
-    // 🔒 Tenant Isolation: Resolve slug to Clerk orgId
-    const org = await ctx.db
+    let org = await ctx.db
       .query("organizations")
-      .withIndex("by_slug", (q) => q.eq("slug", args.cafeId))
+      .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.cafeId))
       .unique();
-
     if (!org) {
-      throw new Error(`Organization for cafeId "${args.cafeId}" not found.`);
+      org = await ctx.db
+        .query("organizations")
+        .withIndex("by_slug", (q) => q.eq("slug", args.cafeId))
+        .unique();
+    }
+
+    // Stale clients (old tabs, drifted Clerk slugs) get an empty list, not a
+    // crashed dashboard.
+    if (!org) {
+      console.warn(`getOrders: no organization for "${args.cafeId}" — stale caller?`);
+      return [];
     }
 
     // Ensure the caller is an authenticated staff member of this org
     await verifyOrgAccess(ctx, org.clerkId);
 
+    // Query by the org's CURRENT Convex slug — tableOrders rows follow it
+    // through migrateOrgSlug.
     return await ctx.db
       .query("tableOrders")
-      .withIndex("by_cafe", (q) => q.eq("cafeId", args.cafeId))
+      .withIndex("by_cafe", (q) => q.eq("cafeId", org.slug))
       .order("desc")
       .collect();
   },

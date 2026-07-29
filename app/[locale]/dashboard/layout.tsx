@@ -8,7 +8,7 @@ import {
   useAuth,
   UserButton,
 } from "@clerk/nextjs";
-import { useQuery } from "convex/react";
+import { useConvexAuth, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { cn } from "@/lib/utils";
 import {
@@ -20,7 +20,6 @@ import {
   Store,
   ChevronLeft,
   ChevronRight,
-  MessageSquare,
   Gift,
 } from "lucide-react";
 import { useState, createContext, useContext, useEffect } from "react";
@@ -48,12 +47,6 @@ const NAV_ITEMS = [
     label: "Orders",
     href: "/dashboard/orders",
     icon: ShoppingBag,
-    exact: false,
-  },
-  {
-    label: "Chat",
-    href: "/dashboard/chat-theme",
-    icon: MessageSquare,
     exact: false,
   },
   {
@@ -268,13 +261,14 @@ export default function DashboardLayout({
   const pathname = usePathname();
 
   const { organization, membership, isLoaded } = useOrganization();
+  const { isAuthenticated } = useConvexAuth();
   const convexRole = useQuery(
     api.memberships.getMyRole,
-    organization ? { orgId: organization.id } : "skip",
+    organization && isAuthenticated ? { orgId: organization.id } : "skip",
   );
   const orgSettings = useQuery(
     api.organizations.getOrgSettings,
-    organization ? { orgId: organization.id } : "skip",
+    organization && isAuthenticated ? { orgId: organization.id } : "skip",
   );
 
   // ── Surprise Bags gating ─────────────────────────────────────────────────
@@ -282,7 +276,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const gating = useQuery(
     api.bagsDashboard.getOrgGating,
-    organization ? { orgId: organization.id } : "skip",
+    organization && isAuthenticated ? { orgId: organization.id } : "skip",
   );
   const isBagsOnly = gating?.onboardingType === "bags";
   useEffect(() => {
@@ -298,7 +292,10 @@ export default function DashboardLayout({
   const { isLoaded: membershipsLoaded, userMemberships } = useOrganizationList({
     userMemberships: true,
   });
-  const currentUser = useQuery(api.users.getCurrentUser);
+  const currentUser = useQuery(
+    api.users.getCurrentUser,
+    isAuthenticated ? {} : "skip",
+  );
   const isPlatformAdmin =
     currentUser?.role === "super_admin" || currentUser?.role === "admin";
 
@@ -318,7 +315,6 @@ export default function DashboardLayout({
   const orgAccessPending = isLoaded && !organization && !orgAccessResolved;
 
   const role = convexRole || membership?.role;
-  const showAiManager = orgSettings?.features?.hasAiManager !== false;
   const showLiveOrdering = orgSettings?.features?.hasLiveOrdering !== false;
   const showDigitalMenu = orgSettings?.features?.hasDigitalMenu !== false;
 
@@ -326,7 +322,6 @@ export default function DashboardLayout({
 
   const allowedNavItems = NAV_ITEMS.filter((item) => {
     if (!showSurpriseBags && item.label === "Surprise Bags") return false;
-    if (!showAiManager && item.label === "Chat") return false;
     if (!showLiveOrdering && item.label === "Orders") return false;
     if (
       !showDigitalMenu &&
@@ -369,6 +364,18 @@ export default function DashboardLayout({
     return (
       <div className="flex h-[100dvh] items-center justify-center bg-v-bg">
         <div className="h-6 w-6 animate-spin rounded-full border-2 border-v-line border-t-v-accent" />
+      </div>
+    );
+  }
+
+  // ── Storefront workspace takeover ──────────────────────────────────────────
+  // The merged design workspace brings its own chrome (glass top bar, panel
+  // rail, mobile bottom nav) — hand it the full pane, no sidebar/container.
+  if (bare.startsWith("/dashboard/storefront") && isAllowed) {
+    return (
+      <div className="flex h-[100dvh] flex-col overflow-hidden bg-v-bg text-v-ink">
+        <ImpersonationBanner />
+        <div className="min-h-0 flex-1">{children}</div>
       </div>
     );
   }

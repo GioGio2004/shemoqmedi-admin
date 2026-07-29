@@ -63,9 +63,14 @@ export const deleteFromClerk = internalMutation({
   },
 });
 
+// Platform-wide roster: every org joined to every member's user record.
+// requireSuperAdmin is mandatory — unguarded, this returned the entire
+// tenant + member PII graph (emails, phones, payment method) to any caller.
 export const getAllOrganizationsWithMembers = query({
   args: {},
   handler: async (ctx) => {
+    await requireSuperAdmin(ctx);
+
     const orgs = await ctx.db.query("organizations").collect();
 
     return await Promise.all(
@@ -199,16 +204,23 @@ export const updateStorefrontConfig = mutation({
   args: {
     orgId: v.string(), // Clerk org ID
 
+    // Text fields accept a plain string (legacy) or a translated record —
+    // mirroring the schema's union. The old admin sent records here too, which
+    // v.string() silently rejected at the validator.
     storefrontConfig: v.optional(
       v.object({
-        heroHeadline: v.string(),
-        heroSubheadline: v.string(),
-        primaryButtonText: v.optional(v.string()),
-        secondaryButtonText: v.optional(v.string()),
+        heroHeadline: v.union(v.string(), v.record(v.string(), v.string())),
+        heroSubheadline: v.union(v.string(), v.record(v.string(), v.string())),
+        primaryButtonText: v.optional(
+          v.union(v.string(), v.record(v.string(), v.string())),
+        ),
+        secondaryButtonText: v.optional(
+          v.union(v.string(), v.record(v.string(), v.string())),
+        ),
         coverImageUrl: v.optional(v.string()), // Landing page / primary background
         heroImageUrls: v.array(v.string()), // Up to 3 floating hero images
-        address: v.string(),
-        cityStateZip: v.string(),
+        address: v.union(v.string(), v.record(v.string(), v.string())),
+        cityStateZip: v.union(v.string(), v.record(v.string(), v.string())),
         lat: v.optional(v.number()),
         lng: v.optional(v.number()),
       }),
@@ -254,6 +266,7 @@ export const updateStorefrontConfig = mutation({
         storyImageUrl: v.optional(v.string()),
         galleryImageUrls: v.optional(v.array(v.string())),
         accentColor: v.optional(v.string()),
+        menuStyle: v.optional(v.union(v.literal("rows"), v.literal("gallery"))),
         showTicker: v.optional(v.boolean()),
         showTunnel: v.optional(v.boolean()),
         showFeatured: v.optional(v.boolean()),

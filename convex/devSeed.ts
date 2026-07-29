@@ -295,6 +295,7 @@ export const seedSignatureDemo = internalMutation({
         },
         storyImageUrl: IMG.story,
         galleryImageUrls: IMG.gallery,
+        menuStyle: "gallery" as const,
         showTicker: true,
         showFeatured: true,
         showStory: true,

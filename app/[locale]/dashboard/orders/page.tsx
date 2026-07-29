@@ -60,9 +60,13 @@ const STATUS_CONFIG = {
 
 export default function OrdersPage() {
   const { organization, isLoaded } = useOrganization();
-  const orgSlug = organization?.slug ?? null;
 
-  const orders = useQuery(api.orders.getOrders, orgSlug ? { cafeId: orgSlug } : "skip");
+  // Pass the Clerk org ID, not Clerk's slug — Convex owns the slug and
+  // Clerk's copy drifts after renames (this exact drift broke this page).
+  const orders = useQuery(
+    api.orders.getOrders,
+    organization?.id ? { cafeId: organization.id } : "skip",
+  );
   const updateStatus = useMutation(api.orders.updateOrderStatus);
 
   if (!isLoaded || orders === undefined) {
@@ -73,7 +77,7 @@ export default function OrdersPage() {
     );
   }
 
-  if (!orgSlug) {
+  if (!organization?.id) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
         <p className="font-medium text-v-ink">No workspace selected</p>

@@ -1,13 +1,17 @@
 import { cronJobs } from "convex/server";
-import { api } from "./_generated/api";
+import { internal } from "./_generated/api";
 
 const crons = cronJobs();
+
+// Both targets are internal* functions: crons can call them, clients cannot.
+// (As public functions they were an unauthenticated cascading delete and a
+// billable Google Places sweep that anyone could trigger.)
 
 // Run the cleanup task daily at midnight UTC
 crons.daily(
   "remove-expired-sessions",
   { minuteUTC: 0, hourUTC: 0 },
-  api.cleanup.removeExpiredSessions,
+  internal.cleanup.removeExpiredSessions,
 );
 
 // Refresh Google Business Profile data (rating, review count, hours) for all
@@ -16,7 +20,7 @@ crons.daily(
 crons.daily(
   "refresh-google-venue-data",
   { minuteUTC: 30, hourUTC: 2 },
-  api.venues.syncAllGoogleData,
+  internal.venues.syncAllGoogleData,
 );
 
 export default crons;

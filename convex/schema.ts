@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { studioConfigV } from "./studioConfig";
 
 // 🤖 AI-Ready Translation Object
 // Accepts any language code the AI generates (e.g., { "en": "Coffee", "ka": "ყავა", "fr": "Café" })
@@ -108,6 +109,8 @@ export default defineSchema({
         storyImageUrl: v.optional(v.string()),
         galleryImageUrls: v.optional(v.array(v.string())), // drift-wall gallery; falls back to venues.galleryImages
         accentColor: v.optional(v.string()), // overrides the default accent for this venue's menu
+        // "gallery" (default): Pinterest-style visual wall. "rows": editorial ruled list.
+        menuStyle: v.optional(v.union(v.literal("rows"), v.literal("gallery"))),
         showTicker: v.optional(v.boolean()), // all default true when unset
         showTunnel: v.optional(v.boolean()), // the 3D corridor flythrough
         showFeatured: v.optional(v.boolean()),
@@ -562,6 +565,7 @@ export default defineSchema({
     botName: v.optional(v.string()), // e.g. "Shemoqmedi Assistant"
     botAvatarUrl: v.optional(v.string()), // URL for bot avatar
     primaryColor: v.string(), // Main accent
+    primaryColorLight: v.optional(v.string()), // Lighter accent (gradients/hover)
     backgroundColor: v.string(), // Chat container background
     textColor: v.string(), // General text color
     userMessageBg: v.string(), // User message bubble color
@@ -765,7 +769,46 @@ export default defineSchema({
     .index("by_session", ["sessionId"]),
 
   // ==========================================
-  // 11. AI TRAINING DATA FLYWHEEL
+  // 11. SHEMOQMEDI STUDIO (Design-as-Data)
+  // ==========================================
+  // One row per organization. `draft` is what the Studio editor works on;
+  // `published` is what the consumer menu renders. Publish = copy draft →
+  // published, so venues never see half-finished edits. Config shape lives
+  // in studioConfig.ts (shared with the Studio UI).
+  studioDesigns: defineTable({
+    orgId: v.string(), // Clerk Org ID
+    draft: studioConfigV,
+    published: v.optional(studioConfigV),
+    draftUpdatedAt: v.number(),
+    publishedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_org", ["orgId"]),
+
+  // ==========================================
+  // 12. ONBOARDING (guided-tour tracking)
+  // ==========================================
+  // One row per user per flow. `flow` names the tour ("storefront-studio");
+  // stepsSeen records the exact path taken so onboarding funnels can be
+  // analyzed later. A row without completedAt/skippedAt = an unfinished tour
+  // (the UI resumes it).
+  onboarding: defineTable({
+    userId: v.id("users"),
+    orgId: v.string(), // Clerk org the user was touring in (context, not key)
+    flow: v.string(),
+    startedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    skippedAt: v.optional(v.number()),
+    stepsSeen: v.array(v.string()),
+    lastStepAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_user_flow", ["userId", "flow"])
+    .index("by_flow", ["flow"])
+    .index("by_org", ["orgId"]),
+
+  // ==========================================
+  // 13. AI TRAINING DATA FLYWHEEL
   // ==========================================
   /**
    * ai_training_logs — one row per completed AI exchange.

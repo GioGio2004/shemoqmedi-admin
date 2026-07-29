@@ -1,14 +1,14 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
+import { verifyOrgAccess } from "./authHelpers";
 
 export const getOverviewStats = query({
   args: { orgId: v.string() },
   handler: async (ctx, args) => {
-    // Identity verification (Dashboard uses Clerk, so we just verify identity exists)
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Unauthenticated call to analytics");
-    }
+    // Must be a MEMBER of this org, not merely signed in — a bare identity
+    // check let any authenticated user read any venue's order volume,
+    // traffic and ratings by passing a different orgId.
+    await verifyOrgAccess(ctx, args.orgId);
 
     // 1. Resolve Organization
     const org = await ctx.db

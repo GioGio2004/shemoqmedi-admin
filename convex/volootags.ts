@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { requireSelf } from "./authHelpers";
 
 // 📍 LOG TAP — called on every NFC tap from the customer app (/t/[uuid])
 // Increments tapCount on the volootags record and optionally records timezone.
@@ -33,6 +34,7 @@ export const toggleAppMode = mutation({
     activeAppMode: v.union(v.literal("store"), v.literal("magic")),
   },
   handler: async (ctx, args) => {
+    await requireSelf(ctx, args.userId);
     const user = await ctx.db
       .query("users")
       .withIndex("byExternalId", (q) => q.eq("externalId", args.userId))
@@ -51,6 +53,7 @@ export const getActiveTag = query({
   args: { userId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     if (!args.userId) return null;
+    await requireSelf(ctx, args.userId);
     return await ctx.db
       .query("volootags")
       .withIndex("by_userId", (q) => q.eq("userId", args.userId))
@@ -64,6 +67,7 @@ export const getUserMagicStatus = query({
   args: { userId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     if (!args.userId) return null;
+    await requireSelf(ctx, args.userId);
     const user = await ctx.db
       .query("users")
       .withIndex("byExternalId", (q) =>
@@ -81,6 +85,7 @@ export const getUserMagicStatus = query({
 export const markUnboxingSeen = mutation({
   args: { userId: v.string() },
   handler: async (ctx, args) => {
+    await requireSelf(ctx, args.userId);
     const user = await ctx.db
       .query("users")
       .withIndex("byExternalId", (q) => q.eq("externalId", args.userId))
@@ -154,6 +159,7 @@ export const getUserTags = query({
   args: { userId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     if (!args.userId) return [];
+    await requireSelf(ctx, args.userId);
     return await ctx.db
       .query("volootags")
       .withIndex("by_userId", (q) => q.eq("userId", args.userId))
@@ -168,6 +174,7 @@ export const getUserProfile = query({
   args: { userId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     if (!args.userId) return null;
+    await requireSelf(ctx, args.userId);
     const user = await ctx.db
       .query("users")
       .withIndex("byExternalId", (q) =>
@@ -190,6 +197,7 @@ export const getTagTapStats = query({
   args: { userId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     if (!args.userId) return null;
+    await requireSelf(ctx, args.userId);
 
     const tag = await ctx.db
       .query("volootags")

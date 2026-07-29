@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import {
   mutation,
   query,
-  action,
+  internalAction,
   internalMutation,
   internalQuery,
 } from "./_generated/server";
@@ -267,7 +267,9 @@ export const patchGoogleData = internalMutation({
  * API Reference: https://developers.google.com/maps/documentation/places/web-service/place-details
  * New Places API endpoint: https://places.googleapis.com/v1/places/{placeId}
  */
-export const syncAllGoogleData = action({
+// Cron target ONLY — internalAction is not client-callable. As a public
+// action anyone could drive a full Places sweep on the billed API key.
+export const syncAllGoogleData = internalAction({
   args: {},
   handler: async (ctx) => {
     const apiKey = process.env.GOOGLE_PLACE_API_KEY;

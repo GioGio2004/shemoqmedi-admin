@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
 import { toast } from "sonner";
@@ -403,10 +403,15 @@ export function NTagFleetPanel({
     }
   };
 
-  const tags = useQuery(api.volootagsAdmin.getAllPhysicalTags, {
-    orgId: filterOrg,
-  });
-  const stats = useQuery(api.volootagsAdmin.getPhysicalTagStats, {});
+  const { isAuthenticated } = useConvexAuth();
+  const tags = useQuery(
+    api.volootagsAdmin.getAllPhysicalTags,
+    isAuthenticated ? { orgId: filterOrg } : "skip",
+  );
+  const stats = useQuery(
+    api.volootagsAdmin.getPhysicalTagStats,
+    isAuthenticated ? {} : "skip",
+  );
 
   const filtered = (tags ?? []).filter(
     (t: any) =>

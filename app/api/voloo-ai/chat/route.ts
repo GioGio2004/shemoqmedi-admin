@@ -12,12 +12,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from "next/server";
-import { ConvexHttpClient } from "convex/browser";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import type { Tool } from "@google/generative-ai";
 import { api } from "@/convex/_generated/api";
+import { authedConvexClient } from "@/lib/convexServer";
 
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 // ── System instruction ────────────────────────────────────────────────────────
@@ -162,6 +161,20 @@ export async function POST(request: NextRequest) {
     if (!process.env.GEMINI_API_KEY) {
       return NextResponse.json({ success: false, error: "AI service not configured." }, { status: 503 });
     }
+
+    // ── Auth: per-request Convex client carrying the caller's Clerk token,
+    //    so the volooAi functions can enforce org membership themselves. ────
+    const authed = await authedConvexClient();
+    if (!authed) {
+      return NextResponse.json({ success: false, error: "Not signed in." }, { status: 401 });
+    }
+    if (authed.orgId && authed.orgId !== orgId) {
+      return NextResponse.json(
+        { success: false, error: "You are not a member of that venue." },
+        { status: 403 },
+      );
+    }
+    const convex = authed.client;
 
     console.log(`💬 [VolooAI Chat] org="${orgId}" msg="${message.slice(0, 80)}"`);
 

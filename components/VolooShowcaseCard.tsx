@@ -2,11 +2,9 @@
 // components/VolooShowcaseCard.tsx — shared between voice and text chat UIs
 
 import { useState, useEffect, useRef } from "react";
-import { ConvexHttpClient } from "convex/browser";
+import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { ShowcaseItem } from "@/hooks/useGeminiLive";
-
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 function formatPrice(tetri: number): string {
   if (!tetri) return "—";
@@ -23,6 +21,8 @@ export function ShowcaseCard({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // useMutation carries the signed-in user's Clerk token automatically.
+  const updateDescription = useMutation(api.volooAi.updateItemDescription);
   useEffect(() => { setDesc(item.description); }, [item.description]);
 
   const onChange = (val: string) => {
@@ -32,7 +32,7 @@ export function ShowcaseCard({
     timer.current = setTimeout(async () => {
       setSaving(true);
       try {
-        await convex.mutation(api.volooAi.updateItemDescription, { orgId, targetId: item.id!, newDescription: val });
+        await updateDescription({ orgId, targetId: item.id!, newDescription: val });
         setSaved(true); onSaved(item.id!, val); setTimeout(() => setSaved(false), 2000);
       } catch { /* silent */ } finally { setSaving(false); }
     }, 800);

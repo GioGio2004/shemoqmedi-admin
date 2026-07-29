@@ -97,6 +97,31 @@ export async function verifyOrgAdmin(ctx: AnyCtx, orgId: string) {
 }
 
 /**
+ * requireSelf — for functions that take a Clerk user ID as an ARGUMENT.
+ *
+ * A caller-supplied `userId` is untrusted input: without this check, passing
+ * someone else's ID returns (or patches) their record. Platform admins are
+ * allowed through so support tooling keeps working.
+ *
+ * Usage:  await requireSelf(ctx, args.userId);
+ */
+export async function requireSelf(ctx: AnyCtx, externalUserId: string) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new ConvexError("Authentication required");
+  if (identity.subject === externalUserId) return identity;
+
+  const caller = await ctx.db
+    .query("users")
+    .withIndex("byExternalId", (q) => q.eq("externalId", identity.subject))
+    .unique();
+  if (caller?.role && ["super_admin", "admin"].includes(caller.role)) {
+    return identity;
+  }
+
+  throw new ConvexError("Forbidden: you may only access your own account.");
+}
+
+/**
  * requireSuperAdmin — platform-level gate for global operations
  * (training-data readers, venue directory management, etc.).
  *
