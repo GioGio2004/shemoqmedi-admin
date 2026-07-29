@@ -92,8 +92,15 @@ export default defineSchema({
         textColor: v.optional(v.string()),
         fontFamily: v.string(),
         buttonRadius: v.string(),
+        // "studio" = render from the venue's published studioDesigns config
+        // (set by studio.publish). The other three are the fixed templates.
         menuType: v.optional(
-          v.union(v.literal("basic"), v.literal("dragable"), v.literal("ruled")),
+          v.union(
+            v.literal("basic"),
+            v.literal("dragable"),
+            v.literal("ruled"),
+            v.literal("studio"),
+          ),
         ),
         categoryLayout: v.optional(v.union(v.literal("pills"), v.literal("cards"))),
       }),

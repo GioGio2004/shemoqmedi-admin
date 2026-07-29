@@ -251,7 +251,12 @@ export const updateStorefrontConfig = mutation({
         fontFamily: v.string(), // e.g. "Inter"
         buttonRadius: v.string(), // e.g. "0.5rem" | "9999px"
         menuType: v.optional(
-          v.union(v.literal("basic"), v.literal("dragable"), v.literal("ruled")),
+          v.union(
+            v.literal("basic"),
+            v.literal("dragable"),
+            v.literal("ruled"),
+            v.literal("studio"),
+          ),
         ),
         categoryLayout: v.optional(v.union(v.literal("pills"), v.literal("cards"))),
       }),

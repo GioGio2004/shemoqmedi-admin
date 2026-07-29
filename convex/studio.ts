@@ -194,11 +194,12 @@ export const publish = mutation({
       throw new ConvexError("Nothing to publish — save a draft first.");
     }
 
+    const live = config ?? existing!.draft;
+
     if (existing) {
-      const draft = config ?? existing.draft;
       await ctx.db.patch(existing._id, {
-        draft,
-        published: draft,
+        draft: live,
+        published: live,
         draftUpdatedAt: config ? now : existing.draftUpdatedAt,
         publishedAt: now,
         updatedAt: now,
@@ -206,14 +207,43 @@ export const publish = mutation({
     } else {
       await ctx.db.insert("studioDesigns", {
         orgId,
-        draft: config!,
-        published: config!,
+        draft: live,
+        published: live,
         draftUpdatedAt: now,
         publishedAt: now,
         createdAt: now,
         updatedAt: now,
       });
     }
+
+    // ── Point the live menu at this design ────────────────────────────────
+    // Without this the config is stored but nothing renders it: the consumer
+    // menu routes on themeSettings.menuType, so publishing must switch the
+    // venue to "studio". (Choosing a fixed template on the Templates page
+    // sets menuType back to basic/ruled/dragable — they are mutually
+    // exclusive by design.) Legacy fields are kept in sync so the older
+    // templates still look right if the venue switches back.
+    const org = await ctx.db
+      .query("organizations")
+      .withIndex("by_clerk_id", (q) => q.eq("clerkId", orgId))
+      .unique();
+
+    if (org) {
+      const prev = org.themeSettings;
+      await ctx.db.patch(org._id, {
+        themeSettings: {
+          primaryColor: prev?.primaryColor ?? live.theme.accent,
+          backgroundColor: prev?.backgroundColor ?? live.theme.background,
+          textColor: prev?.textColor ?? live.theme.ink,
+          fontFamily: prev?.fontFamily ?? "Inter",
+          buttonRadius: prev?.buttonRadius ?? `${live.theme.radius}px`,
+          categoryLayout: prev?.categoryLayout,
+          menuType: "studio",
+        },
+        updatedAt: now,
+      });
+    }
+
     return { publishedAt: now };
   },
 });

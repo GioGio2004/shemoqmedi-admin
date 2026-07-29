@@ -29,7 +29,9 @@ export interface LegacyTheme {
   textColor?: string;
   fontFamily: string;
   buttonRadius: string;
-  menuType?: "basic" | "dragable" | "ruled";
+  // "studio" = the venue's own published design is live (set by publishing in
+  // the Storefront studio). Picking a template here replaces it.
+  menuType?: "basic" | "dragable" | "ruled" | "studio";
   categoryLayout?: "pills" | "cards";
 }
 
@@ -143,6 +145,14 @@ export function TemplatePanel({
             <TemplateMockup kind="dragable" />
           </OptionTile>
         </div>
+        {menuType === "studio" && (
+          <p className="flex items-start gap-2 rounded-xl border border-emerald-400/25 bg-emerald-400/[0.06] p-3 text-[11px] leading-relaxed text-v-mut">
+            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" />
+            Your own <strong className="font-semibold text-v-ink">custom design</strong> is
+            currently live. Choosing a template above replaces it — your design
+            stays saved and you can re-publish it any time from the studio.
+          </p>
+        )}
         {menuType === "ruled" && (
           <p className="flex items-start gap-2 rounded-xl border border-v-accent/25 bg-v-accent/[0.06] p-3 text-[11px] leading-relaxed text-v-mut">
             <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-v-accent" />
