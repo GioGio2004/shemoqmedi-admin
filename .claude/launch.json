@@ -18,10 +18,13 @@
         "--prefix",
         "C:/Users/khvic/Desktop/shemoqmedi",
         "run",
-        "dev"
+        "dev",
+        "--",
+        "--port",
+        "3005"
       ],
-      "port": 3001,
-      "autoPort": true
+      "port": 3005,
+      "autoPort": false
     }
   ]
 }
