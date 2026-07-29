@@ -312,8 +312,14 @@ export const updateStorefrontTheme = mutation({
       buttonRadius:    "0.5rem",
     };
 
-    // Merge — only overwrite keys the AI explicitly provided
+    // Merge — only overwrite keys the AI explicitly provided.
+    // CRITICAL: spread `existing` first. themeSettings is a nested object and
+    // Convex's db.patch replaces it wholesale, so listing keys by hand DELETES
+    // every key not listed — including menuType, the single field the public
+    // menu routes on. Dropping it silently reverted venues to the Classic
+    // template and stranded published Studio designs.
     const merged = {
+      ...existing,
       primaryColor:    primaryColor    ?? existing.primaryColor,
       backgroundColor: backgroundColor ?? existing.backgroundColor,
       textColor:       textColor       ?? existing.textColor,

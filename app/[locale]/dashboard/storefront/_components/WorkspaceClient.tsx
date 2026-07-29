@@ -21,6 +21,7 @@ import {
   CloudUpload,
   Eye,
   HelpCircle,
+  LayoutTemplate,
   Layers,
   Loader2,
   MessageSquare,
@@ -64,6 +65,12 @@ import {
   type ChatThemeState,
 } from "./ChatPanel";
 import { StudioTutorial, STUDIO_FLOW, type TutorialApply } from "./Tutorial";
+import { TemplateModal, TEMPLATE_FLOW } from "./TemplateModal";
+import {
+  TemplatePanel,
+  type LegacyTheme,
+  type RuledContent,
+} from "./TemplatePanel";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The Storefront workspace — Studio design + storefront content merged into
@@ -72,11 +79,12 @@ import { StudioTutorial, STUDIO_FLOW, type TutorialApply } from "./Tutorial";
 // design draft live.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Section = "design" | "content" | "venue" | "chat";
+type Section = "design" | "template" | "content" | "venue" | "chat";
 type SaveState = "idle" | "dirty" | "saving" | "saved" | "error";
 
 const SECTIONS: Array<{ key: Section; label: string; icon: React.ElementType }> = [
   { key: "design", label: "Design", icon: Palette },
+  { key: "template", label: "Template", icon: Layers },
   { key: "content", label: "Content", icon: Type },
   { key: "venue", label: "Venue", icon: Store },
   { key: "chat", label: "Chat", icon: MessageSquare },
@@ -92,6 +100,12 @@ interface ContentState {
   announcements: Announcement[];
   lat?: number;
   lng?: number;
+}
+
+/** Ready-made template + that template's own options (its own save domain). */
+interface TemplateState {
+  theme: LegacyTheme;
+  ruled: RuledContent;
 }
 
 function timeAgo(ts: number): string {
@@ -124,6 +138,41 @@ function buildContentArgs(orgId: string, content: ContentState) {
       email: content.socials.email || undefined,
     },
     announcements: content.announcements,
+  };
+}
+
+/**
+ * TemplateState → updateStorefrontConfig args (shared by autosave + flush).
+ *
+ * menuType is deliberately NOT sent: the server pins it from the stored row so
+ * a settings save can never change which template is live. That switch belongs
+ * to organizations.setMenuTemplate (the picker modal) alone.
+ */
+function buildTemplateArgs(orgId: string, template: TemplateState) {
+  const clean = (r: Record<string, string>) => {
+    const out = Object.fromEntries(
+      Object.entries(r).filter(([, v]) => v && v.trim()),
+    );
+    return Object.keys(out).length ? out : undefined;
+  };
+  return {
+    orgId,
+    themeSettings: template.theme,
+    ruledMenuConfig: {
+      tickerText: clean(template.ruled.tickerText),
+      storyText: clean(template.ruled.storyText),
+      storyImageUrl: template.ruled.storyImageUrl || undefined,
+      galleryImageUrls: template.ruled.galleryImageUrls.length
+        ? template.ruled.galleryImageUrls
+        : undefined,
+      accentColor: template.ruled.accentColor || undefined,
+      menuStyle: template.ruled.menuStyle,
+      showTicker: template.ruled.showTicker,
+      showTunnel: template.ruled.showTunnel,
+      showFeatured: template.ruled.showFeatured,
+      showStory: template.ruled.showStory,
+      showGallery: template.ruled.showGallery,
+    },
   };
 }
 
@@ -228,6 +277,13 @@ function WorkspaceEditor({
     api.onboarding.getMine,
     isAuthenticated ? { flow: STUDIO_FLOW } : "skip",
   );
+  // Separate flow row so the template picker and the tour are independently
+  // "first-visit" — finishing one must not suppress the other.
+  const templateRow = useQuery(
+    api.onboarding.getMine,
+    isAuthenticated ? { flow: TEMPLATE_FLOW } : "skip",
+  );
+  const finishOnboarding = useMutation(api.onboarding.finish);
   const saveDraft = useMutation(api.studio.saveDraft);
   const publishDesign = useMutation(api.studio.publish);
   const saveContent = useMutation(api.organizations.updateStorefrontConfig);
@@ -251,6 +307,35 @@ function WorkspaceEditor({
     (onboardingRow === null ||
       (!onboardingRow.completedAt && !onboardingRow.skippedAt));
   const tourOpen = tourManual || (tourEligible && !tourDismissed);
+
+  // ── Template picker visibility ────────────────────────────────────────────
+  // Same derived pattern as the tour (no setState-in-effect): the venue sees it
+  // once automatically, then only on demand. It waits for the tour so a first
+  // login never stacks two overlays.
+  const [templateDismissed, setTemplateDismissed] = useState(false);
+  const [templateManual, setTemplateManual] = useState(false);
+  const templateFirstVisit =
+    templateRow !== undefined &&
+    (templateRow === null ||
+      (!templateRow.completedAt && !templateRow.skippedAt));
+  const templateOpen =
+    templateManual || (templateFirstVisit && !templateDismissed && !tourOpen);
+
+  const closeTemplateModal = (
+    reason: "kept" | "switched" | "editing" | "dismissed",
+  ) => {
+    setTemplateManual(false);
+    setTemplateDismissed(true);
+    // Any deliberate answer counts as completing the step; an Esc/scrim
+    // dismissal is recorded as skipped so funnel data stays honest.
+    if (orgId) {
+      finishOnboarding({
+        flow: TEMPLATE_FLOW,
+        orgId,
+        outcome: reason === "dismissed" ? "skipped" : "completed",
+      }).catch(() => {});
+    }
+  };
 
   // ── DESIGN domain (draft → publish) ───────────────────────────────────────
   const [designEdits, setDesignEdits] = useState<StudioConfig | null>(null);
@@ -372,6 +457,70 @@ function WorkspaceEditor({
     return () => clearTimeout(timer);
   }, [content, contentEdits, orgId, saveContent, saveLocation]);
 
+  // ── TEMPLATE domain (ready-made look + that template's own options) ───────
+  // Folded back in from the retired /dashboard/templates page. Two surfaces
+  // each holding a copy of themeSettings is what let a template save overwrite
+  // menuType and strand a published custom design; now there is exactly one
+  // editor, and menuType itself is written ONLY by organizations.setMenuTemplate
+  // (via the picker modal) — never by this autosave.
+  const [templateEdits, setTemplateEdits] = useState<TemplateState | null>(null);
+  const templateInitial = useMemo<TemplateState | null>(() => {
+    if (!data) return null;
+    const t = data.org.themeSettings;
+    const r = data.org.ruledMenuConfig;
+    return {
+      theme: {
+        primaryColor: t?.primaryColor ?? "#ffffff",
+        backgroundColor: t?.backgroundColor ?? "#09090b",
+        textColor: t?.textColor ?? "#ffffff",
+        fontFamily: t?.fontFamily ?? "Inter",
+        buttonRadius: t?.buttonRadius ?? "0.5rem",
+        menuType: t?.menuType ?? "basic",
+        categoryLayout: t?.categoryLayout ?? "pills",
+      },
+      ruled: {
+        tickerText: r?.tickerText ?? {},
+        storyText: r?.storyText ?? {},
+        storyImageUrl: r?.storyImageUrl ?? "",
+        galleryImageUrls: r?.galleryImageUrls ?? [],
+        accentColor: r?.accentColor ?? "",
+        menuStyle: r?.menuStyle ?? "gallery",
+        showTicker: r?.showTicker ?? true,
+        showTunnel: r?.showTunnel ?? true,
+        showFeatured: r?.showFeatured ?? true,
+        showStory: r?.showStory ?? true,
+        showGallery: r?.showGallery ?? true,
+      },
+    };
+  }, [data]);
+  const template = templateEdits ?? templateInitial;
+
+  const [templateSave, setTemplateSave] = useState<SaveState>("idle");
+  const templateSavedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!template) return;
+    const json = JSON.stringify(template);
+    if (templateEdits === null) {
+      templateSavedRef.current = json;
+      return;
+    }
+    if (json === templateSavedRef.current) return;
+    setTemplateSave("dirty");
+    const timer = setTimeout(async () => {
+      try {
+        setTemplateSave("saving");
+        await saveContent(buildTemplateArgs(orgId, template));
+        templateSavedRef.current = json;
+        setTemplateSave("saved");
+        setLiveReloadKey((k) => k + 1);
+      } catch {
+        setTemplateSave("error");
+        toast.error("Template settings failed to save.");
+      }
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [template, templateEdits, orgId, saveContent]);
+
   // ── CHAT domain (VolooAI widget theme — live on save) ─────────────────────
   const [chatEdits, setChatEdits] = useState<ChatThemeState | null>(null);
   const chatInitial = useMemo<ChatThemeState | null>(() => {
@@ -429,11 +578,20 @@ function WorkspaceEditor({
 
   // ── Combined status + unload guard ────────────────────────────────────────
   const busy =
-    designSave === "saving" || contentSave === "saving" || chatSave === "saving";
+    designSave === "saving" ||
+    contentSave === "saving" ||
+    templateSave === "saving" ||
+    chatSave === "saving";
   const dirty =
-    designSave === "dirty" || contentSave === "dirty" || chatSave === "dirty";
+    designSave === "dirty" ||
+    contentSave === "dirty" ||
+    templateSave === "dirty" ||
+    chatSave === "dirty";
   const failed =
-    designSave === "error" || contentSave === "error" || chatSave === "error";
+    designSave === "error" ||
+    contentSave === "error" ||
+    templateSave === "error" ||
+    chatSave === "error";
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (busy || dirty) e.preventDefault();
@@ -468,6 +626,13 @@ function WorkspaceEditor({
           }
         }
       }
+      if (template) {
+        const json = JSON.stringify(template);
+        if (json !== templateSavedRef.current) {
+          templateSavedRef.current = json;
+          saveContent(buildTemplateArgs(orgId, template)).catch(() => {});
+        }
+      }
       if (chat) {
         const json = JSON.stringify(chat);
         if (json !== chatSavedRef.current) {
@@ -488,11 +653,27 @@ function WorkspaceEditor({
 
   const handlePublish = async () => {
     if (!design) return;
+    // Publishing switches the public menu to the custom design. When the venue
+    // is currently on a ready-made template that is a visible, surprising
+    // change — especially from the Content/Venue/Chat sections, where the
+    // button is equally reachable. Ask first instead of silently retemplating.
+    const currentType = data?.org.themeSettings?.menuType ?? "basic";
+    if (currentType !== "studio") {
+      const ok = window.confirm(
+        "Publishing replaces your current template with your own custom design.\n\n" +
+          "Your dishes, photos and text stay exactly as they are, and you can " +
+          "switch back to a template any time.\n\nPublish now?",
+      );
+      if (!ok) return;
+    }
     try {
       setPublishing(true);
       await publishDesign({ orgId, config: design });
       designSavedRef.current = JSON.stringify(design);
       setDesignSave("saved");
+      // The live preview is the real page — reload it so the change is visible
+      // immediately, matching what the content autosave already does.
+      setLiveReloadKey((k) => k + 1);
       toast.success("Design published — the live menu picks it up instantly.");
     } catch {
       toast.error("Publish failed. Try again.");
@@ -575,26 +756,46 @@ function WorkspaceEditor({
           />
           <SectionsPanel config={design} patch={patchDesign} />
           <div className="px-3 pb-2">
-            <Link
-              href="/dashboard/templates"
-              className="flex items-center gap-2.5 rounded-2xl border border-white/10 bg-white/[0.04] p-3.5 backdrop-blur-xl transition-colors hover:bg-white/[0.08]"
+            <button
+              type="button"
+              onClick={() => setTemplateManual(true)}
+              className="flex w-full items-center gap-2.5 rounded-2xl border border-white/10 bg-white/[0.04] p-3.5 text-left backdrop-blur-xl transition-colors hover:bg-white/[0.08]"
             >
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-black/25">
                 <Layers className="h-3.5 w-3.5 text-v-accent" />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-xs font-medium text-v-ink">
-                  Menu templates
+                  Menu template
                 </span>
                 <span className="block text-[10px] text-v-faint">
-                  Ready-made looks moved to their own page
+                  Use a ready-made look instead of your own design
                 </span>
               </span>
               <ChevronRight className="h-3.5 w-3.5 shrink-0 text-v-faint" />
-            </Link>
+            </button>
           </div>
           <p className="v-t-micro px-5 pb-5 text-v-faint">
             Design saves as a draft — press Publish to push it live.
+          </p>
+        </>
+      )}
+      {section === "template" && template && (
+        <>
+          <TemplatePanel
+            theme={template.theme}
+            onTheme={(t) =>
+              setTemplateEdits((prev) => ({ ...(prev ?? templateInitial!), theme: t }))
+            }
+            ruled={template.ruled}
+            onRuled={(r) =>
+              setTemplateEdits((prev) => ({ ...(prev ?? templateInitial!), ruled: r }))
+            }
+            cafeName={data.org.name}
+            onChangeTemplate={() => setTemplateManual(true)}
+          />
+          <p className="v-t-micro px-5 pb-5 text-v-faint">
+            Template settings save live — guests see them on their next open.
           </p>
         </>
       )}
@@ -775,6 +976,16 @@ function WorkspaceEditor({
 
         <button
           type="button"
+          onClick={() => setTemplateManual(true)}
+          className="hidden items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.05] px-3 py-2 text-[11px] font-medium text-v-mut transition-colors hover:text-v-ink sm:flex"
+          title="Change the menu template"
+        >
+          <LayoutTemplate className="h-3.5 w-3.5" />
+          Template
+        </button>
+
+        <button
+          type="button"
           onClick={() => setTourManual(true)}
           aria-label="Open the tour"
           title="Take the tour again"
@@ -914,6 +1125,17 @@ function WorkspaceEditor({
           }}
         />
       )}
+
+      {/* ── Template picker — first visit, then on demand from the header ── */}
+      <TemplateModal
+        orgId={orgId}
+        open={templateOpen}
+        onClose={closeTemplateModal}
+        onStartEditing={() => {
+          switchSection("design");
+          setMobileView("panels");
+        }}
+      />
 
       {/* ── Mobile bottom button navigation ── */}
       <nav

@@ -129,7 +129,13 @@ export const updateThemeSettings = mutation({
       throw new Error(`Organization "${orgId}" not found in Convex.`);
     }
 
-    await ctx.db.patch(org._id, { themeSettings, updatedAt: Date.now() });
+    // Merge over the stored object rather than replacing it. db.patch swaps the
+    // whole nested value, so patching these three keys alone would delete
+    // menuType (which the public menu routes on) and categoryLayout.
+    await ctx.db.patch(org._id, {
+      themeSettings: { ...org.themeSettings, ...themeSettings },
+      updatedAt: Date.now(),
+    });
     console.log(`🎨 themeSettings updated for org ${orgId}:`, themeSettings);
   },
 });
@@ -291,7 +297,7 @@ export const updateStorefrontConfig = mutation({
     ),
   },
 
-  handler: async (ctx, { orgId, ...fields }) => {
+  handler: async (ctx, { orgId, themeSettings, ...fields }) => {
     await verifyOrgAccess(ctx, orgId);
 
     const org = await ctx.db
@@ -308,11 +314,20 @@ export const updateStorefrontConfig = mutation({
       Object.entries(fields).filter(([, v]) => v !== undefined),
     );
 
-    await ctx.db.patch(org._id, { ...patch, updatedAt: Date.now() });
+    // themeSettings is a nested object, so db.patch REPLACES it. Editors send a
+    // snapshot captured when their form mounted, which means a stale (or
+    // absent) menuType here silently retemplates the venue and can strand a
+    // published Studio design. menuType is owned exclusively by
+    // setMenuTemplate / studio.publish — never let a content save move it.
+    const themePatch = themeSettings
+      ? { themeSettings: { ...themeSettings, menuType: org.themeSettings?.menuType } }
+      : {};
+
+    await ctx.db.patch(org._id, { ...patch, ...themePatch, updatedAt: Date.now() });
 
     console.log(
       `🏪 storefrontConfig updated for org ${orgId}. Keys:`,
-      Object.keys(patch).join(", "),
+      [...Object.keys(patch), ...Object.keys(themePatch)].join(", "),
     );
   },
 });
@@ -463,6 +478,112 @@ export const getStorefrontConfig = query({
       themeSettings: org.themeSettings ?? null,
       announcements: org.announcements ?? [],
       ruledMenuConfig: org.ruledMenuConfig ?? null,
+    };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SET_MENU_TEMPLATE — switch which template renders the public menu.
+//
+// Why this exists instead of routing through updateStorefrontConfig:
+// that mutation takes the WHOLE themeSettings object, so two editing surfaces
+// that each hold their own copy will clobber each other's fields on save. That
+// is exactly how a venue ended up with a published Studio design while
+// themeSettings.menuType still said "ruled" — the consumer routes on menuType,
+// so the published design silently never rendered.
+//
+// This patches menuType and nothing else, and it is the ONLY writer of that
+// field outside studio.publish.
+// ─────────────────────────────────────────────────────────────────────────────
+export const setMenuTemplate = mutation({
+  args: {
+    orgId: v.string(),
+    menuType: v.union(
+      v.literal("basic"),
+      v.literal("dragable"),
+      v.literal("ruled"),
+      v.literal("studio"),
+    ),
+  },
+  handler: async (ctx, { orgId, menuType }) => {
+    await verifyOrgAccess(ctx, orgId);
+
+    const org = await ctx.db
+      .query("organizations")
+      .withIndex("by_clerk_id", (q) => q.eq("clerkId", orgId))
+      .unique();
+
+    if (!org) throw new ConvexError(`Organization "${orgId}" not found.`);
+
+    // "studio" only renders when a design has actually been published —
+    // otherwise the consumer falls through to the basic template and the venue
+    // sees a blank-looking menu it never chose.
+    if (menuType === "studio") {
+      const design = await ctx.db
+        .query("studioDesigns")
+        .withIndex("by_org", (q) => q.eq("orgId", orgId))
+        .unique();
+      if (!design?.published) {
+        throw new ConvexError(
+          "Publish your custom design first — there is nothing live to switch to yet.",
+        );
+      }
+    }
+
+    const prev = org.themeSettings;
+    await ctx.db.patch(org._id, {
+      themeSettings: {
+        // Preserve every existing token; only the route changes.
+        primaryColor: prev?.primaryColor ?? "#ffffff",
+        backgroundColor: prev?.backgroundColor,
+        textColor: prev?.textColor,
+        fontFamily: prev?.fontFamily ?? "Inter",
+        buttonRadius: prev?.buttonRadius ?? "0.5rem",
+        categoryLayout: prev?.categoryLayout,
+        menuType,
+      },
+      updatedAt: Date.now(),
+    });
+
+    return { menuType };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET_MENU_TEMPLATE_STATE — everything the template picker needs in one read.
+//
+// The picker has to tell the venue the truth about what is LIVE right now,
+// including the case that bit us: a published custom design that is not the
+// active route. Returning both facts together removes the guesswork.
+// ─────────────────────────────────────────────────────────────────────────────
+export const getMenuTemplateState = query({
+  args: { orgId: v.string() },
+  handler: async (ctx, { orgId }) => {
+    await verifyOrgAccess(ctx, orgId);
+
+    const org = await ctx.db
+      .query("organizations")
+      .withIndex("by_clerk_id", (q) => q.eq("clerkId", orgId))
+      .unique();
+
+    if (!org) return null;
+
+    const design = await ctx.db
+      .query("studioDesigns")
+      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .unique();
+
+    const menuType = org.themeSettings?.menuType ?? "basic";
+    const hasPublishedDesign = !!design?.published;
+
+    return {
+      menuType,
+      hasPublishedDesign,
+      publishedAt: design?.publishedAt ?? null,
+      hasDraft: !!design?.draft,
+      // True when a published design exists but a fixed template is routing
+      // instead — the venue's custom work is live-but-unreachable.
+      customDesignShadowed: hasPublishedDesign && menuType !== "studio",
     };
   },
 });

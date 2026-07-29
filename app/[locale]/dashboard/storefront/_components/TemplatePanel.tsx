@@ -98,59 +98,74 @@ function TemplateMockup({ kind }: { kind: "ruled" | "basic" | "dragable" }) {
   );
 }
 
+const TEMPLATE_LABELS: Record<
+  NonNullable<LegacyTheme["menuType"]>,
+  { name: string; hint: string }
+> = {
+  ruled: { name: "Signature", hint: "Cinematic editorial" },
+  basic: { name: "Classic", hint: "Vertical scroll" },
+  dragable: { name: "Spatial", hint: "Drag-to-explore" },
+  studio: { name: "Custom design", hint: "Built by you in the studio" },
+};
+
 export function TemplatePanel({
   theme,
   onTheme,
   ruled,
   onRuled,
   cafeName,
+  onChangeTemplate,
 }: {
   theme: LegacyTheme;
   onTheme: (t: LegacyTheme) => void;
   ruled: RuledContent;
   onRuled: (r: RuledContent) => void;
   cafeName: string;
+  /** Opens the picker modal — the ONLY surface that changes menuType. */
+  onChangeTemplate: () => void;
 }) {
   const [lang, setLang] = useState<ContentLang>("en");
   const menuType = theme.menuType ?? "basic";
   const setTheme = (p: Partial<LegacyTheme>) => onTheme({ ...theme, ...p });
   const setRuled = (p: Partial<RuledContent>) => onRuled({ ...ruled, ...p });
+  const current = TEMPLATE_LABELS[menuType];
 
   return (
     <>
+      {/* Which template is live is chosen in the picker modal, not here —
+          one writer for menuType means a settings save can never strand a
+          published custom design again. */}
       <PanelSection index="01" label="Menu template">
-        <div className="grid grid-cols-3 gap-1.5">
-          <OptionTile
-            active={menuType === "ruled"}
-            label="Signature"
-            hint="Cinematic editorial"
-            onClick={() => setTheme({ menuType: "ruled" })}
+        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+          <div className="pointer-events-none flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-white/[0.08] bg-black/30">
+            {menuType === "studio" ? (
+              <Sparkles className="h-5 w-5 text-v-accent" />
+            ) : (
+              <TemplateMockup kind={menuType} />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[12px] font-medium leading-tight text-v-ink">
+              {current.name}
+            </p>
+            <p className="mt-0.5 text-[10px] leading-tight text-v-faint">
+              {current.hint}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onChangeTemplate}
+            className="shrink-0 rounded-lg border border-white/10 bg-white/[0.06] px-2.5 py-1.5 text-[11px] font-medium text-v-ink transition-colors hover:bg-white/[0.12]"
           >
-            <TemplateMockup kind="ruled" />
-          </OptionTile>
-          <OptionTile
-            active={menuType === "basic"}
-            label="Classic"
-            hint="Vertical scroll"
-            onClick={() => setTheme({ menuType: "basic" })}
-          >
-            <TemplateMockup kind="basic" />
-          </OptionTile>
-          <OptionTile
-            active={menuType === "dragable"}
-            label="Spatial"
-            hint="Drag-to-explore"
-            onClick={() => setTheme({ menuType: "dragable" })}
-          >
-            <TemplateMockup kind="dragable" />
-          </OptionTile>
+            Change
+          </button>
         </div>
         {menuType === "studio" && (
           <p className="flex items-start gap-2 rounded-xl border border-emerald-400/25 bg-emerald-400/[0.06] p-3 text-[11px] leading-relaxed text-v-mut">
             <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-300" />
             Your own <strong className="font-semibold text-v-ink">custom design</strong> is
-            currently live. Choosing a template above replaces it — your design
-            stays saved and you can re-publish it any time from the studio.
+            live. Edit it in the <strong className="font-semibold text-v-ink">Design</strong>{" "}
+            section, then press Publish to push changes out.
           </p>
         )}
         {menuType === "ruled" && (
