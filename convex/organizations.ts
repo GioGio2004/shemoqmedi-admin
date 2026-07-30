@@ -530,16 +530,15 @@ export const setMenuTemplate = mutation({
       }
     }
 
-    const prev = org.themeSettings;
+    // Spread the STORED object first (db.patch replaces nested objects — a
+    // hand-enumerated key list silently drops fields added to the schema
+    // later). Only the route changes; defaults fill gaps for a new org.
     await ctx.db.patch(org._id, {
       themeSettings: {
-        // Preserve every existing token; only the route changes.
-        primaryColor: prev?.primaryColor ?? "#ffffff",
-        backgroundColor: prev?.backgroundColor,
-        textColor: prev?.textColor,
-        fontFamily: prev?.fontFamily ?? "Inter",
-        buttonRadius: prev?.buttonRadius ?? "0.5rem",
-        categoryLayout: prev?.categoryLayout,
+        primaryColor: "#ffffff",
+        fontFamily: "Inter",
+        buttonRadius: "0.5rem",
+        ...(org.themeSettings ?? {}),
         menuType,
       },
       updatedAt: Date.now(),

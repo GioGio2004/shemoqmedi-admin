@@ -221,7 +221,11 @@ export function tr(
   return record[locale] ?? record["en"] ?? Object.values(record)[0] ?? "";
 }
 
-/** Tetri integer → GEL display string. 550 → "5.50 ₾" */
-export function formatPrice(tetri: number): string {
-  return (tetri / 100).toFixed(2) + " ₾";
+/** Tetri integer → display string in the org's currency. 550 → "5.50 ₾" */
+export function formatPrice(tetri: number, currency = "GEL"): string {
+  const value = (tetri / 100).toFixed(2);
+  if (currency === "USD") return `$${value}`;
+  if (currency === "EUR") return `€${value}`;
+  // Suffix style; unknown codes fall back to the code itself, never bare.
+  return `${value} ${currency === "GEL" ? "₾" : currency}`;
 }

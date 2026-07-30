@@ -22,8 +22,13 @@ import type { PreviewViewport } from "./MenuPreview";
 const LOCAL_ORIGIN =
   process.env.NEXT_PUBLIC_MENU_ORIGIN ?? "http://localhost:3005";
 
-/** Canonical published origin (shemoqmedi.space 307s to www). */
-export const PUBLISHED_ORIGIN = "https://www.shemoqmedi.space";
+/** Canonical published origin (shemoqmedi.space 307s to www). Env-driven so a
+ *  dev deployment can point the frame at a consumer that reads the SAME
+ *  Convex database — a hardcoded prod origin previews a different DB. */
+export const PUBLISHED_ORIGIN =
+  process.env.NEXT_PUBLIC_CONSUMER_URL ??
+  process.env.NEXT_PUBLIC_MENU_ORIGIN ??
+  "https://www.shemoqmedi.space";
 
 /** Local dev server is only worth probing while developing. */
 export const MENU_ORIGIN =
@@ -75,8 +80,8 @@ function SourceBadge({ origin }: { origin: string }) {
       }`}
     >
       {isLocal
-        ? "Local menu — unpublished edits included"
-        : "Published site — start the local menu server to preview unpublished edits"}
+        ? "Local menu — content edits show live; design changes need Publish"
+        : "Live menu — content edits show live; design changes need Publish"}
     </span>
   );
 }

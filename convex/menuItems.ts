@@ -1,9 +1,22 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { verifyOrgAccess } from "./authHelpers";
+import { isAllergenKey } from "./allergens";
 
 // ─── Shared validators ────────────────────────────────────────────────────────
 const translatedTextArg = v.record(v.string(), v.string());
+
+/** Reject unknown allergen keys — this field is a legal declaration, and a
+ *  typo'd key would silently render nothing on the public menu. */
+function assertAllergens(allergens: string[] | undefined) {
+  if (!allergens) return;
+  const bad = allergens.filter((a) => !isAllergenKey(a));
+  if (bad.length) {
+    throw new Error(
+      `Unknown allergen key(s): ${bad.join(", ")}. Allergens must use the canonical keys from convex/allergens.ts.`,
+    );
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LIST_BY_CATEGORY — all items in a category, sorted by sortOrder
@@ -66,11 +79,13 @@ export const create = mutation({
     price: v.number(),          // tetri/cents — e.g. 550 = 5.50 GEL
     imageUrl: v.optional(v.string()),
     tags: v.optional(v.array(v.string())),
+    allergens: v.optional(v.array(v.string())),
     isFeatured: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { orgId, categoryId } = args;
     await verifyOrgAccess(ctx, orgId);
+    assertAllergens(args.allergens);
 
     // Validate the target category belongs to this org
     const category = await ctx.db.get(categoryId);
@@ -106,6 +121,7 @@ export const create = mutation({
       price: args.price,
       imageUrl: args.imageUrl,
       tags: args.tags,
+      allergens: args.allergens,
       isFeatured: args.isFeatured ?? false,
       isAvailable: true,
       sortOrder: maxSort + 1,
@@ -134,11 +150,13 @@ export const update = mutation({
     imageUrl: v.optional(v.string()),
     categoryId: v.optional(v.id("categories")),
     tags: v.optional(v.array(v.string())),
+    allergens: v.optional(v.array(v.string())),
     isAvailable: v.optional(v.boolean()),
     isFeatured: v.optional(v.boolean()),
   },
   handler: async (ctx, { orgId, menuItemId, ...fields }) => {
     await verifyOrgAccess(ctx, orgId);
+    assertAllergens(fields.allergens);
 
     const item = await ctx.db.get(menuItemId);
     if (!item || item.orgId !== orgId) {

@@ -127,7 +127,8 @@ function buildContentArgs(orgId: string, content: ContentState) {
       primaryButtonText: content.storefront.primaryButtonText,
       secondaryButtonText: content.storefront.secondaryButtonText,
       coverImageUrl: content.storefront.coverImageUrl || undefined,
-      heroImageUrls: content.storefront.heroImageUrls,
+      // Empty slots are UI affordances, not content — never persist "".
+      heroImageUrls: content.storefront.heroImageUrls.filter(Boolean),
       address: content.storefront.address,
       cityStateZip: content.storefront.cityStateZip,
     },
@@ -294,7 +295,14 @@ function WorkspaceEditor({
   const [mobileView, setMobileView] = useState<"panels" | "preview">("panels");
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [viewport, setViewport] = useState<PreviewViewport>("phone");
-  const [previewMode, setPreviewMode] = useState<"live" | "draft">("live");
+  // Derived default: a venue that never published sees its DRAFT (otherwise a
+  // first-time designer's edits are invisible until Publish). Explicit clicks
+  // always win.
+  const [previewModeChoice, setPreviewModeChoice] = useState<
+    "live" | "draft" | null
+  >(null);
+  const previewMode = previewModeChoice ?? (data?.published ? "live" : "draft");
+  const setPreviewMode = setPreviewModeChoice;
   const [liveReloadKey, setLiveReloadKey] = useState(0);
   const [replayKey, setReplayKey] = useState(0);
   const [publishing, setPublishing] = useState(false);
@@ -406,10 +414,9 @@ function WorkspaceEditor({
         address: toRecord(sc?.address),
         cityStateZip: toRecord(sc?.cityStateZip),
       },
-      hours: data.org.operatingHours ?? [
-        { day: "Mon – Fri", hours: "08:00 – 20:00" },
-        { day: "Sat – Sun", hours: "09:00 – 18:00" },
-      ],
+      // Never invent hours — publishing fabricated opening times to the live
+      // page is worse than showing none. The panel has an "Add time slot" row.
+      hours: data.org.operatingHours ?? [],
       socials: {
         whatsapp: data.org.socialLinks?.whatsapp ?? "",
         instagram: data.org.socialLinks?.instagram ?? "",
@@ -447,8 +454,8 @@ function WorkspaceEditor({
         }
         contentSavedRef.current = json;
         setContentSave("saved");
-        // Live preview is the real page — refresh it so the save shows up.
-        setLiveReloadKey((k) => k + 1);
+        // No iframe reload needed — the live menu page subscribes to Convex
+        // reactively, and remounting the frame every save flashes the preview.
       } catch {
         setContentSave("error");
         toast.error("Content failed to save — check your connection.");
@@ -512,7 +519,6 @@ function WorkspaceEditor({
         await saveContent(buildTemplateArgs(orgId, template));
         templateSavedRef.current = json;
         setTemplateSave("saved");
-        setLiveReloadKey((k) => k + 1);
       } catch {
         setTemplateSave("error");
         toast.error("Template settings failed to save.");
@@ -710,6 +716,7 @@ function WorkspaceEditor({
     name: data.org.name,
     slug: data.org.slug,
     logoUrl: data.org.logoUrl,
+    currency: data.org.currency,
     coverImageUrl: content.storefront.coverImageUrl || data.org.coverImageUrl,
     tagline: content.storefront.heroSubheadline,
     operatingHours: content.hours,
@@ -783,7 +790,13 @@ function WorkspaceEditor({
       {section === "template" && template && (
         <>
           <TemplatePanel
-            theme={template.theme}
+            theme={{
+              ...template.theme,
+              // The live menuType comes from the stored row, never the edit
+              // buffer — the modal's setMenuTemplate write lands reactively,
+              // so the panel always shows the options of the ACTIVE template.
+              menuType: data.org.themeSettings?.menuType ?? "basic",
+            }}
             onTheme={(t) =>
               setTemplateEdits((prev) => ({ ...(prev ?? templateInitial!), theme: t }))
             }
@@ -905,7 +918,7 @@ function WorkspaceEditor({
         </div>
 
         {/* preview source: the real menu page vs the design draft */}
-        <div className="ml-auto hidden items-center gap-1 rounded-xl border border-white/[0.08] bg-black/25 p-1 md:flex">
+        <div className="ml-auto flex items-center gap-1 rounded-xl border border-white/[0.08] bg-black/25 p-1">
           <button
             type="button"
             onClick={() => setPreviewMode("live")}
@@ -996,7 +1009,17 @@ function WorkspaceEditor({
 
         <div className="flex items-center gap-2.5">
           <span className="hidden sm:block">{saveBadge}</span>
-          {data.publishedAt && !hasUnpublishedChanges ? (
+          {/* A published design only renders when the venue routes to it — a
+              fixed template shadows it, and saying "Live" then is a lie. */}
+          {data.publishedAt &&
+          data.org.themeSettings?.menuType !== "studio" ? (
+            <span
+              className="v-t-micro hidden items-center gap-1.5 rounded-full border border-amber-400/30 bg-amber-400/[0.08] px-2.5 py-1 text-amber-300 lg:flex"
+              title="This venue is on a fixed template — the published design is not being shown. Publish again or switch the template to Studio."
+            >
+              <TriangleAlert className="h-3 w-3" /> Shadowed by template
+            </span>
+          ) : data.publishedAt && !hasUnpublishedChanges ? (
             <span className="v-t-micro hidden items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-400/[0.08] px-2.5 py-1 text-emerald-300 lg:flex">
               <span className="h-1 w-1 rounded-full bg-emerald-400" />
               Live · {timeAgo(data.publishedAt)}

@@ -5,6 +5,7 @@ import { useOrganization } from "@clerk/nextjs";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
+import { ALLERGEN_KEYS, ALLERGEN_LABELS } from "@/convex/allergens";
 import { ImageUploader } from "@/components/ImageUploader";
 import { MenuImage } from "@/components/MenuImage";
 import {
@@ -77,6 +78,7 @@ type MenuItem = {
   isFeatured?: boolean;
   sortOrder: number;
   tags?: string[];
+  allergens?: string[];
   categoryId: Id<"categories">;
   orgId: string;
 };
@@ -270,6 +272,9 @@ function MenuItemDialog({
   );
   const [tags, setTags] = useState<string[]>(existing?.tags ?? []);
   const [tagInput, setTagInput] = useState("");
+  const [allergens, setAllergens] = useState<string[]>(
+    existing?.allergens ?? [],
+  );
   const [imageUrl, setImageUrl] = useState(existing?.imageUrl ?? "");
   const [isFeatured, setIsFeatured] = useState(existing?.isFeatured ?? false);
   const [saving, setSaving] = useState(false);
@@ -304,7 +309,10 @@ function MenuItemDialog({
           description,
           price,
           imageUrl: imageUrl || undefined,
-          tags: tags.length ? tags : undefined,
+          // Always send arrays on update — omitting the arg would strip it
+          // from the patch and make removing the last entry impossible.
+          tags,
+          allergens,
           isFeatured,
         });
       } else {
@@ -316,6 +324,7 @@ function MenuItemDialog({
           price,
           imageUrl: imageUrl || undefined,
           tags: tags.length ? tags : undefined,
+          allergens: allergens.length ? allergens : undefined,
           isFeatured,
         });
       }
@@ -480,6 +489,54 @@ function MenuItemDialog({
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Allergens — legal declaration (Georgian food-information technical
+              regulation Annex 1). Canonical keys, not free text; every public
+              template renders these regardless of style toggles. */}
+          <div className="space-y-1.5">
+            <Label className="v-t-micro text-v-faint">
+              Allergens{" "}
+              <span className="normal-case text-v-faint/70">
+                — required by Georgian law when present in the dish
+              </span>
+            </Label>
+            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-4">
+              {ALLERGEN_KEYS.map((key) => {
+                const active = allergens.includes(key);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() =>
+                      setAllergens(
+                        active
+                          ? allergens.filter((a) => a !== key)
+                          : [...allergens, key],
+                      )
+                    }
+                    className={cn(
+                      "flex flex-col items-start rounded-v border px-2.5 py-1.5 text-left transition-all",
+                      active
+                        ? "border-amber-400/50 bg-amber-400/[0.08]"
+                        : "border-v-line bg-white/[0.02] hover:bg-white/[0.05]",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "text-xs font-medium leading-tight",
+                        active ? "text-amber-300" : "text-v-ink",
+                      )}
+                    >
+                      {ALLERGEN_LABELS[key].en}
+                    </span>
+                    <span className="text-[10px] leading-tight text-v-faint">
+                      {ALLERGEN_LABELS[key].ka}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 

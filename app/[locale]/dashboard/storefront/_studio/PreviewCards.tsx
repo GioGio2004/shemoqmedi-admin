@@ -1,6 +1,7 @@
 "use client";
 
 import type { StudioConfig } from "@/convex/studioConfig";
+import { allergenLabel } from "@/convex/allergens";
 import { formatPrice, tr, withAlpha } from "./presets";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -16,6 +17,8 @@ export type PreviewItem = {
   price: number;
   imageUrl: string | null;
   tags: string[];
+  /** Canonical allergen keys (convex/allergens.ts) — legal declaration. */
+  allergens?: string[];
   isFeatured: boolean;
 };
 
@@ -31,13 +34,16 @@ function CardImage({
   locale,
   ratio,
   className = "",
+  showImage = true,
 }: {
   item: PreviewItem;
   locale: string;
   ratio: string;
   className?: string;
+  /** When false, always render the placeholder (mirrors the live renderer). */
+  showImage?: boolean;
 }) {
-  if (item.imageUrl) {
+  if (showImage && item.imageUrl) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
@@ -73,9 +79,11 @@ function CardImage({
 function Price({
   value,
   style,
+  currency,
 }: {
   value: number;
   style: StudioConfig["cards"]["priceStyle"];
+  currency?: string;
 }) {
   if (style === "badge") {
     return (
@@ -87,7 +95,7 @@ function Price({
           borderRadius: "calc(var(--sd-radius) * 0.75)",
         }}
       >
-        {formatPrice(value)}
+        {formatPrice(value, currency)}
       </span>
     );
   }
@@ -96,7 +104,7 @@ function Price({
       className="shrink-0 text-[12px] font-semibold tabular-nums"
       style={{ color: "var(--sd-ink)" }}
     >
-      {formatPrice(value)}
+      {formatPrice(value, currency)}
     </span>
   );
 }
@@ -106,15 +114,17 @@ function TitleRow({
   item,
   locale,
   cards,
+  currency,
 }: {
   item: PreviewItem;
   locale: string;
   cards: StudioConfig["cards"];
+  currency?: string;
 }) {
   return (
     <div className="flex items-baseline gap-1.5">
       <span
-        className="min-w-0 truncate text-[13px] font-semibold leading-snug"
+        className="min-w-0 text-[13px] font-semibold leading-snug"
         style={{ color: "var(--sd-ink)", fontFamily: "var(--sd-font-heading)" }}
       >
         {tr(item.name, locale)}
@@ -127,7 +137,7 @@ function TitleRow({
         />
       )}
       {cards.priceStyle !== "dotted" && <span className="flex-1" />}
-      <Price value={item.price} style={cards.priceStyle} />
+      <Price value={item.price} style={cards.priceStyle} currency={currency} />
     </div>
   );
 }
@@ -144,14 +154,7 @@ function Description({
   return (
     <p
       className="text-[11px] leading-relaxed"
-      style={{
-        color: "var(--sd-ink-60)",
-        display: "-webkit-box",
-        WebkitLineClamp: 2,
-        WebkitBoxOrient: "vertical",
-        overflow: "hidden",
-        fontFamily: "var(--sd-font-body)",
-      }}
+      style={{ color: "var(--sd-ink-60)", fontFamily: "var(--sd-font-body)" }}
     >
       {text}
     </p>
@@ -179,16 +182,50 @@ function Tags({ item }: { item: PreviewItem }) {
   );
 }
 
+/** Allergen declaration — mirrors the live renderer: NOT gated by showTags. */
+function Allergens({
+  item,
+  locale,
+  onDark = false,
+}: {
+  item: PreviewItem;
+  locale: string;
+  onDark?: boolean;
+}) {
+  if (!item.allergens?.length) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {item.allergens.map((key) => (
+        <span
+          key={key}
+          className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+          style={{
+            color: onDark ? "#FFD48A" : "var(--sd-ink)",
+            border: onDark
+              ? "1px solid rgba(255, 212, 138, 0.5)"
+              : "1px solid var(--sd-ink-60)",
+            borderRadius: "calc(var(--sd-radius) * 0.5)",
+          }}
+        >
+          {allergenLabel(key, locale)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // ── The five variants ────────────────────────────────────────────────────────
 
 export function ItemCard({
   item,
   locale,
   cards,
+  currency,
 }: {
   item: PreviewItem;
   locale: string;
   cards: StudioConfig["cards"];
+  currency?: string;
 }) {
   const ratio = RATIO[cards.imageRatio];
 
@@ -216,9 +253,10 @@ export function ItemCard({
             className="flex flex-col"
             style={{ padding: "calc(10px * var(--sd-density))", gap: "calc(6px * var(--sd-density))" }}
           >
-            <TitleRow item={item} locale={locale} cards={cards} />
+            <TitleRow item={item} locale={locale} cards={cards} currency={currency} />
             {cards.showDescriptions && <Description item={item} locale={locale} />}
             {cards.showTags && <Tags item={item} />}
+            <Allergens item={item} locale={locale} />
           </div>
         </div>
       );
@@ -234,9 +272,10 @@ export function ItemCard({
             borderBottom: "1px solid var(--sd-ink-14)",
           }}
         >
-          <TitleRow item={item} locale={locale} cards={cards} />
+          <TitleRow item={item} locale={locale} cards={cards} currency={currency} />
           {cards.showDescriptions && <Description item={item} locale={locale} />}
           {cards.showTags && <Tags item={item} />}
+          <Allergens item={item} locale={locale} />
         </div>
       );
 
@@ -247,7 +286,13 @@ export function ItemCard({
           className="sd-card relative overflow-hidden"
           style={{ borderRadius: "var(--sd-radius)" }}
         >
-          <CardImage item={item} locale={locale} ratio={ratio} className="!rounded-none" />
+          <CardImage
+            item={item}
+            locale={locale}
+            ratio={ratio}
+            className="!rounded-none"
+            showImage={cards.showImages}
+          />
           <div
             className="absolute inset-x-1.5 bottom-1.5 backdrop-blur-md"
             style={{
@@ -257,8 +302,10 @@ export function ItemCard({
               padding: "calc(8px * var(--sd-density))",
             }}
           >
-            <TitleRow item={item} locale={locale} cards={cards} />
+            <TitleRow item={item} locale={locale} cards={cards} currency={currency} />
             {cards.showDescriptions && <Description item={item} locale={locale} />}
+            {cards.showTags && <Tags item={item} />}
+            <Allergens item={item} locale={locale} />
           </div>
         </div>
       );
@@ -280,9 +327,10 @@ export function ItemCard({
             </div>
           )}
           <div className="flex min-w-0 flex-1 flex-col" style={{ gap: 3 }}>
-            <TitleRow item={item} locale={locale} cards={cards} />
+            <TitleRow item={item} locale={locale} cards={cards} currency={currency} />
             {cards.showDescriptions && <Description item={item} locale={locale} />}
             {cards.showTags && <Tags item={item} />}
+            <Allergens item={item} locale={locale} />
           </div>
         </div>
       );
@@ -299,6 +347,7 @@ export function ItemCard({
             locale={locale}
             ratio="16 / 9"
             className="!rounded-none"
+            showImage={cards.showImages}
           />
           <div
             aria-hidden
@@ -328,10 +377,19 @@ export function ItemCard({
                     {tr(item.description, locale)}
                   </p>
                 )}
+                {cards.showTags && (
+                  <div className="mt-1">
+                    <Tags item={item} />
+                  </div>
+                )}
+                <div className="mt-1">
+                  <Allergens item={item} locale={locale} onDark />
+                </div>
               </div>
               <Price
                 value={item.price}
                 style={cards.priceStyle === "dotted" ? "plain" : cards.priceStyle}
+                currency={currency}
               />
             </div>
           </div>
@@ -348,10 +406,12 @@ export function FeaturedCard({
   item,
   locale,
   wide = false,
+  currency,
 }: {
   item: PreviewItem;
   locale: string;
   wide?: boolean;
+  currency?: string;
 }) {
   return (
     <div
@@ -374,7 +434,7 @@ export function FeaturedCard({
           className="mt-0.5 text-[10px] font-semibold tabular-nums"
           style={{ color: "var(--sd-accent)" }}
         >
-          {formatPrice(item.price)}
+          {formatPrice(item.price, currency)}
         </p>
       </div>
     </div>

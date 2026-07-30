@@ -34,7 +34,9 @@ export const listOrganizations = query({
     const user = await requireUser(ctx);
 
     let orgs;
-    if (user.role === "super_admin" || user.role === "admin") {
+    // Only super_admin matches verifyOrgAccess's bypass — listing orgs a role
+    // can see but not open just produces per-org "Unauthorized" errors.
+    if (user.role === "super_admin") {
       orgs = await ctx.db.query("organizations").collect();
     } else {
       const memberships = await ctx.db
@@ -89,33 +91,33 @@ export const getStudioData = query({
       .withIndex("by_org_and_sort", (q) => q.eq("orgId", orgId))
       .collect();
 
-    const menu = await Promise.all(
-      categories
-        .filter((c) => c.isActive)
-        .map(async (cat) => {
-          const items = await ctx.db
-            .query("menuItems")
-            .withIndex("by_category", (q) => q.eq("categoryId", cat._id))
-            .collect();
-          return {
-            id: cat._id,
-            name: cat.name,
-            imageUrl: cat.imageUrl ?? null,
-            items: items
-              .filter((i) => i.isAvailable)
-              .sort((a, b) => a.sortOrder - b.sortOrder)
-              .map((i) => ({
-                id: i._id,
-                name: i.name,
-                description: i.description ?? null,
-                price: i.price,
-                imageUrl: i.imageUrl ?? null,
-                tags: i.tags ?? [],
-                isFeatured: i.isFeatured ?? false,
-              })),
-          };
-        }),
-    );
+    // One by_org read + in-memory grouping — this query re-runs reactively on
+    // every autosave, so a per-category fan-out multiplies real read cost.
+    const allItems = await ctx.db
+      .query("menuItems")
+      .withIndex("by_org", (q) => q.eq("orgId", orgId))
+      .collect();
+
+    const menu = categories
+      .filter((c) => c.isActive)
+      .map((cat) => ({
+        id: cat._id,
+        name: cat.name,
+        imageUrl: cat.imageUrl ?? null,
+        items: allItems
+          .filter((i) => i.categoryId === cat._id && i.isAvailable)
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+          .map((i) => ({
+            id: i._id,
+            name: i.name,
+            description: i.description ?? null,
+            price: i.price,
+            imageUrl: i.imageUrl ?? null,
+            tags: i.tags ?? [],
+            allergens: i.allergens ?? [],
+            isFeatured: i.isFeatured ?? false,
+          })),
+      }));
 
     return {
       org: {
@@ -123,6 +125,7 @@ export const getStudioData = query({
         name: org.name,
         slug: org.slug,
         logoUrl: org.logoUrl ?? null,
+        currency: org.currency ?? "GEL",
         coverImageUrl: org.storefrontConfig?.coverImageUrl ?? null,
         tagline: org.storefrontConfig?.heroSubheadline ?? null,
         accentColor:
@@ -229,15 +232,17 @@ export const publish = mutation({
       .unique();
 
     if (org) {
-      const prev = org.themeSettings;
+      // Spread the STORED object first (db.patch replaces nested objects —
+      // hand-enumerating keys silently drops any field added to the schema
+      // later). Derived defaults only fill gaps for a brand-new org.
       await ctx.db.patch(org._id, {
         themeSettings: {
-          primaryColor: prev?.primaryColor ?? live.theme.accent,
-          backgroundColor: prev?.backgroundColor ?? live.theme.background,
-          textColor: prev?.textColor ?? live.theme.ink,
-          fontFamily: prev?.fontFamily ?? "Inter",
-          buttonRadius: prev?.buttonRadius ?? `${live.theme.radius}px`,
-          categoryLayout: prev?.categoryLayout,
+          primaryColor: live.theme.accent,
+          backgroundColor: live.theme.background,
+          textColor: live.theme.ink,
+          fontFamily: "Inter",
+          buttonRadius: `${live.theme.radius}px`,
+          ...(org.themeSettings ?? {}),
           menuType: "studio",
         },
         updatedAt: now,

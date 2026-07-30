@@ -11,6 +11,7 @@
 import type * as admin from "../admin.js";
 import type * as aiChatThemes from "../aiChatThemes.js";
 import type * as aiTrainingLogs from "../aiTrainingLogs.js";
+import type * as allergens from "../allergens.js";
 import type * as analytics from "../analytics.js";
 import type * as anonymousGuests from "../anonymousGuests.js";
 import type * as authHelpers from "../authHelpers.js";
@@ -54,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   aiChatThemes: typeof aiChatThemes;
   aiTrainingLogs: typeof aiTrainingLogs;
+  allergens: typeof allergens;
   analytics: typeof analytics;
   anonymousGuests: typeof anonymousGuests;
   authHelpers: typeof authHelpers;

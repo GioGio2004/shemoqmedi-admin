@@ -62,6 +62,7 @@ export const get = query({
           price: item.price,         // Stored in tetri/cents (integer)
           imageUrl: item.imageUrl ?? null,
           tags: item.tags ?? [],
+          allergens: item.allergens ?? [],
           accentColor: item.accentColor ?? null,
           isFeatured: item.isFeatured ?? false,
           sortOrder: item.sortOrder,
@@ -84,7 +85,8 @@ export const get = query({
         storefrontConfig: org.storefrontConfig ?? null,
         operatingHours: org.operatingHours ?? [],
         socialLinks: org.socialLinks ?? null,
-        announcements: org.announcements ?? [],
+        // Retracted announcements must never reach visitors.
+        announcements: (org.announcements ?? []).filter((a) => a.isActive),
         storefrontAlert: org.storefrontAlert ?? null,
         features: org.features ?? null,
         ruledMenuConfig: org.ruledMenuConfig ?? null,

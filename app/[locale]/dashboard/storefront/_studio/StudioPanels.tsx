@@ -226,6 +226,12 @@ export function CardsPanel({
   const set = (p: Partial<StudioConfig["cards"]>) =>
     patch({ cards: { ...c, ...p } });
 
+  // Only show controls the active variant actually honors — a control that
+  // does nothing for the current card is a lie, not an option.
+  const isList = c.variant === "minimal" || c.variant === "editorial";
+  const hasFreeRatio = c.variant === "classic" || c.variant === "glass";
+  const hasImages = c.variant !== "minimal";
+
   return (
     <PanelSection index="02" label="Item cards">
       <div className="grid grid-cols-2 gap-1.5">
@@ -242,30 +248,34 @@ export function CardsPanel({
         ))}
       </div>
 
-      <Field label="Columns" inline>
-        <Segmented
-          size="sm"
-          value={String(c.columns)}
-          options={[
-            { key: "1", label: "1" },
-            { key: "2", label: "2" },
-          ]}
-          onChange={(v) => set({ columns: Number(v) })}
-        />
-      </Field>
+      {!isList && (
+        <Field label="Columns" inline>
+          <Segmented
+            size="sm"
+            value={String(c.columns)}
+            options={[
+              { key: "1", label: "1" },
+              { key: "2", label: "2" },
+            ]}
+            onChange={(v) => set({ columns: Number(v) })}
+          />
+        </Field>
+      )}
 
-      <Field label="Image ratio" inline>
-        <Segmented
-          size="sm"
-          value={c.imageRatio}
-          options={[
-            { key: "square" as const, label: "1:1" },
-            { key: "portrait" as const, label: "3:4" },
-            { key: "landscape" as const, label: "16:10" },
-          ]}
-          onChange={(v) => set({ imageRatio: v })}
-        />
-      </Field>
+      {hasFreeRatio && (
+        <Field label="Image ratio" inline>
+          <Segmented
+            size="sm"
+            value={c.imageRatio}
+            options={[
+              { key: "square" as const, label: "1:1" },
+              { key: "portrait" as const, label: "3:4" },
+              { key: "landscape" as const, label: "16:10" },
+            ]}
+            onChange={(v) => set({ imageRatio: v })}
+          />
+        </Field>
+      )}
 
       <Field label="Price style">
         <Segmented
@@ -280,9 +290,11 @@ export function CardsPanel({
         />
       </Field>
 
-      <Field label="Show photos" inline>
-        <Toggle checked={c.showImages} onChange={(v) => set({ showImages: v })} />
-      </Field>
+      {hasImages && (
+        <Field label="Show photos" inline>
+          <Toggle checked={c.showImages} onChange={(v) => set({ showImages: v })} />
+        </Field>
+      )}
       <Field label="Show descriptions" inline>
         <Toggle
           checked={c.showDescriptions}

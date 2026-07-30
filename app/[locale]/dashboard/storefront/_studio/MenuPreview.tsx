@@ -37,6 +37,8 @@ export type PreviewOrg = {
   tagline: Record<string, string> | string | null;
   operatingHours: Array<{ day: string; hours: string }> | null;
   socialLinks: { whatsapp?: string; instagram?: string; email?: string } | null;
+  /** ISO code from organizations.currency ("GEL", "USD"…). */
+  currency?: string;
 };
 
 export type PreviewViewport = "phone" | "desktop";
@@ -51,9 +53,9 @@ const DEMO_MENU: PreviewCategory[] = [
     name: { en: "Coffee", ka: "ყავა" },
     imageUrl: null,
     items: [
-      { id: "d1", name: { en: "Flat White", ka: "ფლეტ ვაითი" }, description: { en: "Double ristretto, silky micro-foam." }, price: 950, imageUrl: null, tags: ["hot"], isFeatured: true },
+      { id: "d1", name: { en: "Flat White", ka: "ფლეტ ვაითი" }, description: { en: "Double ristretto, silky micro-foam." }, price: 950, imageUrl: null, tags: ["hot"], allergens: ["milk"], isFeatured: true },
       { id: "d2", name: { en: "Cold Brew Tonic", ka: "ცივი ყავა ტონიკით" }, description: { en: "18-hour steep over Georgian tonic." }, price: 1200, imageUrl: null, tags: ["cold"], isFeatured: false },
-      { id: "d3", name: { en: "Cortado", ka: "კორტადო" }, description: { en: "Equal parts espresso and steamed milk." }, price: 850, imageUrl: null, tags: [], isFeatured: false },
+      { id: "d3", name: { en: "Cortado", ka: "კორტადო" }, description: { en: "Equal parts espresso and steamed milk." }, price: 850, imageUrl: null, tags: [], allergens: ["milk"], isFeatured: false },
     ],
   },
   {
@@ -61,9 +63,9 @@ const DEMO_MENU: PreviewCategory[] = [
     name: { en: "Kitchen", ka: "სამზარეულო" },
     imageUrl: null,
     items: [
-      { id: "d4", name: { en: "Khachapuri Toast", ka: "ხაჭაპურის ტოსტი" }, description: { en: "Imeruli cheese, sourdough, chili honey." }, price: 1600, imageUrl: null, tags: ["veg"], isFeatured: true },
-      { id: "d5", name: { en: "Beet Carpaccio", ka: "ჭარხლის კარპაჩო" }, description: { en: "Walnut cream, tarragon oil." }, price: 1400, imageUrl: null, tags: ["vegan"], isFeatured: false },
-      { id: "d6", name: { en: "Matsoni Bowl", ka: "მაწვნის ბოული" }, description: { en: "House granola, seasonal fruit, honey." }, price: 1100, imageUrl: null, tags: [], isFeatured: false },
+      { id: "d4", name: { en: "Khachapuri Toast", ka: "ხაჭაპურის ტოსტი" }, description: { en: "Imeruli cheese, sourdough, chili honey." }, price: 1600, imageUrl: null, tags: ["veg"], allergens: ["gluten", "milk", "eggs"], isFeatured: true },
+      { id: "d5", name: { en: "Beet Carpaccio", ka: "ჭარხლის კარპაჩო" }, description: { en: "Walnut cream, tarragon oil." }, price: 1400, imageUrl: null, tags: ["vegan"], allergens: ["nuts"], isFeatured: false },
+      { id: "d6", name: { en: "Matsoni Bowl", ka: "მაწვნის ბოული" }, description: { en: "House granola, seasonal fruit, honey." }, price: 1100, imageUrl: null, tags: [], allergens: ["milk", "gluten", "nuts"], isFeatured: false },
     ],
   },
 ];
@@ -85,15 +87,17 @@ export function MenuPreview({
 }) {
   const { theme, hero, cards, nav, motion, sections } = config;
   const isDesktop = viewport === "desktop";
-  const isDemo = menu.length === 0 || menu.every((c) => c.items.length === 0);
-  const data = isDemo ? DEMO_MENU : menu;
+  // Mirror the live renderer: categories without items never render.
+  const realMenu = useMemo(() => menu.filter((c) => c.items.length > 0), [menu]);
+  const isDemo = realMenu.length === 0;
+  const data = isDemo ? DEMO_MENU : realMenu;
 
   const [activeCat, setActiveCat] = useState(0);
   const category = data[Math.min(activeCat, data.length - 1)];
 
   const featured = useMemo(() => {
     const starred = data.flatMap((c) => c.items).filter((i) => i.isFeatured);
-    return starred.slice(0, 6);
+    return starred.slice(0, 8);
   }, [data]);
 
   const scopeRef = useRef<HTMLDivElement>(null);
@@ -206,9 +210,12 @@ export function MenuPreview({
     : "calc(16px * var(--sd-density))";
 
   const listVariant = cards.variant === "minimal" || cards.variant === "editorial";
+  // Mirror the live renderer's honest columns: 1 = single column at every
+  // width; 2 = two on phones, three at desktop widths.
+  const columnCount = listVariant ? 1 : Math.max(1, Math.min(cards.columns || 2, 2));
   const gridColumns = listVariant
     ? "1fr"
-    : `repeat(${isDesktop ? Math.min(cards.columns + 1, 4) : cards.columns}, minmax(0, 1fr))`;
+    : `repeat(${columnCount === 1 ? 1 : isDesktop ? 3 : 2}, minmax(0, 1fr))`;
 
   // ── Section renderers ─────────────────────────────────────────────────────
   const renderHero = () => {
@@ -216,7 +223,8 @@ export function MenuPreview({
     const tagline = tr(org.tagline, locale);
 
     if (hero.preset === "poster") {
-      const posterH = isDesktop ? 320 : 230;
+      // Proportional to the live page's min(72vh, 560px) inside each frame.
+      const posterH = isDesktop ? 460 : 518;
       return (
         <div className="relative" style={{ minHeight: posterH }}>
           {org.coverImageUrl ? (
@@ -312,7 +320,7 @@ export function MenuPreview({
         <div className="sdp-strip flex gap-2 overflow-x-auto" style={{ padding: `0 ${pad} 4px` }}>
           {featured.map((item) => (
             <div key={item.id} data-anim>
-              <FeaturedCard item={item} locale={locale} wide={isDesktop} />
+              <FeaturedCard item={item} locale={locale} wide={isDesktop} currency={org.currency} />
             </div>
           ))}
         </div>
@@ -321,6 +329,8 @@ export function MenuPreview({
   };
 
   const renderNav = () => {
+    // Live renderer hides the nav entirely for a single category.
+    if (data.length <= 1) return null;
     const wrap = (
       <div className="sdp-strip flex gap-1.5 overflow-x-auto" style={{ padding: `calc(10px * var(--sd-density)) ${pad}` }}>
         {data.map((cat, i) => {
@@ -383,7 +393,7 @@ export function MenuPreview({
         >
           {(category?.items ?? []).map((item) => (
             <div key={item.id} data-anim>
-              <ItemCard item={item} locale={locale} cards={cards} />
+              <ItemCard item={item} locale={locale} cards={cards} currency={org.currency} />
             </div>
           ))}
         </div>

@@ -344,6 +344,12 @@ export default defineSchema({
     // Maps perfectly to his `benefits: ["Smooth", "Strong"]`
     tags: v.optional(v.array(v.string())),
 
+    // Legal allergen declaration — canonical keys from convex/allergens.ts
+    // (Georgian food-information technical regulation, Annex 1). Distinct from
+    // `tags`: tags are marketing, this is a compliance field that every
+    // public renderer must show regardless of style toggles.
+    allergens: v.optional(v.array(v.string())),
+
     // NEW: Maps perfectly to his `color: "bg-amber-700"`
     accentColor: v.optional(v.string()),
 
