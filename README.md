@@ -3,14 +3,14 @@
 Admin app for **shemoqmedi.space**, and home of the shared **Convex backend** (`convex/`).
 The public site lives in the `shemoqmedi` repo and talks to the same Convex deployment.
 
-Starter state: Next.js 16 + Tailwind 4 / shadcn, Clerk auth, Convex, next-intl (en/ka/ru), ImageKit uploads.
+Starter state: Next.js 16 + Tailwind 4 / shadcn, Clerk auth, Convex, ImageKit uploads. English only.
 
 ## What's wired
 
 | Piece | Where |
 | --- | --- |
-| Sign-in / sign-up (Clerk) | `app/[locale]/sign-in`, `app/[locale]/sign-up` |
-| Protected dashboard | `app/[locale]/dashboard`; route guard in `proxy.ts` |
+| Sign-in / sign-up (Clerk) | `app/sign-in`, `app/sign-up` |
+| Protected dashboard | `app/dashboard`; route guard in `proxy.ts` |
 | Clerk → Convex auth | `convex/auth.config.ts` (JWT template `convex`) + `components/ConvexProviderWithClerk.tsx` |
 | Clerk → Convex user sync | `convex/http.ts` webhook `/clerk-users-webhook` → `convex/users.ts` |
 | Auth helpers for Convex functions | `convex/authHelpers.ts` (`requireUser`, `requireAdmin`) |
