@@ -7,7 +7,7 @@ import type { FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { LIMITS } from "@/convex/lib/taxonomy";
-import { MediaPicker, MultiImagePicker, useStorageUpload, type UploadKind } from "./MediaUpload";
+import { MediaPicker, MultiImagePicker, useMediaUpload, type UploadKind } from "./MediaUpload";
 
 type Listing = NonNullable<FunctionReturnType<typeof api.listings.reviewDetail>>;
 type Kind = "cover" | "video";
@@ -27,7 +27,7 @@ const SLOTS: Record<Kind, Slot> = {
     label: "Screenshot 1 · cover",
     media: "image",
     aspect: "16 / 9",
-    hint: "1920×1080, or a full-page screenshot (it scrolls in the home slider). PNG, JPG or WebP, up to 5 MB. Required.",
+    hint: "1920×1080, or a full-page screenshot (it scrolls in the home slider). PNG, JPG or WebP up to 20 MB, saved as WebP. Required.",
     removable: false,
   },
   video: {
@@ -42,14 +42,16 @@ const SLOTS: Record<Kind, Slot> = {
 
 function MediaSlot({
   listingId,
+  slug,
   slot,
   currentUrl,
 }: {
   listingId: Id<"listings">;
+  slug: string;
   slot: Slot;
   currentUrl: string | null;
 }) {
-  const upload = useStorageUpload();
+  const upload = useMediaUpload();
   const replace = useMutation(api.listings.replaceMedia);
   const removeMedia = useMutation(api.admin.removeMedia);
 
@@ -67,7 +69,7 @@ function MediaSlot({
     setError(null);
     setMessage(null);
     try {
-      const storageId = await upload(file);
+      const storageId = await upload(file, { site: slug, label: slot.kind === "cover" ? "cover" : "preview" });
       await replace({ id: listingId, kind: slot.kind, storageId });
       setFile(null);
       setPickerKey((k) => k + 1);
@@ -152,7 +154,7 @@ function MediaSlot({
 
 /** Screenshots 2–5: reorder, promote to cover, remove, add more. */
 function GalleryManager({ listing }: { listing: Listing }) {
-  const upload = useStorageUpload();
+  const upload = useMediaUpload();
   const add = useMutation(api.listings.addGalleryImage);
   const remove = useMutation(api.listings.removeGalleryImage);
   const reorder = useMutation(api.listings.setGalleryOrder);
@@ -191,8 +193,10 @@ function GalleryManager({ listing }: { listing: Listing }) {
     run(
       "upload",
       async () => {
-        for (const file of files.slice(0, room)) {
-          const storageId = await upload(file);
+        for (const [i, file] of files.slice(0, room).entries()) {
+          // Screenshot 1 is the cover, so extras are numbered from 2.
+          const label = `screenshot-${gallery.length + i + 2}`;
+          const storageId = await upload(file, { site: listing.slug, label });
           await add({ id: listing.id, storageId });
         }
         setFiles([]);
@@ -267,7 +271,7 @@ function GalleryManager({ listing }: { listing: Listing }) {
         <MultiImagePicker
           id="media-gallery"
           label="Add screenshots"
-          hint="16:9 (1920×1080) works best. PNG, JPG or WebP, up to 5 MB each."
+          hint="16:9 (1920×1080) works best. PNG, JPG or WebP up to 20 MB each, saved as WebP."
           files={files}
           max={room}
           onChange={(next, err) => {
@@ -312,8 +316,8 @@ export function MediaPanel({ listing }: { listing: Listing }) {
       </p>
       <div className="grid gap-10">
         <div className="grid gap-8 md:grid-cols-2">
-          <MediaSlot listingId={listing.id} slot={SLOTS.cover} currentUrl={listing.coverUrl} />
-          <MediaSlot listingId={listing.id} slot={SLOTS.video} currentUrl={listing.videoUrl} />
+          <MediaSlot listingId={listing.id} slug={listing.slug} slot={SLOTS.cover} currentUrl={listing.coverUrl} />
+          <MediaSlot listingId={listing.id} slug={listing.slug} slot={SLOTS.video} currentUrl={listing.videoUrl} />
         </div>
         <GalleryManager listing={listing} />
       </div>

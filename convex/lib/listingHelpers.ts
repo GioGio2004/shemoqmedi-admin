@@ -2,6 +2,7 @@ import { ConvexError, v } from "convex/values";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { award, creatorTier, listingStatus, pillars, region } from "../schema";
+import { deleteMedia, mediaInfo, mediaUrl, type MediaId } from "./media";
 import { CATEGORIES, LIMITS, type CreatorTier, type RegionSlug } from "./taxonomy";
 import { ZERO_PILLARS, decideAwards, summarize, type Pillars } from "./scoring";
 
@@ -77,7 +78,7 @@ export async function uniqueSlug(
  * rolls the whole mutation back, deletes included.)
  */
 /** Validate extra screenshots: unique, at most LIMITS.gallery, all images. */
-export async function checkGallery(ctx: MutationCtx, ids: Id<"_storage">[] | undefined) {
+export async function checkGallery(ctx: MutationCtx, ids: MediaId[] | undefined) {
   const gallery = [...new Set(ids ?? [])];
   if (gallery.length > LIMITS.gallery) {
     fail(`Add up to ${LIMITS.gallery} more screenshots (${LIMITS.gallery + 1} in all).`);
@@ -88,11 +89,11 @@ export async function checkGallery(ctx: MutationCtx, ids: Id<"_storage">[] | und
 
 export async function assertMedia(
   ctx: MutationCtx,
-  id: Id<"_storage">,
+  id: MediaId,
   field: string,
   kind: "image" | "video",
 ) {
-  const meta = await ctx.db.system.get(id);
+  const meta = await mediaInfo(ctx, id);
   if (!meta) fail(`${field} upload was not found. Please upload it again.`);
   const type = meta.contentType ?? "";
   if (kind === "image") {
@@ -181,9 +182,9 @@ export const EMPTY_SCORES = {
 };
 
 export async function deleteListing(ctx: MutationCtx, listing: Doc<"listings">) {
-  await ctx.storage.delete(listing.coverId);
-  for (const id of listing.galleryIds ?? []) await ctx.storage.delete(id);
-  if (listing.videoId) await ctx.storage.delete(listing.videoId);
+  await deleteMedia(ctx, listing.coverId);
+  for (const id of listing.galleryIds ?? []) await deleteMedia(ctx, id);
+  if (listing.videoId) await deleteMedia(ctx, listing.videoId);
   const votes = await ctx.db
     .query("votes")
     .withIndex("by_listing", (q) => q.eq("listingId", listing._id))
@@ -234,11 +235,11 @@ export const publicListing = v.object({
 
 export async function mediaUrls(ctx: QueryCtx, listing: Doc<"listings">) {
   return {
-    coverUrl: await ctx.storage.getUrl(listing.coverId),
-    galleryUrls: (await Promise.all((listing.galleryIds ?? []).map((id) => ctx.storage.getUrl(id)))).filter(
+    coverUrl: await mediaUrl(ctx, listing.coverId),
+    galleryUrls: (await Promise.all((listing.galleryIds ?? []).map((id) => mediaUrl(ctx, id)))).filter(
       (url): url is string => url !== null,
     ),
-    videoUrl: listing.videoId ? await ctx.storage.getUrl(listing.videoId) : null,
+    videoUrl: listing.videoId ? await mediaUrl(ctx, listing.videoId) : null,
   };
 }
 

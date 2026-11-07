@@ -26,7 +26,26 @@ export const pillars = v.object({
   code: v.number(),
 });
 
+/** A screenshot or video: Convex storage file or ImageKit `media` row (see lib/media.ts). */
+const mediaId = v.union(v.id("_storage"), v.id("media"));
+
 export default defineSchema({
+  // Files uploaded to ImageKit (convex/media.ts). WebP screenshots and
+  // MP4/WebM previews under /listings/<slug>/ with SEO-friendly names.
+  media: defineTable({
+    fileId: v.string(), // ImageKit file id
+    url: v.string(), // https://ik.imagekit.io/<id>/listings/<slug>/<name>
+    filePath: v.string(),
+    kind: v.union(v.literal("image"), v.literal("video")),
+    contentType: v.string(),
+    size: v.number(),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+    uploadedBy: v.id("users"),
+    invalid: v.optional(v.boolean()), // failed the server-side check; not shown
+    createdAt: v.number(),
+  }).index("by_fileId", ["fileId"]),
+
   // Created and kept in sync by the Clerk webhook (http.ts → users.upsertFromClerk).
   users: defineTable({
     externalId: v.string(), // Clerk user id (identity.subject)
@@ -77,9 +96,10 @@ export default defineSchema({
     creditName: v.string(),
     creditUrl: v.optional(v.string()),
 
-    coverId: v.id("_storage"), // first screenshot (16:9, or a full page that scrolls)
-    galleryIds: v.optional(v.array(v.id("_storage"))), // up to LIMITS.gallery more screenshots
-    videoId: v.optional(v.id("_storage")), // short muted hover preview
+    // Each is a Convex storage file (older uploads) or a `media` row (ImageKit).
+    coverId: mediaId, // first screenshot (16:9, or a full page that scrolls)
+    galleryIds: v.optional(v.array(mediaId)), // up to LIMITS.gallery more screenshots
+    videoId: v.optional(mediaId), // short muted preview
 
     status: listingStatus,
     reviewNote: v.optional(v.string()),

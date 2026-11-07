@@ -24,7 +24,7 @@ import {
   type RegionSlug,
   type TechnologyName,
 } from "@/convex/lib/taxonomy";
-import { MediaPicker, MultiImagePicker, useStorageUpload } from "./MediaUpload";
+import { MediaPicker, MultiImagePicker, useMediaUpload } from "./MediaUpload";
 import { score } from "./format";
 import { Select } from "./Select";
 
@@ -62,14 +62,15 @@ const NO_MEDIA: MediaState = { file: null, error: null };
 export function ListingCreateForm() {
   const router = useRouter();
   const createListing = useMutation(api.admin.createListing);
-  const uploadFile = useStorageUpload();
+  const uploadFile = useMediaUpload();
   // Files already uploaded in this session, so a retry after a failed save
   // does not upload the same screenshot twice.
-  const uploaded = useRef(new Map<File, Id<"_storage">>());
-  async function upload(file: File) {
+  const uploaded = useRef(new Map<File, Id<"media">>());
+  async function upload(file: File, label: string) {
     const known = uploaded.current.get(file);
     if (known) return known;
-    const id = await uploadFile(file);
+    // Folder + file names come from the site title (the slug is derived from it).
+    const id = await uploadFile(file, { site: title, label });
     uploaded.current.set(file, id);
     return id;
   }
@@ -157,11 +158,11 @@ export function ListingCreateForm() {
 
     try {
       setPhase("uploading");
-      const coverId = await upload(cover.file as File);
-      const galleryIds: Id<"_storage">[] = [];
-      for (const file of extras) galleryIds.push(await upload(file));
-      let videoId: Id<"_storage"> | undefined;
-      if (video.file) videoId = await upload(video.file);
+      const coverId = await upload(cover.file as File, "cover");
+      const galleryIds: Id<"media">[] = [];
+      for (const [i, file] of extras.entries()) galleryIds.push(await upload(file, `screenshot-${i + 2}`));
+      let videoId: Id<"media"> | undefined;
+      if (video.file) videoId = await upload(video.file, "preview");
 
       let votingEndsAt: number | undefined;
       if (status === "in_voting") votingEndsAt = fromLocalInput(votingEnds) ?? undefined;
@@ -505,7 +506,7 @@ export function ListingCreateForm() {
               <MediaPicker
                 id="cover"
                 label="Screenshot 1 · cover"
-                hint="1920×1080 (16:9), or a full-page screenshot that scrolls in the home slider. PNG/JPG/WebP ≤ 5 MB"
+                hint="1920×1080 (16:9), or a full-page screenshot that scrolls in the home slider. PNG/JPG/WebP up to 20 MB, saved as WebP"
                 kind="image"
                 aspect="16 / 9"
                 file={cover.file}
@@ -518,7 +519,7 @@ export function ListingCreateForm() {
               <MultiImagePicker
                 id="extras"
                 label="More screenshots (optional)"
-                hint={`Up to ${LIMITS.gallery} more, shown after the cover. 16:9 works best. PNG/JPG/WebP ≤ 5 MB each`}
+                hint={`Up to ${LIMITS.gallery} more, shown after the cover. 16:9 works best. PNG/JPG/WebP up to 20 MB each, saved as WebP`}
                 files={extras}
                 max={LIMITS.gallery}
                 onChange={(files, err) => {

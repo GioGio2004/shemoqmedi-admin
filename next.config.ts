@@ -24,6 +24,7 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       { protocol: "https", hostname: "img.clerk.com" },
       { protocol: "https", hostname: "*.convex.cloud" },
+      { protocol: "https", hostname: "ik.imagekit.io", pathname: "/shemoqmedi/**" },
     ],
   },
 };

@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
@@ -106,9 +107,9 @@ export const submit = mutation({
     creditName: v.string(),
     creditUrl: v.optional(v.string()),
     submissionTier: v.union(v.literal("standard"), v.literal("express")),
-    coverId: v.id("_storage"),
-    galleryIds: v.optional(v.array(v.id("_storage"))),
-    videoId: v.optional(v.id("_storage")),
+    coverId: vMediaId,
+    galleryIds: v.optional(v.array(vMediaId)),
+    videoId: v.optional(vMediaId),
   },
   returns: v.object({ slug: v.string() }),
   handler: async (ctx, args) => {
@@ -235,7 +236,7 @@ export const myListings = query({
         finalScore: row.finalScore ?? null,
         votingEndsAt: row.votingEndsAt ?? null,
         createdAt: row.createdAt,
-        coverUrl: await ctx.storage.getUrl(row.coverId),
+        coverUrl: await mediaUrl(ctx, row.coverId),
       })),
     );
   },
@@ -293,7 +294,7 @@ const reviewListing = v.object({
   coverUrl: v.union(v.string(), v.null()),
   galleryUrls: v.array(v.string()),
   /** Extra screenshots with their ids, in order (for the admin media panel). */
-  gallery: v.array(v.object({ id: v.id("_storage"), url: v.union(v.string(), v.null()) })),
+  gallery: v.array(v.object({ id: vMediaId, url: v.union(v.string(), v.null()) })),
   videoUrl: v.union(v.string(), v.null()),
   submitter: v.union(v.object({ name: v.string(), email: v.string() }), v.null()),
 });
@@ -332,7 +333,7 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
     createdAt: listing.createdAt,
     ...(await mediaUrls(ctx, listing)),
     gallery: await Promise.all(
-      (listing.galleryIds ?? []).map(async (id) => ({ id, url: await ctx.storage.getUrl(id) })),
+      (listing.galleryIds ?? []).map(async (id) => ({ id, url: await mediaUrl(ctx, id) })),
     ),
     submitter: owner ? { name: owner.name, email: owner.email } : null,
   };
@@ -509,12 +510,12 @@ async function swapMedia(
   const field = kind === "cover" ? "coverId" : "videoId";
   const previous = listing[field];
   await ctx.db.patch(listing._id, { [field]: storageId, updatedAt: Date.now() });
-  if (previous && previous !== storageId) await ctx.storage.delete(previous);
+  if (previous && previous !== storageId) await deleteMedia(ctx, previous);
 }
 
 /** Admin: replace a listing's cover screenshot or video. */
 export const replaceMedia = mutation({
-  args: { id: v.id("listings"), kind: mediaKind, storageId: v.id("_storage") },
+  args: { id: v.id("listings"), kind: mediaKind, storageId: vMediaId },
   returns: v.null(),
   handler: async (ctx, { id, kind, storageId }) => {
     await requireAdmin(ctx);
@@ -527,7 +528,7 @@ export const replaceMedia = mutation({
 
 /** Admin: add one more screenshot (after the cover, up to LIMITS.gallery). */
 export const addGalleryImage = mutation({
-  args: { id: v.id("listings"), storageId: v.id("_storage") },
+  args: { id: v.id("listings"), storageId: vMediaId },
   returns: v.null(),
   handler: async (ctx, { id, storageId }) => {
     await requireAdmin(ctx);
@@ -541,7 +542,7 @@ export const addGalleryImage = mutation({
 
 /** Admin: remove one extra screenshot and its file. */
 export const removeGalleryImage = mutation({
-  args: { id: v.id("listings"), storageId: v.id("_storage") },
+  args: { id: v.id("listings"), storageId: vMediaId },
   returns: v.null(),
   handler: async (ctx, { id, storageId }) => {
     await requireAdmin(ctx);
@@ -551,14 +552,14 @@ export const removeGalleryImage = mutation({
     if (!gallery.includes(storageId)) fail("That screenshot is not on this listing.");
     const rest = gallery.filter((g) => g !== storageId);
     await ctx.db.patch(id, { galleryIds: rest.length ? rest : undefined, updatedAt: Date.now() });
-    await ctx.storage.delete(storageId);
+    await deleteMedia(ctx, storageId);
     return null;
   },
 });
 
 /** Admin: reorder the extra screenshots (same ids, new order). */
 export const setGalleryOrder = mutation({
-  args: { id: v.id("listings"), galleryIds: v.array(v.id("_storage")) },
+  args: { id: v.id("listings"), galleryIds: v.array(vMediaId) },
   returns: v.null(),
   handler: async (ctx, { id, galleryIds }) => {
     await requireAdmin(ctx);
@@ -577,7 +578,7 @@ export const setGalleryOrder = mutation({
 
 /** Admin: make an extra screenshot the cover; the old cover takes its place. */
 export const makeGalleryCover = mutation({
-  args: { id: v.id("listings"), storageId: v.id("_storage") },
+  args: { id: v.id("listings"), storageId: vMediaId },
   returns: v.null(),
   handler: async (ctx, { id, storageId }) => {
     await requireAdmin(ctx);
@@ -603,7 +604,7 @@ export const uploadUrlInternal = internalMutation({
 
 /** CLI only (scripts/capture-screens.mjs): set a listing's cover by slug. */
 export const replaceCoverBySlug = internalMutation({
-  args: { slug: v.string(), storageId: v.id("_storage") },
+  args: { slug: v.string(), storageId: vMediaId },
   returns: v.null(),
   handler: async (ctx, { slug, storageId }) => {
     const listing = await ctx.db

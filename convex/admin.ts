@@ -3,6 +3,7 @@
 // and manage creators and user roles. Every function requires an admin.
 
 import { v } from "convex/values";
+import { deleteMedia, vMediaId } from "./lib/media";
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin } from "./authHelpers";
@@ -73,9 +74,9 @@ export const createListing = mutation({
     creatorTier,
     creditName: v.string(),
     creditUrl: v.optional(v.string()),
-    coverId: v.id("_storage"),
-    galleryIds: v.optional(v.array(v.id("_storage"))),
-    videoId: v.optional(v.id("_storage")),
+    coverId: vMediaId,
+    galleryIds: v.optional(v.array(vMediaId)),
+    videoId: v.optional(vMediaId),
     status: v.union(
       v.literal("pending"),
       v.literal("in_voting"),
@@ -335,7 +336,7 @@ export const removeMedia = mutation({
     const current = listing.videoId;
     if (!current) return null;
     await ctx.db.patch(id, { videoId: undefined, updatedAt: Date.now() });
-    await ctx.storage.delete(current);
+    await deleteMedia(ctx, current);
     return null;
   },
 });

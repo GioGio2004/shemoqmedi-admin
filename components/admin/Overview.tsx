@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { LegacyMediaMigrator } from "./LegacyMediaMigrator";
 
 type Card = {
   href: string;
@@ -112,6 +113,8 @@ export function Overview() {
           <WorkspaceCard key={card.href} card={card} />
         ))}
       </div>
+
+      <LegacyMediaMigrator />
     </>
   );
 }

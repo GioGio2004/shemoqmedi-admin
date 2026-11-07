@@ -1,25 +1,31 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation } from "convex/react";
+import { useAction, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { LIMITS } from "@/convex/lib/taxonomy";
+import { MAX_IMAGE_INPUT_BYTES, uploadToImageKit } from "@/lib/imagekitUpload";
 
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const VIDEO_TYPES = ["video/mp4", "video/webm"];
 
 export type UploadKind = "image" | "video";
 
-/** Uploads one file to Convex storage and returns its storage id. */
-export function useStorageUpload() {
-  const generateUploadUrl = useMutation(api.listings.generateUploadUrl);
-  return async (file: File): Promise<Id<"_storage">> => {
-    const postUrl = await generateUploadUrl({});
-    const res = await fetch(postUrl, { method: "POST", headers: { "Content-Type": file.type }, body: file });
-    if (!res.ok) throw new Error(`Upload failed (HTTP ${res.status}).`);
-    const { storageId } = (await res.json()) as { storageId: Id<"_storage"> };
-    return storageId;
+/**
+ * Uploads one file to ImageKit (screenshots converted to WebP, SEO file
+ * names; see lib/imagekitUpload.ts) and returns the media id the listing
+ * mutations take.
+ *
+ * @param seo.site  the listing's slug or title, used for the folder and file name
+ * @param seo.label what the file is: "cover", "screenshot-3", "preview"
+ */
+export function useMediaUpload() {
+  const getAuth = useAction(api.media.uploadAuth);
+  const register = useMutation(api.media.register);
+  return async (file: File, seo: { site: string; label: string }): Promise<Id<"media">> => {
+    const args = await uploadToImageKit(file, seo, () => getAuth({}));
+    return await register(args);
   };
 }
 
@@ -27,7 +33,8 @@ export function useStorageUpload() {
 export function checkFile(file: File, kind: UploadKind, label: string): string | null {
   if (kind === "image") {
     if (!IMAGE_TYPES.includes(file.type)) return `${label} must be a PNG, JPG or WebP image.`;
-    if (file.size > LIMITS.imageBytes) return `${label} must be 5 MB or less.`;
+    // Checked again after WebP conversion against LIMITS.imageBytes (5 MB).
+    if (file.size > MAX_IMAGE_INPUT_BYTES) return `${label} must be 20 MB or less.`;
   } else {
     if (!VIDEO_TYPES.includes(file.type)) return `${label} must be an MP4 or WebM video.`;
     if (file.size > LIMITS.videoBytes) return `${label} must be 10 MB or less.`;
@@ -37,7 +44,7 @@ export function checkFile(file: File, kind: UploadKind, label: string): string |
 
 /**
  * File picker with drag & drop and a local preview. It does NOT upload by
- * itself: the parent decides when (use useStorageUpload). `currentUrl`
+ * itself: the parent decides when (use useMediaUpload). `currentUrl`
  * shows the existing media when nothing new is picked.
  */
 export function MediaPicker({

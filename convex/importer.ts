@@ -1,4 +1,5 @@
 import { ConvexError, v } from "convex/values";
+import { deleteMedia, vMediaId } from "./lib/media";
 import { action, internalMutation, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
@@ -253,7 +254,7 @@ export const insertImported = internalMutation({
     ...importInput.fields,
     title: v.string(),
     tagline: v.string(),
-    coverId: v.id("_storage"),
+    coverId: vMediaId,
     source: v.union(v.literal("import"), v.literal("seed")),
   },
   returns: v.object({ id: v.id("listings"), slug: v.string(), skipped: v.boolean() }),
@@ -264,7 +265,7 @@ export const insertImported = internalMutation({
       .collect();
     const live = existing.find((l) => l.status !== "rejected");
     if (live) {
-      await ctx.storage.delete(args.coverId);
+      await deleteMedia(ctx, args.coverId);
       return { id: live._id, slug: live.slug, skipped: true };
     }
 
