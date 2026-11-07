@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { AdminShell } from "@/components/admin/AdminShell";
-import { ReviewQueue, type ReviewStatus } from "@/components/admin/ReviewQueue";
+import { REVIEW_STATUSES, ReviewQueue, type ReviewStatus } from "@/components/admin/ReviewQueue";
 
 export const metadata: Metadata = { title: "Review | Shemoqmedi Admin" };
 
-const STATUSES: ReviewStatus[] = ["pending", "approved", "rejected"];
+function isStatus(value: string | undefined): value is ReviewStatus {
+  return REVIEW_STATUSES.some((s) => s === value);
+}
 
 export default async function ReviewPage({
   searchParams,
@@ -12,7 +14,7 @@ export default async function ReviewPage({
   searchParams: Promise<{ status?: string }>;
 }) {
   const { status } = await searchParams;
-  const active = STATUSES.includes(status as ReviewStatus) ? (status as ReviewStatus) : "pending";
+  const active: ReviewStatus = isStatus(status) ? status : "pending";
 
   return (
     <AdminShell>

@@ -9,23 +9,39 @@ import { STOREFRONT_URL } from "@/lib/storefront";
 import { Wordmark } from "./Wordmark";
 import { useAdmin } from "./useAdmin";
 
-function PendingCount() {
-  const counts = useQuery(api.listings.reviewCounts, {});
-  if (!counts || counts.pending === 0) return null;
+function CountBubble({ value, label }: { value: number | undefined; label: string }) {
+  if (!value) return null;
   return (
-    <span className="admin-count" aria-label={`${counts.pending} waiting`}>
-      <span>{counts.pending}</span>
+    <span className="admin-count">
+      <span aria-hidden="true">{value}</span>
+      <span className="sr-only">
+        , {value} {label}
+      </span>
     </span>
   );
 }
 
+/** Mounted only for admins, so the admin-only queries never run early. */
+function ReviewCount() {
+  const counts = useQuery(api.listings.reviewCounts, {});
+  return <CountBubble value={counts?.pending} label="waiting" />;
+}
+
+function ClaimsCount() {
+  const count = useQuery(api.claims.pendingCount, {});
+  return <CountBubble value={count} label="pending claims" />;
+}
+
+const NAV = [
+  { href: "/dashboard", label: "Overview", count: null },
+  { href: "/review", label: "Review", count: ReviewCount },
+  { href: "/claims", label: "Claims", count: ClaimsCount },
+  { href: "/seed", label: "Import", count: null },
+] as const;
+
 function AdminHeader() {
   const pathname = usePathname();
   const admin = useAdmin();
-  const items = [
-    { href: "/dashboard", label: "Overview" },
-    { href: "/review", label: "Review" },
-  ];
 
   return (
     <header className="admin-header">
@@ -34,16 +50,19 @@ function AdminHeader() {
         <span className="admin-brand-label">Admin</span>
       </Link>
       <nav className="admin-navigation" aria-label="Admin navigation">
-        {items.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-current={pathname.startsWith(item.href) ? "page" : undefined}
-          >
-            {item.label}
-            {item.href === "/review" && admin.kind === "admin" && <PendingCount />}
-          </Link>
-        ))}
+        {NAV.map((item) => {
+          const Count = item.count;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={pathname.startsWith(item.href) ? "page" : undefined}
+            >
+              {item.label}
+              {Count && admin.kind === "admin" && <Count />}
+            </Link>
+          );
+        })}
       </nav>
       <div className="admin-header-actions">
         <a href={STOREFRONT_URL} className="admin-storefront-link" target="_blank" rel="noopener noreferrer">

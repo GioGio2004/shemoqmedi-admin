@@ -1,5 +1,6 @@
 import { v } from "convex/values";
-import { internalMutation, query, type QueryCtx } from "./_generated/server";
+import { internalMutation, internalQuery, query, type QueryCtx } from "./_generated/server";
+import { requireAdmin } from "./authHelpers";
 
 const userDoc = v.object({
   _id: v.id("users"),
@@ -94,6 +95,16 @@ export const getCurrentUser = query({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
     return await getUserByExternalId(ctx, identity.subject);
+  },
+});
+
+/** For actions: throws unless the caller is a platform admin. */
+export const assertAdmin = internalQuery({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    return null;
   },
 });
 

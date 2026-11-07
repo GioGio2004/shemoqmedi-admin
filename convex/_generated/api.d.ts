@@ -9,11 +9,19 @@
  */
 
 import type * as authHelpers from "../authHelpers.js";
+import type * as claims from "../claims.js";
+import type * as creators from "../creators.js";
+import type * as crons from "../crons.js";
 import type * as http from "../http.js";
+import type * as importer from "../importer.js";
+import type * as lib_listingHelpers from "../lib/listingHelpers.js";
+import type * as lib_scoring from "../lib/scoring.js";
 import type * as lib_taxonomy from "../lib/taxonomy.js";
 import type * as lib_utils from "../lib/utils.js";
 import type * as listings from "../listings.js";
+import type * as seed from "../seed.js";
 import type * as users from "../users.js";
+import type * as votes from "../votes.js";
 
 import type {
   ApiFromModules,
@@ -23,11 +31,19 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   authHelpers: typeof authHelpers;
+  claims: typeof claims;
+  creators: typeof creators;
+  crons: typeof crons;
   http: typeof http;
+  importer: typeof importer;
+  "lib/listingHelpers": typeof lib_listingHelpers;
+  "lib/scoring": typeof lib_scoring;
   "lib/taxonomy": typeof lib_taxonomy;
   "lib/utils": typeof lib_utils;
   listings: typeof listings;
+  seed: typeof seed;
   users: typeof users;
+  votes: typeof votes;
 }>;
 
 /**
