@@ -1,10 +1,10 @@
 import { SignIn } from "@clerk/nextjs";
-import { AuthShell } from "@/components/auth/AuthShell";
+import { SignInFrame } from "@/components/admin/SignInFrame";
 
 export default function SignInPage() {
   return (
-    <AuthShell>
+    <SignInFrame>
       <SignIn path="/sign-in" signUpUrl="/sign-up" fallbackRedirectUrl="/dashboard" />
-    </AuthShell>
+    </SignInFrame>
   );
 }

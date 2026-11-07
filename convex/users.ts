@@ -96,3 +96,27 @@ export const getCurrentUser = query({
     return await getUserByExternalId(ctx, identity.subject);
   },
 });
+
+/**
+ * Grant or remove a platform role. Internal: run it from the CLI only, e.g.
+ *   npx convex run users:setRole '{"email":"you@example.com","role":"admin"}'
+ * Pass "role": null to remove the role.
+ */
+export const setRole = internalMutation({
+  args: {
+    email: v.string(),
+    role: v.union(v.literal("admin"), v.literal("super_admin"), v.null()),
+  },
+  returns: v.string(),
+  handler: async (ctx, { email, role }) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("byEmail", (q) => q.eq("email", email.trim()))
+      .first();
+    if (!user) {
+      throw new Error(`No user with email ${email}. Sign up first so the Clerk webhook creates the record.`);
+    }
+    await ctx.db.patch(user._id, { role: role ?? undefined, updatedAt: Date.now() });
+    return `${user.email} is now ${role ?? "a regular user"}`;
+  },
+});

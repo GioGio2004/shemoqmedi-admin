@@ -10,7 +10,9 @@
 
 import type * as authHelpers from "../authHelpers.js";
 import type * as http from "../http.js";
+import type * as lib_taxonomy from "../lib/taxonomy.js";
 import type * as lib_utils from "../lib/utils.js";
+import type * as listings from "../listings.js";
 import type * as users from "../users.js";
 
 import type {
@@ -22,7 +24,9 @@ import type {
 declare const fullApi: ApiFromModules<{
   authHelpers: typeof authHelpers;
   http: typeof http;
+  "lib/taxonomy": typeof lib_taxonomy;
   "lib/utils": typeof lib_utils;
+  listings: typeof listings;
   users: typeof users;
 }>;
 
