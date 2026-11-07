@@ -48,7 +48,7 @@ export function MediaPicker({
   file,
   onChange,
   currentUrl,
-  aspect = "16 / 10",
+  aspect = "16 / 9",
 }: {
   id: string;
   label: string;

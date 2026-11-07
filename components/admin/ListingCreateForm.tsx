@@ -508,9 +508,9 @@ export function ListingCreateForm() {
               <MediaPicker
                 id="cover"
                 label="Desktop screenshot"
-                hint="1600×1000 recommended, PNG/JPG/WebP ≤ 5 MB"
+                hint="1920×1080 (16:9) recommended, PNG/JPG/WebP ≤ 5 MB"
                 kind="image"
-                aspect="16 / 10"
+                aspect="16 / 9"
                 file={cover.file}
                 onChange={(file, err) => setCover({ file, error: err })}
               />
@@ -538,7 +538,7 @@ export function ListingCreateForm() {
                 label="Hover video (optional)"
                 hint="MP4/WebM ≤ 10 MB"
                 kind="video"
-                aspect="16 / 10"
+                aspect="16 / 9"
                 file={video.file}
                 onChange={(file, err) => setVideo({ file, error: err })}
               />
