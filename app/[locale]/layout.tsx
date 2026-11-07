@@ -1,43 +1,24 @@
-import type { Metadata } from 'next'
-import { Outfit, JetBrains_Mono, Space_Grotesk, Noto_Sans_Georgian } from 'next/font/google'
-import "../globals.css"
-import { ClerkProvider } from '@clerk/nextjs'
-import ConvexClientProvider from '@/components/ConvexProviderWithClerk'
-import { NextIntlClientProvider } from 'next-intl'
-import { getMessages } from 'next-intl/server'
+import type { Metadata } from "next";
+import { Geist, Geist_Mono, Noto_Sans_Georgian } from "next/font/google";
+import { NextIntlClientProvider } from "next-intl";
+import { getMessages } from "next-intl/server";
+import "../globals.css";
+import { ClerkProvider } from "@/components/clerk-provider";
+import ConvexClientProvider from "@/components/ConvexProviderWithClerk";
 
-const outfit = Outfit({
-  variable: '--font-sans',
-  subsets: ['latin'],
-  display: 'swap',
-})
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-  display: 'swap',
-})
-
-// RULED display voice — same pairing as the consumer storefront so the two
-// apps read as one product. Noto Sans Georgian covers ka glyphs.
-const display = Space_Grotesk({
-  variable: '--font-display',
-  subsets: ['latin'],
-  weight: 'variable',
-  display: 'swap',
-})
-
+const sans = Geist({ variable: "--font-sans", subsets: ["latin"] });
+const mono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 const georgian = Noto_Sans_Georgian({
-  variable: '--font-ka',
-  subsets: ['georgian'],
-  weight: 'variable',
-  display: 'swap',
-})
+  variable: "--font-ka",
+  subsets: ["georgian"],
+  weight: "variable",
+});
 
 export const metadata: Metadata = {
-  title: 'Shemoqmedi Admin',
-  description: 'Admin dashboard for Shemoqmedi',
-}
+  title: "Shemoqmedi Admin",
+  description: "Admin dashboard for shemoqmedi.space",
+  robots: { index: false, follow: false },
+};
 
 export default async function RootLayout({
   children,
@@ -51,13 +32,15 @@ export default async function RootLayout({
 
   return (
     <ClerkProvider>
-      <html lang={locale}>
-        <body className={`${outfit.variable} ${jetbrainsMono.variable} ${display.variable} ${georgian.variable} font-sans antialiased`}>
+      <html lang={locale} className="dark">
+        <body
+          className={`${sans.variable} ${mono.variable} ${georgian.variable} font-sans antialiased`}
+        >
           <NextIntlClientProvider messages={messages}>
             <ConvexClientProvider>{children}</ConvexClientProvider>
           </NextIntlClientProvider>
         </body>
       </html>
     </ClerkProvider>
-  )
+  );
 }

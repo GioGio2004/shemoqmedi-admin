@@ -1,48 +1,30 @@
-import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
-import { fetchQuery } from "convex/nextjs";
-import { api } from "@/convex/_generated/api";
-import { DashboardOverviewClient } from "./_components/dashboard-overview-client";
+import { getTranslations } from "next-intl/server";
+import { UserButton } from "@clerk/nextjs";
+import { CurrentUserCard } from "@/components/auth/CurrentUserCard";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
-export default async function DashboardOverviewPage() {
-  const { userId, orgId, getToken } = await auth();
+// Protected by proxy.ts: every non-public route requires a Clerk session.
+export default async function DashboardPage() {
+  const t = await getTranslations("dashboard");
 
-  // Guard: must be authenticated to access dashboard
-  if (!userId) redirect("/sign-in");
-
-  // ── Surprise Bags gating ──────────────────────────────────────────────────
-  // Orgs onboarded as "bags" only get the Surprise Bags dashboard.
-  if (orgId) {
-    try {
-      const token = (await getToken({ template: "convex" })) ?? undefined;
-      const gating = await fetchQuery(
-        api.bagsDashboard.getOrgGating,
-        { orgId },
-        token ? { token } : undefined,
-      );
-      if (gating.onboardingType === "bags") redirect("/bags-dashboard");
-    } catch (e) {
-      // redirect() throws internally — re-throw it; swallow only Convex errors
-      if (e && typeof e === "object" && "digest" in e) throw e;
-    }
-  }
-
-  if (!orgId) {
-    return (
-      <div className="space-y-6 font-sans text-v-ink">
-        <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100 fill-mode-both">
-          <h1 className="font-v-display text-3xl font-medium tracking-tight text-v-ink">
-            Overview
-          </h1>
-          <p className="mt-1 text-sm text-v-mut">
-            No active workspace on this session. Reopen the dashboard from your
-            invitation link, or sign out and back in to activate your
-            workspace.
-          </p>
+  return (
+    <div className="min-h-dvh">
+      <header className="flex items-center justify-between border-b px-6 py-4">
+        <span className="font-mono text-xs tracking-widest uppercase">
+          shemoqmedi / admin
+        </span>
+        <div className="flex items-center gap-3">
+          <LanguageSwitcher />
+          <UserButton />
         </div>
-      </div>
-    );
-  }
-
-  return <DashboardOverviewClient orgId={orgId} />;
-}
+      </header>
+      <main className="mx-auto flex max-w-2xl flex-col gap-6 px-6 py-12">
+        <div>
+          <h1 className="text-2xl font-semibold">{t("title")}</h1>
+          <p className="text-muted-foreground">{t("description")}</p>
+        </div>
+        <CurrentUserCard />
+      </main>
+    </div>
+  );
+}

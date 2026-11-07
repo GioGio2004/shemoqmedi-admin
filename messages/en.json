@@ -1,16 +1,20 @@
 {
-  "common": {
-    "signIn": "Sign In",
-    "signUp": "Sign Up",
-    "signOut": "Sign Out",
-    "dashboard": "Dashboard",
-    "loading": "Loading..."
-  },
   "home": {
     "title": "Shemoqmedi Admin",
-    "description": "Manage your store efficiently",
-    "signInPrompt": "Please sign in to access the dashboard.",
-    "goToDashboard": "Go to Dashboard",
-    "signedIn": "You are signed in"
+    "description": "Control room for shemoqmedi.space. Sign in to continue.",
+    "signIn": "Sign in",
+    "signUp": "Create account",
+    "goToDashboard": "Go to dashboard"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "description": "Starter workspace. The new product gets built from here.",
+    "convexRecord": "Your Convex user record",
+    "loading": "Loading…",
+    "convexUnauthenticated": "Signed in to Clerk, but Convex did not accept the token. Check the Clerk JWT template \"convex\" and CLERK_FRONTEND_API_URL on the Convex deployment.",
+    "notSynced": "No Convex record yet. The Clerk webhook creates it a few seconds after sign-up.",
+    "name": "Name",
+    "email": "Email",
+    "role": "Role"
   }
 }

@@ -1,16 +1,20 @@
 {
-  "common": {
+  "home": {
+    "title": "Shemoqmedi ადმინი",
+    "description": "shemoqmedi.space-ის მართვის პანელი. გასაგრძელებლად შედით სისტემაში.",
     "signIn": "შესვლა",
     "signUp": "რეგისტრაცია",
-    "signOut": "გასვლა",
-    "dashboard": "დაფა",
-    "loading": "იტვირთება..."
+    "goToDashboard": "პანელზე გადასვლა"
   },
-  "home": {
-    "title": "შემოქმედი ადმინი",
-    "description": "მართეთ თქვენი მაღაზია ეფექტურად",
-    "signInPrompt": "გთხოვთ შეხვიდეთ დაფაზე წვდომისთვის.",
-    "goToDashboard": "დაფაზე გადასვლა",
-    "signedIn": "თქვენ შესული ხართ"
+  "dashboard": {
+    "title": "პანელი",
+    "description": "საწყისი სამუშაო სივრცე. ახალი პროდუქტი აქედან აშენდება.",
+    "convexRecord": "თქვენი Convex მომხმარებლის ჩანაწერი",
+    "loading": "იტვირთება…",
+    "convexUnauthenticated": "Clerk-ში შესული ხართ, მაგრამ Convex-მა ტოკენი არ მიიღო. შეამოწმეთ Clerk JWT შაბლონი \"convex\" და CLERK_FRONTEND_API_URL Convex-ზე.",
+    "notSynced": "Convex ჩანაწერი ჯერ არ არის. Clerk webhook მას რეგისტრაციიდან რამდენიმე წამში ქმნის.",
+    "name": "სახელი",
+    "email": "ელფოსტა",
+    "role": "როლი"
   }
 }

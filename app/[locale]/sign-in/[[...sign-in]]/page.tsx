@@ -1,10 +1,19 @@
-import { SignIn } from '@clerk/nextjs'
+import { SignIn } from "@clerk/nextjs";
+import { AuthShell } from "@/components/auth/AuthShell";
 
-export default function Page() {
+export default async function SignInPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
   return (
-    <div className="relative flex min-h-[100dvh] items-center justify-center bg-black px-4 py-10">
-      <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
-      <SignIn />
-    </div>
-  )
+    <AuthShell locale={locale}>
+      <SignIn
+        path={`/${locale}/sign-in`}
+        signUpUrl={`/${locale}/sign-up`}
+        fallbackRedirectUrl={`/${locale}/dashboard`}
+      />
+    </AuthShell>
+  );
 }
