@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ClerkProvider } from "@/components/clerk-provider";
 import ConvexClientProvider from "@/components/ConvexProviderWithClerk";
+import { AlertViewport } from "@/components/admin/Alerts";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -24,6 +25,7 @@ export default function RootLayout({
       <html lang="en">
         <body className={inter.variable}>
           <ConvexClientProvider>{children}</ConvexClientProvider>
+          <AlertViewport />
         </body>
       </html>
     </ClerkProvider>

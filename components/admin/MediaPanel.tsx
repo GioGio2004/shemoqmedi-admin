@@ -1,5 +1,6 @@
 "use client";
 
+import { showError } from "./Alerts";
 import { useState } from "react";
 import { useMutation } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
@@ -7,7 +8,6 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { LIMITS } from "@/convex/lib/taxonomy";
 import { MediaPicker, MultiImagePicker, useStorageUpload, type UploadKind } from "./MediaUpload";
-import { errorMessage } from "./format";
 
 type Listing = NonNullable<FunctionReturnType<typeof api.listings.reviewDetail>>;
 type Kind = "cover" | "video";
@@ -73,7 +73,7 @@ function MediaSlot({
       setPickerKey((k) => k + 1);
       setMessage(currentUrl ? "Replaced." : "Uploaded.");
     } catch (err) {
-      setError(errorMessage(err));
+      showError(err);
     } finally {
       setBusy(null);
     }
@@ -89,7 +89,7 @@ function MediaSlot({
       await removeMedia({ id: listingId, kind: "video" });
       setMessage("Removed.");
     } catch (err) {
-      setError(errorMessage(err));
+      showError(err);
     } finally {
       setBusy(null);
     }
@@ -174,7 +174,7 @@ function GalleryManager({ listing }: { listing: Listing }) {
       await work();
       setMessage(done);
     } catch (err) {
-      setError(errorMessage(err));
+      showError(err);
     } finally {
       setBusy(null);
     }

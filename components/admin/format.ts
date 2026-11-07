@@ -22,7 +22,12 @@ export function errorMessage(err: unknown): string {
     // Plain errors thrown inside a Convex function arrive wrapped:
     // "[CONVEX A(...)] [Request ID: ...] Server Error\nUncaught Error: <message>\n    at ...".
     const match = err.message.match(/Uncaught Error: ([^\n]+)/);
-    return match ? match[1].trim() : err.message;
+    if (match) return match[1].trim();
+    // Never show the raw wrapper (request ids, stack) for anything else.
+    if (err.message.includes("[CONVEX") || err.message.includes("Server Error")) {
+      return "Something went wrong on the server. Please try again.";
+    }
+    return err.message;
   }
   return "Something went wrong.";
 }

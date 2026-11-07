@@ -1,12 +1,13 @@
 "use client";
 
+import { showError } from "./Alerts";
 import { useState } from "react";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { PILLARS, type PillarKey } from "@/convex/lib/taxonomy";
 import { AwardBadges } from "./ReviewQueue";
-import { errorMessage, score, type AwardSlug } from "./format";
+import { score, type AwardSlug } from "./format";
 
 type Pillars = Record<PillarKey, number>;
 
@@ -57,7 +58,7 @@ export function ScoreEditor(props: Props) {
     try {
       setMessage(await action());
     } catch (err) {
-      setError(errorMessage(err));
+      showError(err);
     } finally {
       setBusy(null);
     }

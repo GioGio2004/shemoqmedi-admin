@@ -6,6 +6,13 @@ const nextConfig: NextConfig = {
   // is reading (that collision throws transient 404s in the dev server).
   // Unset = ".next", so deploys are unaffected.
   distDir: process.env.NEXT_BUILD_DIR || ".next",
+  experimental: {
+    // Turbopack's on-disk dev cache survives restarts and has kept stale
+    // route tables on Windows after files changed under a running server
+    // (pages 404ing until .next was deleted). Correct routes beat a faster
+    // cold start.
+    turbopackFileSystemCacheForDev: false,
+  },
   async redirects() {
     return [
       // The admin used to be localized under /en, /ka and /ru. English only now.

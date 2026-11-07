@@ -1,5 +1,6 @@
 "use client";
 
+import { showError } from "./Alerts";
 import { useState } from "react";
 import { useMutation } from "convex/react";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
@@ -7,7 +8,7 @@ import { api } from "@/convex/_generated/api";
 import { AWARDS, DAY_MS, LIMITS, VOTING_DAYS } from "@/convex/lib/taxonomy";
 import { formatDate, storefrontSiteUrl } from "@/lib/storefront";
 import { AwardBadges, STATUS_LABEL, StatusBadge } from "./ReviewQueue";
-import { errorMessage, type AwardSlug, type ListingStatus } from "./format";
+import { type AwardSlug, type ListingStatus } from "./format";
 
 type Listing = NonNullable<FunctionReturnType<typeof api.listings.reviewDetail>>;
 type LifecycleArgs = FunctionArgs<typeof api.admin.setLifecycle>;
@@ -80,7 +81,7 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
       await action();
       setMessage("Saved.");
     } catch (err) {
-      setError(errorMessage(err));
+      showError(err);
     } finally {
       setBusy(false);
     }

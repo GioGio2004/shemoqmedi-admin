@@ -1,5 +1,6 @@
 "use client";
 
+import { showError } from "./Alerts";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
@@ -24,7 +25,7 @@ import {
   type TechnologyName,
 } from "@/convex/lib/taxonomy";
 import { MediaPicker, MultiImagePicker, useStorageUpload } from "./MediaUpload";
-import { errorMessage, score } from "./format";
+import { score } from "./format";
 import { Select } from "./Select";
 
 type CreateStatus = "pending" | "in_voting" | "awarded" | "archived";
@@ -192,7 +193,7 @@ export function ListingCreateForm() {
       });
       router.push(`/review/${id}`);
     } catch (err) {
-      setError(errorMessage(err));
+      showError(err);
       setPhase("idle");
       submitting.current = false;
     }

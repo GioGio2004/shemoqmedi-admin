@@ -1,12 +1,13 @@
 "use client";
 
+import { showError } from "./Alerts";
 import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
 import { formatDate, storefrontSiteUrl } from "@/lib/storefront";
-import { errorMessage, safeHref, shortUrl, storefrontCreatorUrl, type ClaimStatus } from "./format";
+import { safeHref, shortUrl, storefrontCreatorUrl, type ClaimStatus } from "./format";
 
 type Claim = FunctionReturnType<typeof api.claims.queue>[number];
 
@@ -42,7 +43,7 @@ function ClaimRow({ claim }: { claim: Claim }) {
     try {
       await action();
     } catch (err) {
-      setError(errorMessage(err));
+      showError(err);
     } finally {
       setBusy(false);
     }

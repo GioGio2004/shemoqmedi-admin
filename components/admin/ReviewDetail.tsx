@@ -1,5 +1,6 @@
 "use client";
 
+import { showError } from "./Alerts";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -12,7 +13,7 @@ import { ScoreEditor } from "./ScoreEditor";
 import { ListingEditForm } from "./ListingEditForm";
 import { MediaPanel } from "./MediaPanel";
 import { LifecyclePanel } from "./LifecyclePanel";
-import { SOURCE_LABEL, errorMessage, safeHref, storefrontCreatorUrl } from "./format";
+import { SOURCE_LABEL, safeHref, storefrontCreatorUrl } from "./format";
 
 /** Full control panel for one listing: details, media, lifecycle, scores. */
 export function ReviewDetail({ id }: { id: Id<"listings"> }) {
@@ -51,7 +52,7 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
       await remove({ id });
       router.push("/review");
     } catch (err) {
-      setDeleteError(errorMessage(err));
+      showError(err);
       setDeleting(false);
     }
   }

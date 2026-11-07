@@ -1,5 +1,6 @@
 "use client";
 
+import { showError } from "./Alerts";
 import { useState } from "react";
 import { useMutation } from "convex/react";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
@@ -13,7 +14,6 @@ import {
   type CreatorTier,
   type RegionSlug,
 } from "@/convex/lib/taxonomy";
-import { errorMessage } from "./format";
 import { Select } from "./Select";
 
 type Listing = NonNullable<FunctionReturnType<typeof api.listings.reviewDetail>>;
@@ -116,7 +116,7 @@ export function ListingEditForm({ listing }: { listing: Listing }) {
       setEdits({});
       setDone(true);
     } catch (err) {
-      setError(errorMessage(err));
+      showError(err);
     } finally {
       setBusy(false);
     }

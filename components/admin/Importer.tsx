@@ -1,5 +1,6 @@
 "use client";
 
+import { showError } from "./Alerts";
 import Link from "next/link";
 import { useState } from "react";
 import { useAction } from "convex/react";
@@ -14,7 +15,7 @@ import {
   type CreatorTier,
   type RegionSlug,
 } from "@/convex/lib/taxonomy";
-import { errorMessage, safeHref, shortUrl } from "./format";
+import { safeHref, shortUrl } from "./format";
 import { Select } from "./Select";
 
 type ImportResult = FunctionReturnType<typeof api.importer.importUrls>[number];
@@ -125,7 +126,7 @@ function ImportPanel() {
       setLastDestination(destination);
       setResults(out);
     } catch (err) {
-      setError(errorMessage(err));
+      showError(err);
     } finally {
       setBusy(false);
     }

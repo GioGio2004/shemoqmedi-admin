@@ -1,11 +1,11 @@
 "use client";
 
+import { showError } from "./Alerts";
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
 import { formatDate } from "@/lib/storefront";
-import { errorMessage } from "./format";
 
 type User = FunctionReturnType<typeof api.admin.listUsers>[number];
 type Role = User["role"];
@@ -48,7 +48,7 @@ function UserRow({ user }: { user: User }) {
     try {
       await setRole({ userId: user.id, role });
     } catch (err) {
-      setError(errorMessage(err));
+      showError(err);
     } finally {
       setBusy(false);
     }

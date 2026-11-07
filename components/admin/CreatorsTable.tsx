@@ -1,5 +1,6 @@
 "use client";
 
+import { showError } from "./Alerts";
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
@@ -13,7 +14,6 @@ import {
 } from "@/convex/lib/taxonomy";
 import { formatDate } from "@/lib/storefront";
 import {
-  errorMessage,
   regionLabel,
   safeHref,
   shortUrl,
@@ -94,7 +94,7 @@ function CreatorForm({ creator, onDone }: { creator: Creator; onDone: () => void
       await update({ id: creator.id, ...patch });
       onDone();
     } catch (err) {
-      setError(errorMessage(err));
+      showError(err);
     } finally {
       setBusy(false);
     }
@@ -264,7 +264,7 @@ function CreatorRow({ creator }: { creator: Creator }) {
     try {
       await remove({ id: creator.id });
     } catch (err) {
-      setError(errorMessage(err));
+      showError(err);
       setBusy(false);
     }
   }
