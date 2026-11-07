@@ -15,13 +15,33 @@ import {
 import { FLAGSHIP } from "./seed";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Microlink: title, description and a 1600×1000 screenshot for a URL.
-// Free tier: ~50 requests/day. Set MICROLINK_API_KEY on the deployment for more.
+// Capture: title + description + a desktop screenshot for a URL.
+//
+// Screenshot providers, tried in order until one returns an image:
+//   1. Microlink (1600×1000). Free tier is ~50/day and is shared per IP, so
+//      from Convex's cloud it is often exhausted; MICROLINK_API_KEY fixes that.
+//   2. thum.io (1600px wide, no key, no watermark).
+//   3. WordPress mShots (1280×960, no key; generates on first request, so poll).
+// Title and description come from Microlink's metadata when it worked, else
+// from the page's own <title> / meta description.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Scraped = { title: string; description: string; screenshotUrl: string };
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
-async function scrape(url: string): Promise<Scraped> {
+type Meta = { title: string; description: string };
+type Capture = Meta & { image: Blob; provider: string };
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function asImage(res: Response): Promise<Blob | null> {
+  const type = res.headers.get("content-type") ?? "";
+  if (!res.ok || !type.startsWith("image/") || type.includes("gif")) return null;
+  const blob = await res.blob();
+  return blob.size > 5_000 ? blob : null; // tiny images are placeholders
+}
+
+async function viaMicrolink(url: string): Promise<(Meta & { image: Blob }) | null> {
   const key = process.env.MICROLINK_API_KEY;
   const api = new URL(key ? "https://pro.microlink.io/" : "https://api.microlink.io/");
   api.searchParams.set("url", url);
@@ -31,21 +51,78 @@ async function scrape(url: string): Promise<Scraped> {
   api.searchParams.set("viewport.height", "1000");
   api.searchParams.set("viewport.deviceScaleFactor", "1");
   api.searchParams.set("waitForTimeout", "1500");
-
   const res = await fetch(api, { headers: key ? { "x-api-key": key } : {} });
   const body = (await res.json().catch(() => null)) as {
     status?: string;
-    message?: string;
     data?: { title?: string; description?: string; screenshot?: { url?: string } };
   } | null;
-  if (!res.ok || body?.status !== "success" || !body.data?.screenshot?.url) {
-    throw new Error(body?.message ?? `Microlink could not capture ${url} (HTTP ${res.status}).`);
+  const shot = body?.status === "success" ? body.data?.screenshot?.url : undefined;
+  if (!shot) return null;
+  const image = await asImage(await fetch(shot));
+  if (!image) return null;
+  return { title: body?.data?.title ?? "", description: body?.data?.description ?? "", image };
+}
+
+async function viaThum(url: string): Promise<Blob | null> {
+  return asImage(
+    await fetch(`https://image.thum.io/get/width/1600/crop/1000/noanimate/${url}`, {
+      headers: { "user-agent": BROWSER_UA },
+    }),
+  );
+}
+
+async function viaMshots(url: string): Promise<Blob | null> {
+  const api = `https://s.wordpress.com/mshots/v1/${encodeURIComponent(url)}?w=1600&h=1000`;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const image = await asImage(await fetch(api, { headers: { "user-agent": BROWSER_UA } }));
+    if (image) return image;
+    await sleep(5000); // still generating
   }
-  return {
-    title: body.data.title ?? "",
-    description: body.data.description ?? "",
-    screenshotUrl: body.data.screenshot.url,
-  };
+  return null;
+}
+
+function decodeEntities(text: string) {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
+    .trim();
+}
+
+/** <title> / og:title and meta description / og:description from the page itself. */
+async function pageMeta(url: string): Promise<Meta> {
+  try {
+    const res = await fetch(url, { headers: { "user-agent": BROWSER_UA, accept: "text/html" } });
+    const html = (await res.text()).slice(0, 300_000);
+    const metaContent = (name: string) => {
+      const a = new RegExp(`<meta[^>]+(?:name|property)=["']${name}["'][^>]*content=["']([^"']*)["']`, "i");
+      const b = new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*(?:name|property)=["']${name}["']`, "i");
+      return html.match(a)?.[1] ?? html.match(b)?.[1] ?? "";
+    };
+    const title = metaContent("og:title") || html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1] || "";
+    const description = metaContent("description") || metaContent("og:description");
+    return { title: decodeEntities(title), description: decodeEntities(description) };
+  } catch {
+    return { title: "", description: "" };
+  }
+}
+
+async function capture(url: string): Promise<Capture> {
+  const micro = await viaMicrolink(url).catch(() => null);
+  if (micro) return { ...micro, provider: "microlink" };
+
+  const meta = await pageMeta(url);
+  const thum = await viaThum(url).catch(() => null);
+  if (thum) return { ...meta, image: thum, provider: "thum.io" };
+  const mshots = await viaMshots(url).catch(() => null);
+  if (mshots) return { ...meta, image: mshots, provider: "mshots" };
+
+  throw new ConvexError(
+    `Couldn't capture a screenshot of ${url}. The site may block screenshot services; try again later or set MICROLINK_API_KEY.`,
+  );
 }
 
 const importInput = v.object({
@@ -86,11 +163,8 @@ async function importOne(
 ): Promise<typeof importResult.type> {
   try {
     const url = normalizeUrl(input.url);
-    const scraped = await scrape(url);
-    const image = await fetch(scraped.screenshotUrl);
-    if (!image.ok) throw new Error(`Screenshot download failed (HTTP ${image.status}).`);
-    const blob = await image.blob();
-    const coverId = await ctx.storage.store(blob);
+    const scraped = await capture(url);
+    const coverId = await ctx.storage.store(scraped.image);
     const out: { id: Id<"listings">; slug: string; skipped: boolean } = await ctx.runMutation(
       internal.importer.insertImported,
       {
