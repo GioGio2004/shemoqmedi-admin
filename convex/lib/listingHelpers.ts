@@ -57,13 +57,58 @@ export function slugify(value: string, fallback = "site") {
   );
 }
 
+/** How many old slugs a listing keeps redirecting from. */
+export const MAX_PREVIOUS_SLUGS = 10;
+
+/** How many listings the slug-history scans read (see retiredListingSlugs). */
+const SLUG_SCAN_LIMIT = 1000;
+
+/**
+ * Old slugs of other listings, which still redirect to them. Convex cannot
+ * index array elements, and the showcase is hand-curated (well under
+ * SLUG_SCAN_LIMIT listings), so a bounded table scan is fine here.
+ */
+export async function retiredListingSlugs(ctx: QueryCtx, except?: Id<"listings">) {
+  const rows = await ctx.db.query("listings").take(SLUG_SCAN_LIMIT);
+  const out = new Set<string>();
+  for (const row of rows) {
+    if (row._id === except) continue;
+    for (const slug of row.previousSlugs ?? []) out.add(slug);
+  }
+  return out;
+}
+
+/** True when another listing uses `slug` now, or used it before (it redirects). */
+export async function listingSlugTaken(ctx: QueryCtx, slug: string, self?: Id<"listings">) {
+  const current = await ctx.db
+    .query("listings")
+    .withIndex("by_slug", (q) => q.eq("slug", slug))
+    .first();
+  if (current && current._id !== self) return true;
+  return (await retiredListingSlugs(ctx, self)).has(slug);
+}
+
+/**
+ * The slug history after renaming `listing` to `next`: the current slug is
+ * appended (deduped, newest last, at most MAX_PREVIOUS_SLUGS), and `next` is
+ * dropped from it when the listing takes an old slug back.
+ */
+export function previousSlugsAfterRename(listing: Doc<"listings">, next: string) {
+  const history = (listing.previousSlugs ?? []).filter((s) => s !== listing.slug && s !== next);
+  history.push(listing.slug);
+  return history.slice(-MAX_PREVIOUS_SLUGS);
+}
+
+/** A free slug for a new row. For listings, other listings' old slugs count as taken. */
 export async function uniqueSlug(
   ctx: QueryCtx,
   table: "listings" | "creators",
   base: string,
 ) {
+  const retired = table === "listings" ? await retiredListingSlugs(ctx) : new Set<string>();
   for (let i = 1; i <= 50; i++) {
     const candidate = i === 1 ? base : `${base}-${i}`;
+    if (retired.has(candidate)) continue;
     const taken = await ctx.db
       .query(table)
       .withIndex("by_slug", (q) => q.eq("slug", candidate))
@@ -160,9 +205,15 @@ export function scoreFields(
   };
 }
 
-/** Locks voting and assigns awards. Safe to call more than once. */
-export async function finalizeListing(ctx: MutationCtx, listing: Doc<"listings">) {
-  if (listing.status !== "in_voting") return;
+/**
+ * Locks voting and assigns awards. Safe to call more than once. Returns the
+ * awards given (possibly none), or null when the listing was not in voting.
+ */
+export async function finalizeListing(
+  ctx: MutationCtx,
+  listing: Doc<"listings">,
+): Promise<Doc<"listings">["awards"] | null> {
+  if (listing.status !== "in_voting") return null;
   const fields = scoreFields(listing.editorialScores, listing.communityTotals, listing.communityVotesCount);
   const awards = decideAwards(listing.creatorTier, fields.finalScore ?? null);
   const now = Date.now();
@@ -173,6 +224,7 @@ export async function finalizeListing(ctx: MutationCtx, listing: Doc<"listings">
     awardedAt: awards.length > 0 ? now : undefined,
     updatedAt: now,
   });
+  return awards;
 }
 
 export const EMPTY_SCORES = {
@@ -204,10 +256,16 @@ export async function deleteListing(ctx: MutationCtx, listing: Doc<"listings">) 
 
 export const PUBLIC_STATUSES = ["in_voting", "awarded", "archived"] as const;
 
+/** in_voting, awarded and archived listings have a public page. */
+export function isPublicStatus(status: Doc<"listings">["status"]) {
+  return (PUBLIC_STATUSES as readonly string[]).includes(status);
+}
+
 export const publicListing = v.object({
   slug: v.string(),
   title: v.string(),
   tagline: v.string(),
+  juryNote: v.union(v.string(), v.null()),
   url: v.string(),
   category: v.string(),
   technologies: v.array(v.string()),
@@ -258,6 +316,7 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
     slug: listing.slug,
     title: listing.title,
     tagline: listing.tagline,
+    juryNote: listing.juryNote ?? null,
     url: listing.url,
     category: listing.category,
     technologies: listing.technologies,

@@ -24,6 +24,7 @@ type Fields = {
   slug: string;
   url: string;
   tagline: string;
+  juryNote: string;
   category: string;
   technologies: string[];
   creditName: string;
@@ -39,6 +40,7 @@ const KEYS: Key[] = [
   "slug",
   "url",
   "tagline",
+  "juryNote",
   "category",
   "technologies",
   "creditName",
@@ -54,6 +56,7 @@ function fromListing(l: Listing): Fields {
     slug: l.slug,
     url: l.url,
     tagline: l.tagline,
+    juryNote: l.juryNote ?? "",
     category: l.category,
     technologies: l.technologies,
     creditName: l.creditName,
@@ -166,7 +169,7 @@ export function ListingEditForm({ listing }: { listing: Listing }) {
                 />
               </span>
               <span className="text-xs text-black/55">
-                Letters, numbers and dashes. Old links to /sites/{listing.slug} stop working when you change it.
+                Letters, numbers and dashes. Old links to /sites/{listing.slug} redirect to the new address.
               </span>
             </label>
           </div>
@@ -201,6 +204,24 @@ export function ListingEditForm({ listing }: { listing: Listing }) {
               maxLength={LIMITS.tagline}
               onChange={(e) => set("tagline", e.target.value)}
             />
+          </label>
+
+          <label className="grid gap-2">
+            <span className="flex items-baseline justify-between gap-3">
+              <span className="admin-eyebrow">Jury note</span>
+              <span className="admin-mono text-black/55">
+                {value.juryNote.length}/{LIMITS.juryNote}
+              </span>
+            </span>
+            <textarea
+              className="admin-input resize-y"
+              rows={4}
+              value={value.juryNote}
+              maxLength={LIMITS.juryNote}
+              onChange={(e) => set("juryNote", e.target.value)}
+              placeholder="A few sentences on what makes this site stand out. Shown on its page."
+            />
+            <span className="text-xs text-black/55">Optional. Leave empty to hide it.</span>
           </label>
 
           <div className="grid gap-6 md:grid-cols-2">

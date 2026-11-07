@@ -15,6 +15,7 @@ import type * as creators from "../creators.js";
 import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as importer from "../importer.js";
+import type * as lib_imagekitServer from "../lib/imagekitServer.js";
 import type * as lib_listingHelpers from "../lib/listingHelpers.js";
 import type * as lib_media from "../lib/media.js";
 import type * as lib_scoring from "../lib/scoring.js";
@@ -23,6 +24,7 @@ import type * as lib_utils from "../lib/utils.js";
 import type * as listings from "../listings.js";
 import type * as media from "../media.js";
 import type * as seed from "../seed.js";
+import type * as seo from "../seo.js";
 import type * as users from "../users.js";
 import type * as votes from "../votes.js";
 
@@ -40,6 +42,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   http: typeof http;
   importer: typeof importer;
+  "lib/imagekitServer": typeof lib_imagekitServer;
   "lib/listingHelpers": typeof lib_listingHelpers;
   "lib/media": typeof lib_media;
   "lib/scoring": typeof lib_scoring;
@@ -48,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   listings: typeof listings;
   media: typeof media;
   seed: typeof seed;
+  seo: typeof seo;
   users: typeof users;
   votes: typeof votes;
 }>;

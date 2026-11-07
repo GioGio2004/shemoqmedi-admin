@@ -1,10 +1,12 @@
 import { ConvexError, v } from "convex/values";
-import { action, internalAction, internalMutation, mutation, query } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { LIMITS } from "./lib/taxonomy";
 import { assertMedia, fail } from "./lib/listingHelpers";
-import { deleteMedia, mediaUrl } from "./lib/media";
+import { deleteMedia, mediaUrl, vMediaId, type MediaId } from "./lib/media";
 
 // ImageKit media pipeline.
 //
@@ -190,14 +192,31 @@ const legacyItem = v.object({
   url: v.string(),
 });
 
+const legacyListing = v.object({
+  listingId: v.id("listings"),
+  slug: v.string(),
+  title: v.string(),
+  items: v.array(legacyItem),
+});
+
 /** Admin: every listing that still has files in Convex storage. */
 export const legacyFiles = query({
   args: {},
-  returns: v.array(
-    v.object({ listingId: v.id("listings"), slug: v.string(), title: v.string(), items: v.array(legacyItem) }),
-  ),
+  returns: v.array(legacyListing),
   handler: async (ctx) => {
     await requireAdmin(ctx);
+    return await collectLegacy(ctx);
+  },
+});
+
+/** CLI (scripts/media-to-imagekit.mjs): same list, no user session. */
+export const legacyFilesInternal = internalQuery({
+  args: {},
+  returns: v.array(legacyListing),
+  handler: async (ctx) => collectLegacy(ctx),
+});
+
+async function collectLegacy(ctx: QueryCtx) {
     const listings = await ctx.db.query("listings").take(1000);
     const out = [];
     for (const l of listings) {
@@ -216,6 +235,117 @@ export const legacyFiles = query({
       if (items.length) out.push({ listingId: l._id, slug: l.slug, title: l.title, items });
     }
     return out;
+}
+
+/** Put `to` wherever `from` sits on a listing (cover, gallery or video), checking its type. */
+async function swapOnListing(ctx: MutationCtx, listing: Doc<"listings">, from: MediaId, to: MediaId) {
+  if (listing.coverId === from) {
+    await assertMedia(ctx, to, "Cover screenshot", "image");
+    await ctx.db.patch(listing._id, { coverId: to, updatedAt: Date.now() });
+  } else if (listing.galleryIds?.includes(from)) {
+    await assertMedia(ctx, to, "Screenshot", "image");
+    await ctx.db.patch(listing._id, {
+      galleryIds: listing.galleryIds.map((g) => (g === from ? to : g)),
+      updatedAt: Date.now(),
+    });
+  } else if (listing.videoId === from) {
+    await assertMedia(ctx, to, "Preview video", "video");
+    await ctx.db.patch(listing._id, { videoId: to, updatedAt: Date.now() });
+  } else {
+    fail("That file is no longer on this listing. Reload and try again.");
+  }
+}
+
+const serverFile = v.object({
+  fileId: v.string(),
+  url: v.string(),
+  filePath: v.string(),
+  kind: v.union(v.literal("image"), v.literal("video")),
+  contentType: v.string(),
+  size: v.number(),
+  width: v.optional(v.number()),
+  height: v.optional(v.number()),
+});
+
+/** Record an ImageKit file uploaded server-side (importer, CLI); no user session. */
+export const registerInternal = internalMutation({
+  args: serverFile.fields,
+  returns: v.id("media"),
+  handler: async (ctx, args) => {
+    checkLimits(args.kind, args.contentType, args.size);
+    const existing = await ctx.db
+      .query("media")
+      .withIndex("by_fileId", (q) => q.eq("fileId", args.fileId))
+      .first();
+    if (existing) return existing._id;
+    return await ctx.db.insert("media", { ...args, createdAt: Date.now() });
+  },
+});
+
+/**
+ * CLI: register an uploaded ImageKit file and swap it in for `from` on a
+ * listing (a Convex storage file being moved, or a bigger ImageKit file
+ * being replaced by a compressed one), then delete `from`.
+ */
+export const adoptFile = internalMutation({
+  args: { listingId: v.id("listings"), from: vMediaId, file: serverFile },
+  returns: v.id("media"),
+  handler: async (ctx, { listingId, from, file }) => {
+    const listing = await ctx.db.get(listingId);
+    if (!listing) fail("Listing not found.");
+    checkLimits(file.kind, file.contentType, file.size);
+    const to = await ctx.db.insert("media", { ...file, createdAt: Date.now() });
+    await swapOnListing(ctx, listing, from, to);
+    await deleteMedia(ctx, from);
+    return to;
+  },
+});
+
+/** CLI: delete every Convex storage file no listing points at. */
+export const deleteOrphanStorage = internalMutation({
+  args: {},
+  returns: v.object({ deleted: v.number(), stillUsed: v.number() }),
+  handler: async (ctx) => {
+    const used = new Set<string>();
+    for (const l of await ctx.db.query("listings").take(1000)) {
+      for (const id of [l.coverId, ...(l.galleryIds ?? []), ...(l.videoId ? [l.videoId] : [])]) used.add(id);
+    }
+    let deleted = 0;
+    let stillUsed = 0;
+    for (const file of await ctx.db.system.query("_storage").take(2000)) {
+      if (used.has(file._id)) stillUsed++;
+      else {
+        await ctx.storage.delete(file._id);
+        deleted++;
+      }
+    }
+    return { deleted, stillUsed };
+  },
+});
+
+/** CLI: ImageKit preview videos bigger than minBytes (to re-compress). */
+export const largeVideos = internalQuery({
+  args: { minBytes: v.number() },
+  returns: v.array(
+    v.object({
+      listingId: v.id("listings"),
+      slug: v.string(),
+      mediaId: v.id("media"),
+      url: v.string(),
+      size: v.number(),
+    }),
+  ),
+  handler: async (ctx, { minBytes }) => {
+    const out: { listingId: Id<"listings">; slug: string; mediaId: Id<"media">; url: string; size: number }[] = [];
+    for (const l of await ctx.db.query("listings").take(1000)) {
+      if (!l.videoId) continue;
+      const mediaId = ctx.db.normalizeId("media", l.videoId);
+      const row = mediaId ? await ctx.db.get(mediaId) : null;
+      if (mediaId && row && !row.invalid && row.size > minBytes) {
+        out.push({ listingId: l._id, slug: l.slug, mediaId, url: row.url, size: row.size });
+      }
+    }
+    return out;
   },
 });
 
@@ -227,19 +357,7 @@ export const adoptLegacy = mutation({
     await requireAdmin(ctx);
     const listing = await ctx.db.get(listingId);
     if (!listing) fail("Listing not found.");
-    const replaced = (id: typeof listing.coverId) => (id === from ? to : id);
-    if (listing.coverId === from) {
-      await assertMedia(ctx, to, "Cover screenshot", "image");
-      await ctx.db.patch(listingId, { coverId: to });
-    } else if (listing.galleryIds?.includes(from)) {
-      await assertMedia(ctx, to, "Screenshot", "image");
-      await ctx.db.patch(listingId, { galleryIds: listing.galleryIds.map(replaced) });
-    } else if (listing.videoId === from) {
-      await assertMedia(ctx, to, "Preview video", "video");
-      await ctx.db.patch(listingId, { videoId: to });
-    } else {
-      fail("That file is no longer on this listing. Reload and try again.");
-    }
+    await swapOnListing(ctx, listing, from, to);
     await deleteMedia(ctx, from);
     return null;
   },

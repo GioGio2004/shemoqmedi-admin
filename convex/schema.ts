@@ -41,7 +41,7 @@ export default defineSchema({
     size: v.number(),
     width: v.optional(v.number()),
     height: v.optional(v.number()),
-    uploadedBy: v.id("users"),
+    uploadedBy: v.optional(v.id("users")), // empty for server-side uploads (importer, migration)
     invalid: v.optional(v.boolean()), // failed the server-side check; not shown
     createdAt: v.number(),
   }).index("by_fileId", ["fileId"]),
@@ -86,8 +86,13 @@ export default defineSchema({
     submissionTier: v.union(v.literal("standard"), v.literal("express")),
 
     slug: v.string(),
+    // Slugs this listing used before (newest last, at most 10). The site
+    // 308-redirects /sites/<old> to the current slug (listings.resolveSlug),
+    // so no other listing may take one of them.
+    previousSlugs: v.optional(v.array(v.string())),
     title: v.string(),
     tagline: v.string(),
+    juryNote: v.optional(v.string()), // short public review by the jury (LIMITS.juryNote)
     url: v.string(), // normalized live URL
     category: v.string(), // CATEGORIES slug
     technologies: v.array(v.string()), // TECHNOLOGIES names

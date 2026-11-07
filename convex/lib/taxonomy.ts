@@ -95,6 +95,8 @@ export const DAY_MS = 24 * 60 * 60 * 1000;
 export const LIMITS = {
   title: 80,
   tagline: 160,
+  /** Public jury note on the listing page (a few sentences). */
+  juryNote: 600,
   creditName: 80,
   url: 500,
   technologies: 6,

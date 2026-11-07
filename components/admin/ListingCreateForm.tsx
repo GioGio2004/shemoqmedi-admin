@@ -78,6 +78,7 @@ export function ListingCreateForm() {
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
   const [tagline, setTagline] = useState("");
+  const [juryNote, setJuryNote] = useState("");
   const [category, setCategory] = useState<CategorySlug | "">("");
   const [technologies, setTechnologies] = useState<TechnologyName[]>([]);
   const [creditName, setCreditName] = useState("");
@@ -176,6 +177,7 @@ export function ListingCreateForm() {
       const { id } = await createListing({
         title: title.trim(),
         tagline: tagline.trim(),
+        juryNote: juryNote.trim() || undefined,
         url: url.trim(),
         category,
         technologies,
@@ -266,6 +268,25 @@ export function ListingCreateForm() {
                 />
                 <span id="tagline-count" className="admin-mono text-black/55">
                   {tagline.length}/{LIMITS.tagline}
+                </span>
+              </div>
+
+              <div className="grid gap-2">
+                <label htmlFor="jury-note" className="admin-eyebrow">
+                  Jury note (optional)
+                </label>
+                <textarea
+                  id="jury-note"
+                  rows={4}
+                  maxLength={LIMITS.juryNote}
+                  value={juryNote}
+                  onChange={(e) => setJuryNote(e.target.value)}
+                  className="admin-input resize-y"
+                  placeholder="A few sentences on what makes this site stand out. Shown on its page."
+                  aria-describedby="jury-note-count"
+                />
+                <span id="jury-note-count" className="admin-mono text-black/55">
+                  {juryNote.length}/{LIMITS.juryNote}
                 </span>
               </div>
 

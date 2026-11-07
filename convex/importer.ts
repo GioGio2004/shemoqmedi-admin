@@ -14,6 +14,7 @@ import {
   uniqueSlug,
 } from "./lib/listingHelpers";
 import { FLAGSHIP } from "./seed";
+import { uploadToImageKitFromServer } from "./lib/imagekitServer";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Capture: title + description + a desktop screenshot for a URL.
@@ -165,7 +166,25 @@ async function importOne(
   try {
     const url = normalizeUrl(input.url);
     const scraped = await capture(url);
-    const coverId = await ctx.storage.store(scraped.image);
+    // Straight to ImageKit (never Convex storage), SEO-named like browser uploads.
+    const slug = slugify(input.title ?? scraped.title ?? new URL(url).host);
+    const type = scraped.image.type || "image/jpeg";
+    const ext = type === "image/png" ? "png" : type === "image/webp" ? "webp" : "jpg";
+    const file = await uploadToImageKitFromServer(scraped.image, {
+      fileName: `${slug}-website-cover.${ext}`,
+      folder: `/listings/${slug}`,
+      tags: ["listing", slug, "image", "import"],
+    });
+    const coverId: Id<"media"> = await ctx.runMutation(internal.media.registerInternal, {
+      fileId: file.fileId,
+      url: file.url,
+      filePath: file.filePath,
+      kind: "image",
+      contentType: type,
+      size: file.size,
+      width: file.width,
+      height: file.height,
+    });
     const out: { id: Id<"listings">; slug: string; skipped: boolean } = await ctx.runMutation(
       internal.importer.insertImported,
       {

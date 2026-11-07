@@ -18,11 +18,15 @@ import {
   deleteListing,
   fail,
   findOrCreateCreator,
+  isPublicStatus,
+  listingSlugTaken,
   normalizeUrl,
+  previousSlugsAfterRename,
   scoreFields,
   slugify,
   uniqueSlug,
 } from "./lib/listingHelpers";
+import { awardPaths, creatorPath, listingPaths, scheduleIndexNow, sitePath } from "./seo";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared validation
@@ -67,6 +71,7 @@ export const createListing = mutation({
   args: {
     title: v.string(),
     tagline: v.string(),
+    juryNote: v.optional(v.string()),
     url: v.string(),
     category: v.string(),
     technologies: v.array(v.string()),
@@ -93,6 +98,7 @@ export const createListing = mutation({
     const admin = await requireAdmin(ctx);
     const title = cleanText(args.title, "Site title", LIMITS.title);
     const tagline = cleanText(args.tagline, "Short description", LIMITS.tagline, false);
+    const juryNote = cleanText(args.juryNote ?? "", "Jury note", LIMITS.juryNote, false) || undefined;
     const creditName = cleanText(args.creditName, "Made by", LIMITS.creditName);
     const url = normalizeUrl(args.url);
     const creditUrl = args.creditUrl?.trim() ? normalizeUrl(args.creditUrl, "Creator website") : undefined;
@@ -134,6 +140,7 @@ export const createListing = mutation({
       slug,
       title,
       tagline,
+      juryNote,
       url,
       category: args.category,
       technologies,
@@ -158,6 +165,13 @@ export const createListing = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    if (args.status !== "pending") {
+      await scheduleIndexNow(ctx, [
+        ...(await listingPaths(ctx, { slug, creatorId })),
+        "/",
+        ...awardPaths(args.status === "awarded" ? awards : []),
+      ]);
+    }
     return { id, slug };
   },
 });
@@ -169,6 +183,7 @@ export const updateListing = mutation({
     title: v.optional(v.string()),
     slug: v.optional(v.string()),
     tagline: v.optional(v.string()),
+    juryNote: v.optional(v.string()), // "" clears it
     url: v.optional(v.string()),
     category: v.optional(v.string()),
     technologies: v.optional(v.array(v.string())),
@@ -187,6 +202,9 @@ export const updateListing = mutation({
 
     if (args.title !== undefined) patch.title = cleanText(args.title, "Site title", LIMITS.title);
     if (args.tagline !== undefined) patch.tagline = cleanText(args.tagline, "Short description", LIMITS.tagline, false);
+    if (args.juryNote !== undefined) {
+      patch.juryNote = cleanText(args.juryNote, "Jury note", LIMITS.juryNote, false) || undefined;
+    }
     if (args.url !== undefined) {
       patch.url = normalizeUrl(args.url);
       if (patch.url !== listing.url) await assertUniqueUrl(ctx, patch.url, id);
@@ -195,12 +213,11 @@ export const updateListing = mutation({
       const wanted = slugify(args.slug, "");
       if (!wanted) fail("The page address can only use letters, numbers and dashes.");
       if (wanted !== listing.slug) {
-        const taken = await ctx.db
-          .query("listings")
-          .withIndex("by_slug", (q) => q.eq("slug", wanted))
-          .first();
-        if (taken) fail(`/sites/${wanted} is already taken.`);
+        // Another listing's old address counts as taken: it redirects there.
+        if (await listingSlugTaken(ctx, wanted, id)) fail(`/sites/${wanted} is already taken.`);
         patch.slug = wanted;
+        // The old address keeps working: the site 308s it to the new slug.
+        patch.previousSlugs = previousSlugsAfterRename(listing, wanted);
       }
     }
     if (args.category !== undefined) {
@@ -228,6 +245,14 @@ export const updateListing = mutation({
     }
 
     await ctx.db.patch(id, { ...patch, updatedAt: Date.now() });
+    if (isPublicStatus(listing.status) && Object.keys(patch).length > 0) {
+      // New page + creator page, and the old ones (old slug now redirects,
+      // the old creator may have lost a listing). Duplicates are dropped.
+      await scheduleIndexNow(ctx, [
+        ...(await listingPaths(ctx, { ...listing, ...patch })),
+        ...(await listingPaths(ctx, listing)),
+      ]);
+    }
     return { slug: patch.slug ?? listing.slug };
   },
 });
@@ -303,6 +328,17 @@ export const setLifecycle = mutation({
         await ctx.db.patch(id, { ...base, reviewNote: undefined, awards: [], awardedAt: undefined });
         break;
       }
+    }
+
+    const wasPublic = isPublicStatus(listing.status);
+    if (wasPublic || isPublicStatus(status)) {
+      const after = await ctx.db.get(id);
+      await scheduleIndexNow(ctx, [
+        ...(await listingPaths(ctx, listing)),
+        wasPublic ? null : "/", // newly published
+        // Award pages it joined or left.
+        ...awardPaths([...listing.awards, ...(after?.awards ?? [])]),
+      ]);
     }
     return null;
   },
@@ -460,12 +496,24 @@ export const updateCreator = mutation({
     const now = Date.now();
     await ctx.db.patch(id, { ...patch, updatedAt: now });
 
-    if (patch.name && patch.name !== creator.name) {
-      const listings = await ctx.db
-        .query("listings")
-        .withIndex("by_creator", (q) => q.eq("creatorId", id))
-        .take(1000);
+    const renamed = Boolean(patch.name && patch.name !== creator.name);
+    const listings = await ctx.db
+      .query("listings")
+      .withIndex("by_creator", (q) => q.eq("creatorId", id))
+      .take(1000);
+    if (renamed) {
       for (const l of listings) await ctx.db.patch(l._id, { creditName: patch.name, updatedAt: now });
+    }
+
+    // The profile is public only while it has a public listing.
+    const live = listings.filter((l) => isPublicStatus(l.status));
+    if (live.length > 0 && Object.keys(patch).length > 0) {
+      await scheduleIndexNow(ctx, [
+        creatorPath(patch.slug ?? creator.slug),
+        patch.slug ? creatorPath(creator.slug) : null, // old address
+        // "Made by" changed on each listing page too.
+        ...(renamed ? live.map((l) => sitePath(l.slug)) : []),
+      ]);
     }
     return { slug: patch.slug ?? creator.slug };
   },

@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
-import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { creatorTier, listingStatus, pillars, region } from "./schema";
@@ -17,6 +17,7 @@ import {
   fail,
   finalizeListing,
   findOrCreateCreator,
+  isPublicStatus,
   mediaUrls,
   normalizeUrl,
   publicListing,
@@ -25,6 +26,7 @@ import {
   toPublic,
   uniqueSlug,
 } from "./lib/listingHelpers";
+import { awardPaths, listingPaths, scheduleIndexNow } from "./seo";
 
 const MAX_PUBLIC = 200;
 
@@ -65,6 +67,33 @@ export const getPublicBySlug = query({
   },
 });
 
+/**
+ * Old address → current slug, for a 308 from /sites/<old>. Only public
+ * listings redirect; returns null when nothing (public) used to have this slug.
+ */
+export const resolveSlug = query({
+  args: { slug: v.string() },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, { slug }) => {
+    const current = await ctx.db
+      .query("listings")
+      .withIndex("by_slug", (q) => q.eq("slug", slug))
+      .first();
+    if (current) return null; // the slug is in use; its own page answers
+    // previousSlugs is an array, which Convex cannot index. The showcase is
+    // small and hand-curated, so scanning the public listings is fine.
+    for (const status of PUBLIC_STATUSES) {
+      const rows = await ctx.db
+        .query("listings")
+        .withIndex("by_status_published", (q) => q.eq("status", status))
+        .take(1000);
+      const hit = rows.find((r) => r.previousSlugs?.includes(slug));
+      if (hit) return hit.slug;
+    }
+    return null;
+  },
+});
+
 /** Slugs + dates for the sitemap. */
 export const publicSlugs = query({
   args: {},
@@ -86,14 +115,6 @@ export const publicSlugs = query({
 // Signed-in users: submit and manage their own listings
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const generateUploadUrl = mutation({
-  args: {},
-  returns: v.string(),
-  handler: async (ctx) => {
-    await requireUser(ctx);
-    return await ctx.storage.generateUploadUrl();
-  },
-});
 
 export const submit = mutation({
   args: {
@@ -250,7 +271,10 @@ export const withdraw = mutation({
     const user = await requireUser(ctx);
     const listing = await ctx.db.get(id);
     if (!listing || listing.ownerId !== user._id) fail("Listing not found.");
+    // Ping the removed page so engines recrawl it and see the 404.
+    const paths = isPublicStatus(listing.status) ? await listingPaths(ctx, listing) : [];
     await deleteListing(ctx, listing);
+    await scheduleIndexNow(ctx, paths);
     return null;
   },
 });
@@ -264,6 +288,7 @@ const reviewListing = v.object({
   slug: v.string(),
   title: v.string(),
   tagline: v.string(),
+  juryNote: v.union(v.string(), v.null()),
   url: v.string(),
   category: v.string(),
   categoryName: v.string(),
@@ -307,6 +332,7 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
     slug: listing.slug,
     title: listing.title,
     tagline: listing.tagline,
+    juryNote: listing.juryNote ?? null,
     url: listing.url,
     category: listing.category,
     categoryName: categoryName(listing.category),
@@ -442,6 +468,7 @@ export const approve = mutation({
       awardedAt: undefined,
       updatedAt: now,
     });
+    await scheduleIndexNow(ctx, [...(await listingPaths(ctx, listing)), "/"]);
     return null;
   },
 });
@@ -463,6 +490,10 @@ export const reject = mutation({
       reviewedAt: now,
       updatedAt: now,
     });
+    // Unpublished: engines recrawl and see the 404 (plus award pages it left).
+    if (isPublicStatus(listing.status)) {
+      await scheduleIndexNow(ctx, [...(await listingPaths(ctx, listing)), ...awardPaths(listing.awards)]);
+    }
     return null;
   },
 });
@@ -476,7 +507,8 @@ export const closeVotingNow = mutation({
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
     if (listing.status !== "in_voting") fail("This site is not in voting.");
-    await finalizeListing(ctx, listing);
+    const awards = await finalizeListing(ctx, listing);
+    await scheduleIndexNow(ctx, [...(await listingPaths(ctx, listing)), ...awardPaths(awards ?? [])]);
     return null;
   },
 });
@@ -488,7 +520,12 @@ export const remove = mutation({
     await requireAdmin(ctx);
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
+    // Ping the removed page so engines recrawl it and see the 404.
+    const paths = isPublicStatus(listing.status)
+      ? [...(await listingPaths(ctx, listing)), ...awardPaths(listing.awards)]
+      : [];
     await deleteListing(ctx, listing);
+    await scheduleIndexNow(ctx, paths);
     return null;
   },
 });
@@ -595,38 +632,6 @@ export const makeGalleryCover = mutation({
   },
 });
 
-/** CLI only (scripts/capture-screens.mjs): an upload URL without a user session. */
-export const uploadUrlInternal = internalMutation({
-  args: {},
-  returns: v.string(),
-  handler: async (ctx) => ctx.storage.generateUploadUrl(),
-});
-
-/** CLI only (scripts/capture-screens.mjs): set a listing's cover by slug. */
-export const replaceCoverBySlug = internalMutation({
-  args: { slug: v.string(), storageId: vMediaId },
-  returns: v.null(),
-  handler: async (ctx, { slug, storageId }) => {
-    const listing = await ctx.db
-      .query("listings")
-      .withIndex("by_slug", (q) => q.eq("slug", slug))
-      .first();
-    if (!listing) fail(`No listing with slug ${slug}.`);
-    await swapMedia(ctx, listing, "cover", storageId);
-    return null;
-  },
-});
-
-/** CLI only: slug + url of every listing (for the capture script). */
-export const allForCapture = internalQuery({
-  args: {},
-  returns: v.array(v.object({ slug: v.string(), url: v.string(), status: listingStatus })),
-  handler: async (ctx) => {
-    const rows = await ctx.db.query("listings").take(1000);
-    return rows.map((r) => ({ slug: r.slug, url: r.url, status: r.status }));
-  },
-});
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Scheduled
 // ─────────────────────────────────────────────────────────────────────────────
@@ -643,7 +648,12 @@ export const closeExpiredVoting = internalMutation({
         q.eq("status", "in_voting").lte("votingEndsAt", now),
       )
       .take(100);
-    for (const listing of expired) await finalizeListing(ctx, listing);
+    const paths: string[] = [];
+    for (const listing of expired) {
+      const awards = await finalizeListing(ctx, listing);
+      paths.push(...(await listingPaths(ctx, listing)), ...awardPaths(awards ?? []));
+    }
+    await scheduleIndexNow(ctx, paths); // one ping for the whole batch
     return expired.length;
   },
 });

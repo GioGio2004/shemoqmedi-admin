@@ -72,7 +72,16 @@ describe("submission", () => {
     await expect(t.mutation(api.listings.submit, input(await storeFile(t)))).rejects.toThrow(
       /Unauthenticated/,
     );
-    await expect(t.mutation(api.listings.generateUploadUrl, {})).rejects.toThrow(/Unauthenticated/);
+    await expect(
+      t.mutation(api.media.register, {
+        fileId: "abcdef123",
+        url: "https://ik.imagekit.io/x/listings/a/a.webp",
+        filePath: "/listings/a/a.webp",
+        kind: "image",
+        contentType: "image/webp",
+        size: 10,
+      }),
+    ).rejects.toThrow(/Unauthenticated/);
   });
 
   it("creates a pending listing and a claimed creator profile", async () => {
