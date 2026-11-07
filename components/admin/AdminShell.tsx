@@ -35,9 +35,16 @@ function ClaimsCount() {
 const NAV = [
   { href: "/dashboard", label: "Overview", count: null },
   { href: "/review", label: "Review", count: ReviewCount },
+  { href: "/listings/new", label: "Add site", count: null },
+  { href: "/creators", label: "Creators", count: null },
+  { href: "/users", label: "Users", count: null },
   { href: "/claims", label: "Claims", count: ClaimsCount },
   { href: "/seed", label: "Import", count: null },
 ] as const;
+
+function isCurrent(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 function AdminHeader() {
   const pathname = usePathname();
@@ -49,14 +56,21 @@ function AdminHeader() {
         <Wordmark />
         <span className="admin-brand-label">Admin</span>
       </Link>
-      <nav className="admin-navigation" aria-label="Admin navigation">
+      {/* Seven items: tighter padding than the base style, and the bar scrolls
+          sideways instead of wrapping when the window is narrow. */}
+      <nav
+        className="admin-navigation"
+        aria-label="Admin navigation"
+        style={{ minWidth: 0, overflowX: "auto" }}
+      >
         {NAV.map((item) => {
           const Count = item.count;
           return (
             <Link
               key={item.href}
               href={item.href}
-              aria-current={pathname.startsWith(item.href) ? "page" : undefined}
+              aria-current={isCurrent(pathname, item.href) ? "page" : undefined}
+              style={{ paddingInline: 14, flexShrink: 0, whiteSpace: "nowrap" }}
             >
               {item.label}
               {Count && admin.kind === "admin" && <Count />}

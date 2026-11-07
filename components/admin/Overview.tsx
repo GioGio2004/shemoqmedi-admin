@@ -10,14 +10,22 @@ type Card = {
   title: string;
   body: string;
   cta: string;
+  primary?: boolean;
 };
 
 function WorkspaceCard({ card }: { card: Card }) {
   return (
-    <Link href={card.href} className="workspace-card">
+    <Link
+      href={card.href}
+      className="workspace-card"
+      // The primary card keeps a solid black hairline instead of the faint one.
+      style={card.primary ? { borderColor: "var(--foreground)" } : undefined}
+    >
       <div className="workspace-card-top">
         <p className="admin-eyebrow">{card.eyebrow}</p>
-        <span className="admin-arrow" aria-hidden="true">↗</span>
+        <span className="admin-arrow" aria-hidden="true">
+          {card.primary ? "+" : "↗"}
+        </span>
       </div>
       <h2>{card.title}</h2>
       <p>{card.body}</p>
@@ -34,6 +42,14 @@ export function Overview() {
   const n = (value: number | undefined) => (value === undefined ? "·" : value);
 
   const cards: Card[] = [
+    {
+      href: "/listings/new",
+      eyebrow: "Add a site",
+      title: "List a site",
+      body: "List a site by hand with your own screenshots: cover, mobile and hover video, credit, scores and lifecycle.",
+      cta: "Add a site",
+      primary: true,
+    },
     {
       href: "/review?status=pending",
       eyebrow: "Review queue",
@@ -56,18 +72,25 @@ export function Overview() {
       cta: "See awarded sites",
     },
     {
+      href: "/creators",
+      eyebrow: "Creators",
+      title: "Profiles",
+      body: "Rename creators, change their profile address, tier, region, bio and claimed state.",
+      cta: "Manage creators",
+    },
+    {
+      href: "/users",
+      eyebrow: "Users",
+      title: "Roles",
+      body: "Everyone who signed up, with their listings and votes. Grant or remove admin access.",
+      cta: "Manage users",
+    },
+    {
       href: "/claims",
       eyebrow: "Claims",
       title: `${n(claims)} pending`,
       body: "“This is mine” requests for unclaimed sites and creator profiles.",
       cta: "Review claims",
-    },
-    {
-      href: "/seed",
-      eyebrow: "Import",
-      title: "Add sites",
-      body: "Load the flagship seed, or import live URLs with an automatic screenshot.",
-      cta: "Open the importer",
     },
   ];
 
@@ -79,8 +102,8 @@ export function Overview() {
           <h1>Control room.</h1>
         </div>
         <p className="workspace-intro">
-          Submissions wait here until you approve them. Approved sites vote for 7 days, then
-          close with their final score and awards.
+          Add sites by hand, or approve submissions. Live sites vote for 7 days, then close with
+          their final score and awards.
         </p>
       </div>
 

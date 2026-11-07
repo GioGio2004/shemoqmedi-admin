@@ -16,8 +16,6 @@ import {
 
 export type ReviewStatus = ListingStatus;
 
-export const REVIEW_STATUSES: ReviewStatus[] = ["pending", "in_voting", "awarded", "archived", "rejected"];
-
 export const STATUS_LABEL: Record<ReviewStatus, string> = {
   pending: "In review",
   in_voting: "Live voting",

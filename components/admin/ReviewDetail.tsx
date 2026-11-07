@@ -9,58 +9,52 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { formatDate, storefrontSiteUrl } from "@/lib/storefront";
 import { STATUS_LABEL, StatusBadge } from "./ReviewQueue";
 import { ScoreEditor } from "./ScoreEditor";
-import {
-  SOURCE_LABEL,
-  errorMessage,
-  regionLabel,
-  safeHref,
-  storefrontCreatorUrl,
-  tierLabel,
-} from "./format";
+import { ListingEditForm } from "./ListingEditForm";
+import { MediaPanel } from "./MediaPanel";
+import { LifecyclePanel } from "./LifecyclePanel";
+import { SOURCE_LABEL, errorMessage, safeHref, storefrontCreatorUrl } from "./format";
 
+/** Full control panel for one listing: details, media, lifecycle, scores. */
 export function ReviewDetail({ id }: { id: Id<"listings"> }) {
   const router = useRouter();
   const listing = useQuery(api.listings.reviewDetail, { id });
-  const approve = useMutation(api.listings.approve);
-  const reject = useMutation(api.listings.reject);
-  const closeVoting = useMutation(api.listings.closeVotingNow);
   const remove = useMutation(api.listings.remove);
-
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function run(action: () => Promise<unknown>, after?: () => void) {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-      after?.();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   if (listing === undefined) return <p className="admin-eyebrow">Loading…</p>;
+  // After a delete the query turns null before router.push lands: don't flash "Not found".
+  if (listing === null && deleting) return <p className="admin-eyebrow">Deleted. Returning to review…</p>;
   if (listing === null) {
     return (
       <div className="admin-empty">
         <h2>Not found.</h2>
         This listing no longer exists.{" "}
-        <Link href="/review" className="admin-text-link">Back to review</Link>
+        <Link href="/review" className="admin-text-link">
+          Back to review
+        </Link>
       </div>
     );
   }
 
   const status = listing.status;
   const isPublic = status === "in_voting" || status === "awarded" || status === "archived";
-  const canApprove = status === "pending" || status === "rejected";
-  const canReject = status === "pending" || status === "in_voting";
-  const scoresLocked = status === "awarded" || status === "archived";
   const creditHref = safeHref(listing.creditUrl);
+  const liveHref = safeHref(listing.url);
+
+  async function onDelete() {
+    if (deleting || !listing) return;
+    if (!confirm(`Delete "${listing.title}" with its votes and media? This can't be undone.`)) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await remove({ id });
+      router.push("/review");
+    } catch (err) {
+      setDeleteError(errorMessage(err));
+      setDeleting(false);
+    }
+  }
 
   return (
     <>
@@ -71,128 +65,52 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
           </Link>
           <p className="admin-eyebrow mt-6">{listing.categoryName}</p>
           <h1>{listing.title}</h1>
-          <p>{listing.tagline}</p>
+          {listing.tagline && <p>{listing.tagline}</p>}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <StatusBadge status={status} />
-          <a href={listing.url} target="_blank" rel="noopener noreferrer" className="admin-button admin-button-secondary">
-            Open live site <span aria-hidden="true">↗</span>
-          </a>
+          {liveHref && (
+            <a href={liveHref} target="_blank" rel="noopener noreferrer" className="admin-button admin-button-secondary">
+              Open live site <span aria-hidden="true">↗</span>
+            </a>
+          )}
+          {isPublic && (
+            <a
+              href={storefrontSiteUrl(listing.slug)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="admin-button admin-button-secondary"
+            >
+              View on the site <span aria-hidden="true">↗</span>
+            </a>
+          )}
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <section aria-label="Media" className="grid content-start gap-6">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_400px]">
+        <div className="grid min-w-0 content-start gap-6">
           {listing.coverUrl && (
-            <a href={listing.coverUrl} target="_blank" rel="noopener noreferrer" className="request-thumb block rounded-[24px]">
-              <img src={listing.coverUrl} alt={`${listing.title} desktop screenshot`} />
-            </a>
+            <section aria-label="Screenshot preview">
+              <a
+                href={listing.coverUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="request-thumb block rounded-[24px]"
+              >
+                <img src={listing.coverUrl} alt={`${listing.title} desktop screenshot`} />
+              </a>
+            </section>
           )}
-          {listing.videoUrl && (
-            <div className="request-thumb rounded-[24px]">
-              <video
-                src={listing.videoUrl}
-                className="absolute inset-0 h-full w-full object-cover object-top"
-                muted
-                loop
-                playsInline
-                controls
-                aria-label={`${listing.title} preview video`}
-              />
-            </div>
-          )}
-          {listing.mobileUrl && (
-            <a
-              href={listing.mobileUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="request-thumb block w-full max-w-[280px] rounded-[24px]"
-              style={{ aspectRatio: "9 / 19.5" }}
-            >
-              <img src={listing.mobileUrl} alt={`${listing.title} mobile screenshot`} />
-            </a>
-          )}
-        </section>
 
-        <aside className="grid content-start gap-6">
-          <section className="admin-panel" aria-labelledby="decision-heading">
-            <p id="decision-heading" className="admin-eyebrow mb-5">Decision</p>
-            {error && <p role="alert" className="mb-4 text-sm font-medium">{error}</p>}
-            <div className="grid gap-3">
-              {canApprove && (
-                <button
-                  type="button"
-                  className="admin-button w-full"
-                  disabled={busy}
-                  onClick={() => run(() => approve({ id }))}
-                >
-                  Approve: start 7-day voting <span aria-hidden="true">↗</span>
-                </button>
-              )}
-              {status === "in_voting" && (
-                <button
-                  type="button"
-                  className="admin-button w-full"
-                  disabled={busy}
-                  onClick={() => {
-                    if (
-                      confirm(
-                        `Close voting for "${listing.title}" now and assign awards from the current score? This can't be undone.`,
-                      )
-                    ) {
-                      void run(() => closeVoting({ id }));
-                    }
-                  }}
-                >
-                  Close voting now &amp; assign awards
-                </button>
-              )}
-              {isPublic && (
-                <a
-                  href={storefrontSiteUrl(listing.slug)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="admin-button admin-button-secondary w-full"
-                >
-                  View on the site <span aria-hidden="true">↗</span>
-                </a>
-              )}
+          <ListingEditForm key={listing.id} listing={listing} />
+          <MediaPanel key={`media-${listing.id}`} listing={listing} />
+        </div>
 
-              {canReject && (
-                <>
-                  <label htmlFor="reject-note" className="admin-eyebrow mt-4">
-                    {status === "in_voting" ? "Unpublish with a reason" : "Reject with a reason"}
-                  </label>
-                  <textarea
-                    id="reject-note"
-                    rows={3}
-                    maxLength={500}
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="e.g. The screenshot doesn't match the live site."
-                    className="admin-input resize-y"
-                  />
-                  <button
-                    type="button"
-                    className="admin-button admin-button-secondary w-full"
-                    disabled={busy || !note.trim()}
-                    onClick={() => run(() => reject({ id, note }), () => setNote(""))}
-                  >
-                    {status === "in_voting" ? "Unpublish" : "Reject"}
-                  </button>
-                </>
-              )}
-              {status === "rejected" && listing.reviewNote && (
-                <p className="text-xs text-black/55">Current reason: {listing.reviewNote}</p>
-              )}
-              {(status === "awarded" || status === "archived") && (
-                <p className="text-xs text-black/55">
-                  Voting closed{listing.votingEndsAt ? ` ${formatDate(listing.votingEndsAt)}` : ""}.
-                  Results are final.
-                </p>
-              )}
-            </div>
-          </section>
+        <aside className="grid min-w-0 content-start gap-6 lg:sticky lg:top-[132px] lg:max-h-[calc(100dvh-156px)] lg:self-start lg:overflow-y-auto lg:overscroll-contain">
+          <LifecyclePanel
+            key={[listing.id, status, listing.votingEndsAt, listing.awards.join(","), listing.reviewNote].join("|")}
+            listing={listing}
+          />
 
           <ScoreEditor
             key={listing.id}
@@ -203,18 +121,28 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
             communityVotesCount={listing.communityVotesCount}
             finalScore={listing.finalScore}
             awards={listing.awards}
-            locked={scoresLocked}
           />
 
-          <section className="admin-panel" aria-label="Facts">
+          <section className="admin-panel" aria-labelledby="facts-heading">
+            <p id="facts-heading" className="admin-eyebrow mb-5">
+              Facts
+            </p>
             <dl className="request-fields">
               <div className="wide">
                 <dt>Live URL</dt>
                 <dd>
-                  <a href={listing.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">
-                    {listing.url}
-                  </a>
+                  {liveHref ? (
+                    <a href={liveHref} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">
+                      {listing.url}
+                    </a>
+                  ) : (
+                    listing.url
+                  )}
                 </dd>
+              </div>
+              <div className="wide">
+                <dt>Page on the site</dt>
+                <dd className="admin-mono normal-case">/sites/{listing.slug}</dd>
               </div>
               <div className="wide">
                 <dt>Made by</dt>
@@ -243,26 +171,14 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
                 </dd>
               </div>
               <div>
-                <dt>Creator tier</dt>
-                <dd><span className="admin-tag">{tierLabel(listing.creatorTier)}</span></dd>
-              </div>
-              <div>
-                <dt>Region</dt>
-                <dd>{regionLabel(listing.region)}</dd>
-              </div>
-              <div>
-                <dt>Category</dt>
-                <dd>{listing.categoryName}</dd>
-              </div>
-              <div>
                 <dt>Source</dt>
                 <dd>{SOURCE_LABEL[listing.source]}</dd>
               </div>
               <div>
-                <dt>Site claimed</dt>
-                <dd>{listing.isClaimed ? "Yes" : "No"}</dd>
+                <dt>Added</dt>
+                <dd>{formatDate(listing.createdAt)}</dd>
               </div>
-              <div>
+              <div className="wide">
                 <dt>Submitted by</dt>
                 <dd>
                   {listing.submitter
@@ -272,57 +188,30 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
                       : `${SOURCE_LABEL[listing.source]} (no submitter)`}
                 </dd>
               </div>
-              {listing.technologies.length > 0 && (
-                <div className="wide">
-                  <dt>Built with</dt>
-                  <dd className="flex flex-wrap gap-2">
-                    {listing.technologies.map((t) => (
-                      <span key={t} className="admin-tag">{t}</span>
-                    ))}
-                  </dd>
-                </div>
-              )}
-              <div>
-                <dt>Added</dt>
-                <dd>{formatDate(listing.createdAt)}</dd>
-              </div>
-              <div>
-                <dt>Reviewed</dt>
-                <dd>{listing.reviewedAt ? formatDate(listing.reviewedAt) : "Not yet"}</dd>
-              </div>
-              {listing.publishedAt && (
-                <div>
-                  <dt>Voting opened</dt>
-                  <dd>{formatDate(listing.publishedAt)}</dd>
-                </div>
-              )}
-              {listing.votingEndsAt && (
-                <div>
-                  <dt>
-                    {status === "in_voting"
-                      ? "Voting ends"
-                      : status === "rejected"
-                        ? "Voting window was set to end"
-                        : "Voting ended"}
-                  </dt>
-                  <dd>{formatDate(listing.votingEndsAt)}</dd>
-                </div>
-              )}
             </dl>
           </section>
 
-          <button
-            type="button"
-            className="admin-text-link justify-self-start"
-            disabled={busy}
-            onClick={() => {
-              if (confirm(`Delete "${listing.title}", its votes and its media? This can't be undone.`)) {
-                void run(() => remove({ id }), () => router.push(`/review?status=${status}`));
-              }
-            }}
-          >
-            Delete listing permanently
-          </button>
+          <section className="admin-panel" aria-labelledby="danger-heading">
+            <p id="danger-heading" className="admin-eyebrow mb-3">
+              Danger zone
+            </p>
+            <p className="mb-5 text-xs leading-relaxed text-black/55">
+              Deletes the listing, its votes, its screenshots and its video for good.
+            </p>
+            {deleteError && (
+              <p role="alert" className="mb-4 text-sm font-medium">
+                {deleteError}
+              </p>
+            )}
+            <button
+              type="button"
+              className="admin-button admin-button-secondary w-full"
+              disabled={deleting}
+              onClick={onDelete}
+            >
+              {deleting ? "Deleting…" : "Delete listing permanently"}
+            </button>
+          </section>
         </aside>
       </div>
     </>

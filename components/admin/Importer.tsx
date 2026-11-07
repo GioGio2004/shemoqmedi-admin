@@ -69,57 +69,7 @@ function Results({
   );
 }
 
-/** Shared by both panels: only one Microlink job runs at a time. */
-type RunState = { running: boolean; setRunning: (value: boolean) => void };
-
-function SeedPanel({ running, setRunning }: RunState) {
-  const seed = useAction(api.importer.seedFlagship);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<ImportResult[] | null>(null);
-
-  async function onSeed() {
-    if (running) return;
-    if (!confirm("Load the flagship seed? Each site is captured with Microlink (about 10 s each). Existing URLs are skipped.")) {
-      return;
-    }
-    setBusy(true);
-    setRunning(true);
-    setError(null);
-    setResults(null);
-    try {
-      setResults(await seed({}));
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-      setRunning(false);
-    }
-  }
-
-  return (
-    <section className="admin-panel" aria-labelledby="seed-heading">
-      <p className="admin-eyebrow">Flagship seed</p>
-      <h2 id="seed-heading" className="mt-4 text-3xl font-medium">Load the launch listings.</h2>
-      <ul className="mt-5 grid gap-2 text-sm leading-relaxed text-black/55">
-        <li>Giorgi Khvichia&apos;s own projects carry their jury scores and awards.</li>
-        <li>Third-party sites enter live voting as unawarded, unclaimed nominees: no scores, no awards. Their owners can claim or ask for removal.</li>
-        <li>URLs already in the showcase are skipped, so running it twice is safe.</li>
-      </ul>
-      <button type="button" className="admin-button mt-6" disabled={running} onClick={onSeed}>
-        {busy ? "Loading seed… (1–2 min)" : "Load flagship seed"}
-      </button>
-      {error && (
-        <p role="alert" className="mt-4 text-sm font-medium">
-          {error}
-        </p>
-      )}
-      {results && <Results title="Seed" results={results} destination="public" />}
-    </section>
-  );
-}
-
-function ImportPanel({ running, setRunning }: RunState) {
+function ImportPanel() {
   const importUrls = useAction(api.importer.importUrls);
 
   const [urlsText, setUrlsText] = useState("");
@@ -141,7 +91,7 @@ function ImportPanel({ running, setRunning }: RunState) {
   const creditHref = creditUrl.trim() ? safeHref(creditUrl.trim()) : null;
   const creditUrlInvalid = creditUrl.trim() !== "" && creditHref === null;
   const canSubmit =
-    urls.length > 0 && !tooMany && creditName.trim() !== "" && !creditUrlInvalid && !running;
+    urls.length > 0 && !tooMany && creditName.trim() !== "" && !creditUrlInvalid && !busy;
 
   function toggleTech(name: string) {
     setTechnologies((list) =>
@@ -157,7 +107,6 @@ function ImportPanel({ running, setRunning }: RunState) {
     e.preventDefault();
     if (!canSubmit) return;
     setBusy(true);
-    setRunning(true);
     setError(null);
     setResults(null);
     const destination: Destination = publishNow ? "public" : "pending";
@@ -178,7 +127,6 @@ function ImportPanel({ running, setRunning }: RunState) {
       setError(errorMessage(err));
     } finally {
       setBusy(false);
-      setRunning(false);
     }
   }
 
@@ -194,7 +142,7 @@ function ImportPanel({ running, setRunning }: RunState) {
       </p>
 
       <form onSubmit={onSubmit} className="mt-8 grid gap-6">
-        <fieldset disabled={running} className="grid gap-6">
+        <fieldset disabled={busy} className="grid gap-6">
           <label className="grid gap-2">
             <span className="admin-eyebrow">
               URLs, one per line (max {LIMITS.importBatch})
@@ -347,20 +295,25 @@ function ImportPanel({ running, setRunning }: RunState) {
 }
 
 export function Importer() {
-  const [running, setRunning] = useState(false);
   return (
     <>
       <div className="admin-page-heading">
         <div>
-          <p className="admin-eyebrow">04 / Import</p>
-          <h1>Import.</h1>
-          <p>Bring sites into the showcase without a submission.</p>
+          <p className="admin-eyebrow">Import</p>
+          <h1>Quick import.</h1>
+          <p>
+            Automatic screenshots often miss WebGL and intro-animation sites. For those, use{" "}
+            <Link href="/listings/new" className="underline underline-offset-4">
+              Add a site
+            </Link>{" "}
+            with your own screenshots.
+          </p>
         </div>
+        <Link href="/listings/new" className="admin-button">
+          Add a site <span aria-hidden="true">→</span>
+        </Link>
       </div>
-      <div className="grid gap-6">
-        <SeedPanel running={running} setRunning={setRunning} />
-        <ImportPanel running={running} setRunning={setRunning} />
-      </div>
+      <ImportPanel />
     </>
   );
 }

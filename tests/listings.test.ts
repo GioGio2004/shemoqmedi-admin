@@ -182,7 +182,9 @@ describe("review and voting window", () => {
     const listing = await env.t.query(api.listings.getPublicBySlug, { slug });
     expect(listing).toMatchObject({ status: "awarded", awards: ["BSC", "SOTD"], finalScore: 8.6 });
     expect(await env.t.mutation(internal.listings.closeExpiredVoting, {})).toBe(0);
-    await expect(env.admin.mutation(api.listings.setEditorialScores, { id, scores: p(5) })).rejects.toThrow(/final/);
+    // Admins can still correct the jury score; awards stay as assigned.
+    await env.admin.mutation(api.listings.setEditorialScores, { id, scores: p(5) });
+    expect(await env.t.query(api.listings.getPublicBySlug, { slug })).toMatchObject({ finalScore: 5, awards: ["BSC", "SOTD"] });
   });
 
   it("closes without an award (archived) below 7.50", async () => {

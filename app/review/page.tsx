@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { AdminShell } from "@/components/admin/AdminShell";
-import { REVIEW_STATUSES, ReviewQueue, type ReviewStatus } from "@/components/admin/ReviewQueue";
+import { ReviewQueue } from "@/components/admin/ReviewQueue";
+import { REVIEW_STATUSES, type ListingStatus as ReviewStatus } from "@/components/admin/format";
 
 export const metadata: Metadata = { title: "Review | Shemoqmedi Admin" };
 

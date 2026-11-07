@@ -18,8 +18,6 @@ type Props = {
   communityVotesCount: number;
   finalScore: number | null;
   awards: AwardSlug[];
-  /** Scores are final once voting has closed. */
-  locked: boolean;
 };
 
 function toDraft(scores: Pillars | null): Record<PillarKey, string> {
@@ -31,40 +29,78 @@ function toDraft(scores: Pillars | null): Record<PillarKey, string> {
   };
 }
 
-/** Jury score editor (4 pillars, 1.0–10.0) plus the live score summary. */
+/**
+ * Jury score editor (4 pillars, 1.0–10.0) plus the live score summary.
+ * Editable at any status; after voting has closed the final score is
+ * recomputed but awards stay as they are (change those in Lifecycle).
+ */
 export function ScoreEditor(props: Props) {
   const save = useMutation(api.listings.setEditorialScores);
+  const clear = useMutation(api.admin.clearEditorialScores);
+  const resetVotes = useMutation(api.admin.resetVotes);
+
   const [draft, setDraft] = useState(() => toDraft(props.editorialScores));
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"save" | "clear" | "votes" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
   const parsed = PILLARS.map((p) => ({ key: p.key, value: Number(draft[p.key]) }));
   const valid = parsed.every(
     (p) => draft[p.key].trim() !== "" && Number.isFinite(p.value) && p.value >= 1 && p.value <= 10,
   );
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!valid || busy || props.locked) return;
-    setBusy(true);
+  async function run(kind: "save" | "clear" | "votes", action: () => Promise<string>) {
+    if (busy) return;
+    setBusy(kind);
     setError(null);
-    setSaved(false);
+    setMessage(null);
     try {
-      const scores = Object.fromEntries(parsed.map((p) => [p.key, p.value])) as Pillars;
-      await save({ id: props.id, scores });
-      setSaved(true);
+      setMessage(await action());
     } catch (err) {
       setError(errorMessage(err));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
+  }
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!valid) return;
+    const scores = Object.fromEntries(parsed.map((p) => [p.key, p.value])) as Pillars;
+    void run("save", async () => {
+      await save({ id: props.id, scores });
+      return "Jury score saved.";
+    });
+  }
+
+  function onClear() {
+    if (!confirm("Clear the jury score? The final score falls back to the community score.")) return;
+    void run("clear", async () => {
+      await clear({ id: props.id });
+      setDraft(toDraft(null));
+      return "Jury score cleared.";
+    });
+  }
+
+  function onResetVotes() {
+    const n = props.communityVotesCount;
+    if (
+      !confirm(
+        `Delete all community votes (${n} ${n === 1 ? "vote" : "votes"}) on this listing? This can't be undone.`,
+      )
+    ) {
+      return;
+    }
+    void run("votes", async () => {
+      const removed = await resetVotes({ id: props.id });
+      return `Removed ${removed} ${removed === 1 ? "vote" : "votes"}.`;
+    });
   }
 
   return (
     <section className="admin-panel" aria-labelledby="score-heading">
       <p id="score-heading" className="admin-eyebrow mb-5">
-        Jury score
+        Scores
       </p>
 
       <dl className="score-summary">
@@ -92,8 +128,8 @@ export function ScoreEditor(props: Props) {
       </dl>
 
       <form onSubmit={onSubmit} className="mt-6 grid gap-4">
-        <fieldset disabled={props.locked || busy} className="grid grid-cols-2 gap-3">
-          <legend className="sr-only">Jury pillars, 1.0 to 10.0</legend>
+        <fieldset disabled={busy !== null} className="grid grid-cols-2 gap-3">
+          <legend className="admin-eyebrow mb-3">Jury pillars, 1.0–10.0</legend>
           {PILLARS.map((p) => (
             <label key={p.key} className="grid gap-1.5">
               <span className="admin-eyebrow">{p.name}</span>
@@ -106,7 +142,7 @@ export function ScoreEditor(props: Props) {
                 required
                 value={draft[p.key]}
                 onChange={(e) => {
-                  setSaved(false);
+                  setMessage(null);
                   setDraft((d) => ({ ...d, [p.key]: e.target.value }));
                 }}
                 className="admin-input admin-mono"
@@ -120,24 +156,42 @@ export function ScoreEditor(props: Props) {
             {error}
           </p>
         )}
-        {props.locked ? (
-          <p className="text-xs text-black/55">Voting has closed. These scores are final.</p>
-        ) : (
-          <div className="flex flex-wrap items-center gap-3">
-            <button type="submit" className="admin-button" disabled={!valid || busy}>
-              {busy ? "Saving…" : "Save jury score"}
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="submit" className="admin-button" disabled={!valid || busy !== null}>
+            {busy === "save" ? "Saving…" : "Save jury score"}
+          </button>
+          {props.editorialScores && (
+            <button
+              type="button"
+              className="admin-button admin-button-secondary"
+              disabled={busy !== null}
+              onClick={onClear}
+            >
+              {busy === "clear" ? "Clearing…" : "Clear jury score"}
             </button>
-            {saved && (
-              <span role="status" className="text-xs text-black/55">
-                Saved.
-              </span>
-            )}
-          </div>
-        )}
+          )}
+        </div>
         <p className="text-xs leading-relaxed text-black/55">
-          Final = 0.6 × jury + 0.4 × community (jury only until someone votes).
+          Final = 0.6 × jury + 0.4 × community (jury only until someone votes). Changing scores after voting
+          closed updates the final score but not the awards.
         </p>
       </form>
+
+      <div className="mt-6 grid gap-3 border-t border-black/10 pt-6">
+        <button
+          type="button"
+          className="admin-button admin-button-secondary w-full"
+          disabled={busy !== null}
+          onClick={onResetVotes}
+        >
+          {busy === "votes" ? "Resetting…" : "Reset community votes"}
+        </button>
+        {message && (
+          <p role="status" className="text-xs text-black/55">
+            {message}
+          </p>
+        )}
+      </div>
     </section>
   );
 }

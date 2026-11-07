@@ -1,0 +1,592 @@
+// Full admin control: create listings by hand (own screenshots), edit every
+// field, override the lifecycle (status, voting window, awards), remove media,
+// and manage creators and user roles. Every function requires an admin.
+
+import { v } from "convex/values";
+import { internalMutation, mutation, query } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import { requireAdmin } from "./authHelpers";
+import { award, creatorTier, listingStatus, pillars, region } from "./schema";
+import { DAY_MS, LIMITS, VOTING_DAYS, isCategory, isTechnology } from "./lib/taxonomy";
+import { normalizePillars } from "./lib/scoring";
+import {
+  EMPTY_SCORES,
+  assertMedia,
+  cleanText,
+  deleteListing,
+  fail,
+  findOrCreateCreator,
+  normalizeUrl,
+  scoreFields,
+  slugify,
+  uniqueSlug,
+} from "./lib/listingHelpers";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+function checkTechnologies(technologies: string[]) {
+  const unique = [...new Set(technologies)];
+  if (unique.length > LIMITS.technologies) fail(`Choose up to ${LIMITS.technologies} technologies.`);
+  if (!unique.every(isTechnology)) fail("Unknown technology selected.");
+  return unique;
+}
+
+function checkPillars(scores: Doc<"listings">["editorialScores"]) {
+  if (!scores) return undefined;
+  try {
+    return normalizePillars(scores);
+  } catch (err) {
+    fail((err as Error).message);
+  }
+}
+
+async function assertUniqueUrl(
+  ctx: Parameters<typeof deleteListing>[0],
+  url: string,
+  except?: Id<"listings">,
+) {
+  const rows = await ctx.db
+    .query("listings")
+    .withIndex("by_url", (q) => q.eq("url", url))
+    .collect();
+  if (rows.some((r) => r._id !== except && r.status !== "rejected")) {
+    fail("Another listing already uses this website URL.");
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Listings
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Create a listing by hand with your own screenshots, in any lifecycle state. */
+export const createListing = mutation({
+  args: {
+    title: v.string(),
+    tagline: v.string(),
+    url: v.string(),
+    category: v.string(),
+    technologies: v.array(v.string()),
+    region,
+    creatorTier,
+    creditName: v.string(),
+    creditUrl: v.optional(v.string()),
+    coverId: v.id("_storage"),
+    mobileId: v.optional(v.id("_storage")),
+    videoId: v.optional(v.id("_storage")),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("in_voting"),
+      v.literal("awarded"),
+      v.literal("archived"),
+    ),
+    votingEndsAt: v.optional(v.number()), // in_voting: when voting closes (default now + 7 days)
+    editorialScores: v.optional(pillars),
+    awards: v.optional(v.array(award)), // awarded: at least one
+    isClaimed: v.boolean(),
+  },
+  returns: v.object({ id: v.id("listings"), slug: v.string() }),
+  handler: async (ctx, args) => {
+    const admin = await requireAdmin(ctx);
+    const title = cleanText(args.title, "Site title", LIMITS.title);
+    const tagline = cleanText(args.tagline, "Short description", LIMITS.tagline, false);
+    const creditName = cleanText(args.creditName, "Made by", LIMITS.creditName);
+    const url = normalizeUrl(args.url);
+    const creditUrl = args.creditUrl?.trim() ? normalizeUrl(args.creditUrl, "Creator website") : undefined;
+    if (!isCategory(args.category)) fail("Choose a category.");
+    const technologies = checkTechnologies(args.technologies);
+    const editorialScores = checkPillars(args.editorialScores);
+    const awards = [...new Set(args.awards ?? [])];
+    if (args.status === "awarded" && awards.length === 0) fail("Pick at least one award for an awarded site.");
+
+    await assertMedia(ctx, args.coverId, "Desktop screenshot", "image");
+    if (args.mobileId) await assertMedia(ctx, args.mobileId, "Mobile screenshot", "image");
+    if (args.videoId) await assertMedia(ctx, args.videoId, "Preview video", "video");
+    await assertUniqueUrl(ctx, url);
+
+    const creatorId = await findOrCreateCreator(ctx, {
+      name: creditName,
+      tier: args.creatorTier,
+      region: args.region,
+      website: creditUrl,
+    });
+
+    const now = Date.now();
+    let publishedAt: number | undefined;
+    let votingEndsAt: number | undefined;
+    if (args.status === "in_voting") {
+      votingEndsAt = args.votingEndsAt ?? now + VOTING_DAYS * DAY_MS;
+      if (votingEndsAt <= now) fail("The voting end date must be in the future.");
+      publishedAt = Math.min(now, votingEndsAt - VOTING_DAYS * DAY_MS);
+    } else if (args.status === "awarded" || args.status === "archived") {
+      votingEndsAt = Math.min(args.votingEndsAt ?? now, now);
+      publishedAt = votingEndsAt - VOTING_DAYS * DAY_MS;
+    }
+
+    const slug = await uniqueSlug(ctx, "listings", slugify(title));
+    const id = await ctx.db.insert("listings", {
+      creatorId,
+      source: "import",
+      submissionTier: "standard",
+      slug,
+      title,
+      tagline,
+      url,
+      category: args.category,
+      technologies,
+      region: args.region,
+      creatorTier: args.creatorTier,
+      creditName,
+      creditUrl,
+      coverId: args.coverId,
+      mobileId: args.mobileId,
+      videoId: args.videoId,
+      status: args.status,
+      reviewedBy: args.status === "pending" ? undefined : admin._id,
+      reviewedAt: args.status === "pending" ? undefined : now,
+      publishedAt,
+      votingEndsAt,
+      ...EMPTY_SCORES,
+      editorialScores,
+      ...scoreFields(editorialScores, EMPTY_SCORES.communityTotals, 0),
+      awards: args.status === "awarded" ? awards : [],
+      awardedAt: args.status === "awarded" ? votingEndsAt : undefined,
+      isClaimed: args.isClaimed,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { id, slug };
+  },
+});
+
+/** Edit any descriptive field. Changing "Made by" relinks the creator profile. */
+export const updateListing = mutation({
+  args: {
+    id: v.id("listings"),
+    title: v.optional(v.string()),
+    slug: v.optional(v.string()),
+    tagline: v.optional(v.string()),
+    url: v.optional(v.string()),
+    category: v.optional(v.string()),
+    technologies: v.optional(v.array(v.string())),
+    region: v.optional(region),
+    creatorTier: v.optional(creatorTier),
+    creditName: v.optional(v.string()),
+    creditUrl: v.optional(v.string()), // "" clears it
+    isClaimed: v.optional(v.boolean()),
+  },
+  returns: v.object({ slug: v.string() }),
+  handler: async (ctx, { id, ...args }) => {
+    await requireAdmin(ctx);
+    const listing = await ctx.db.get(id);
+    if (!listing) fail("Listing not found.");
+    const patch: Partial<Doc<"listings">> = {};
+
+    if (args.title !== undefined) patch.title = cleanText(args.title, "Site title", LIMITS.title);
+    if (args.tagline !== undefined) patch.tagline = cleanText(args.tagline, "Short description", LIMITS.tagline, false);
+    if (args.url !== undefined) {
+      patch.url = normalizeUrl(args.url);
+      if (patch.url !== listing.url) await assertUniqueUrl(ctx, patch.url, id);
+    }
+    if (args.slug !== undefined) {
+      const wanted = slugify(args.slug, "");
+      if (!wanted) fail("The page address can only use letters, numbers and dashes.");
+      if (wanted !== listing.slug) {
+        const taken = await ctx.db
+          .query("listings")
+          .withIndex("by_slug", (q) => q.eq("slug", wanted))
+          .first();
+        if (taken) fail(`/sites/${wanted} is already taken.`);
+        patch.slug = wanted;
+      }
+    }
+    if (args.category !== undefined) {
+      if (!isCategory(args.category)) fail("Choose a category.");
+      patch.category = args.category;
+    }
+    if (args.technologies !== undefined) patch.technologies = checkTechnologies(args.technologies);
+    if (args.region !== undefined) patch.region = args.region;
+    if (args.creatorTier !== undefined) patch.creatorTier = args.creatorTier;
+    if (args.creditUrl !== undefined) {
+      patch.creditUrl = args.creditUrl.trim() ? normalizeUrl(args.creditUrl, "Creator website") : undefined;
+    }
+    if (args.isClaimed !== undefined) patch.isClaimed = args.isClaimed;
+    if (args.creditName !== undefined) {
+      const creditName = cleanText(args.creditName, "Made by", LIMITS.creditName);
+      if (creditName !== listing.creditName) {
+        patch.creditName = creditName;
+        patch.creatorId = await findOrCreateCreator(ctx, {
+          name: creditName,
+          tier: patch.creatorTier ?? listing.creatorTier,
+          region: patch.region ?? listing.region,
+          website: "creditUrl" in patch ? patch.creditUrl : listing.creditUrl,
+        });
+      }
+    }
+
+    await ctx.db.patch(id, { ...patch, updatedAt: Date.now() });
+    return { slug: patch.slug ?? listing.slug };
+  },
+});
+
+/**
+ * Lifecycle override: move a listing to any status and set its voting window
+ * and awards by hand. Scores are kept; the final score is recomputed.
+ */
+export const setLifecycle = mutation({
+  args: {
+    id: v.id("listings"),
+    status: listingStatus,
+    votingEndsAt: v.optional(v.number()),
+    awards: v.optional(v.array(award)),
+    note: v.optional(v.string()), // reason shown to the owner when rejected
+  },
+  returns: v.null(),
+  handler: async (ctx, { id, status, votingEndsAt, awards, note }) => {
+    const admin = await requireAdmin(ctx);
+    const listing = await ctx.db.get(id);
+    if (!listing) fail("Listing not found.");
+    const now = Date.now();
+    const scores = scoreFields(listing.editorialScores, listing.communityTotals, listing.communityVotesCount);
+    const base = { status, reviewedBy: admin._id, reviewedAt: now, updatedAt: now, ...scores };
+
+    switch (status) {
+      case "in_voting": {
+        const ends = votingEndsAt ?? now + VOTING_DAYS * DAY_MS;
+        if (ends <= now) fail("The voting end date must be in the future.");
+        const keepStart = listing.status === "in_voting" && listing.publishedAt !== undefined;
+        await ctx.db.patch(id, {
+          ...base,
+          votingEndsAt: ends,
+          publishedAt: keepStart ? listing.publishedAt : Math.min(now, ends - VOTING_DAYS * DAY_MS),
+          awards: [],
+          awardedAt: undefined,
+          reviewNote: undefined,
+        });
+        break;
+      }
+      case "awarded": {
+        const picked = [...new Set(awards ?? listing.awards)];
+        if (picked.length === 0) fail("Pick at least one award.");
+        const ends = Math.min(listing.votingEndsAt ?? now, now);
+        await ctx.db.patch(id, {
+          ...base,
+          awards: picked,
+          votingEndsAt: ends,
+          publishedAt: listing.publishedAt ?? ends - VOTING_DAYS * DAY_MS,
+          awardedAt: listing.awardedAt ?? now,
+          reviewNote: undefined,
+        });
+        break;
+      }
+      case "archived": {
+        const ends = Math.min(listing.votingEndsAt ?? now, now);
+        await ctx.db.patch(id, {
+          ...base,
+          awards: [],
+          awardedAt: undefined,
+          votingEndsAt: ends,
+          publishedAt: listing.publishedAt ?? ends - VOTING_DAYS * DAY_MS,
+          reviewNote: undefined,
+        });
+        break;
+      }
+      case "rejected": {
+        const reviewNote = cleanText(note ?? "", "Reason", LIMITS.reviewNote);
+        await ctx.db.patch(id, { ...base, reviewNote });
+        break;
+      }
+      case "pending": {
+        await ctx.db.patch(id, { ...base, reviewNote: undefined, awards: [], awardedAt: undefined });
+        break;
+      }
+    }
+    return null;
+  },
+});
+
+/** Remove the jury score entirely (back to "not scored"). */
+export const clearEditorialScores = mutation({
+  args: { id: v.id("listings") },
+  returns: v.null(),
+  handler: async (ctx, { id }) => {
+    await requireAdmin(ctx);
+    const listing = await ctx.db.get(id);
+    if (!listing) fail("Listing not found.");
+    await ctx.db.patch(id, {
+      editorialScores: undefined,
+      ...scoreFields(undefined, listing.communityTotals, listing.communityVotesCount),
+      updatedAt: Date.now(),
+    });
+    return null;
+  },
+});
+
+/** Remove the mobile screenshot or the preview video (the desktop one is required). */
+export const removeMedia = mutation({
+  args: { id: v.id("listings"), kind: v.union(v.literal("mobile"), v.literal("video")) },
+  returns: v.null(),
+  handler: async (ctx, { id, kind }) => {
+    await requireAdmin(ctx);
+    const listing = await ctx.db.get(id);
+    if (!listing) fail("Listing not found.");
+    const field = kind === "mobile" ? "mobileId" : "videoId";
+    const current = listing[field];
+    if (!current) return null;
+    await ctx.db.patch(id, { [field]: undefined, updatedAt: Date.now() });
+    await ctx.storage.delete(current);
+    return null;
+  },
+});
+
+/** Wipe the community votes on a listing (e.g. after detecting abuse). */
+export const resetVotes = mutation({
+  args: { id: v.id("listings") },
+  returns: v.number(),
+  handler: async (ctx, { id }) => {
+    await requireAdmin(ctx);
+    const listing = await ctx.db.get(id);
+    if (!listing) fail("Listing not found.");
+    const votes = await ctx.db
+      .query("votes")
+      .withIndex("by_listing", (q) => q.eq("listingId", id))
+      .collect();
+    for (const vote of votes) await ctx.db.delete(vote._id);
+    await ctx.db.patch(id, {
+      communityTotals: EMPTY_SCORES.communityTotals,
+      communityVotesCount: 0,
+      ...scoreFields(listing.editorialScores, EMPTY_SCORES.communityTotals, 0),
+      updatedAt: Date.now(),
+    });
+    return votes.length;
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Creators
+// ─────────────────────────────────────────────────────────────────────────────
+
+const adminCreator = v.object({
+  id: v.id("creators"),
+  slug: v.string(),
+  name: v.string(),
+  tier: creatorTier,
+  region,
+  location: v.union(v.string(), v.null()),
+  website: v.union(v.string(), v.null()),
+  bio: v.union(v.string(), v.null()),
+  isClaimed: v.boolean(),
+  claimedBy: v.union(v.object({ name: v.string(), email: v.string() }), v.null()),
+  listings: v.number(),
+  createdAt: v.number(),
+});
+
+export const listCreators = query({
+  args: {},
+  returns: v.array(adminCreator),
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const creators = await ctx.db.query("creators").order("desc").take(1000);
+    return Promise.all(
+      creators.map(async (c) => {
+        const listings = await ctx.db
+          .query("listings")
+          .withIndex("by_creator", (q) => q.eq("creatorId", c._id))
+          .take(1000);
+        const owner = c.claimedBy ? await ctx.db.get(c.claimedBy) : null;
+        return {
+          id: c._id,
+          slug: c.slug,
+          name: c.name,
+          tier: c.tier,
+          region: c.region,
+          location: c.location ?? null,
+          website: c.website ?? null,
+          bio: c.bio ?? null,
+          isClaimed: c.isClaimed,
+          claimedBy: owner ? { name: owner.name, email: owner.email } : null,
+          listings: listings.length,
+          createdAt: c.createdAt,
+        };
+      }),
+    );
+  },
+});
+
+/** Edit a creator profile. Renaming also updates "Made by" on their listings. */
+export const updateCreator = mutation({
+  args: {
+    id: v.id("creators"),
+    name: v.optional(v.string()),
+    slug: v.optional(v.string()),
+    tier: v.optional(creatorTier),
+    region: v.optional(region),
+    location: v.optional(v.string()), // "" clears
+    website: v.optional(v.string()), // "" clears
+    bio: v.optional(v.string()), // "" clears
+    isClaimed: v.optional(v.boolean()),
+  },
+  returns: v.object({ slug: v.string() }),
+  handler: async (ctx, { id, ...args }) => {
+    await requireAdmin(ctx);
+    const creator = await ctx.db.get(id);
+    if (!creator) fail("Creator not found.");
+    const patch: Partial<Doc<"creators">> = {};
+    if (args.name !== undefined) patch.name = cleanText(args.name, "Name", LIMITS.creditName);
+    if (args.slug !== undefined) {
+      const wanted = slugify(args.slug, "");
+      if (!wanted) fail("The profile address can only use letters, numbers and dashes.");
+      if (wanted !== creator.slug) {
+        const taken = await ctx.db
+          .query("creators")
+          .withIndex("by_slug", (q) => q.eq("slug", wanted))
+          .first();
+        if (taken) fail(`/creators/${wanted} is already taken.`);
+        patch.slug = wanted;
+      }
+    }
+    if (args.tier !== undefined) patch.tier = args.tier;
+    if (args.region !== undefined) patch.region = args.region;
+    if (args.location !== undefined) patch.location = cleanText(args.location, "Location", 80, false) || undefined;
+    if (args.website !== undefined) patch.website = args.website.trim() ? normalizeUrl(args.website, "Website") : undefined;
+    if (args.bio !== undefined) patch.bio = cleanText(args.bio, "Bio", 600, false) || undefined;
+    if (args.isClaimed !== undefined) {
+      patch.isClaimed = args.isClaimed;
+      if (!args.isClaimed) patch.claimedBy = undefined;
+    }
+    const now = Date.now();
+    await ctx.db.patch(id, { ...patch, updatedAt: now });
+
+    if (patch.name && patch.name !== creator.name) {
+      const listings = await ctx.db
+        .query("listings")
+        .withIndex("by_creator", (q) => q.eq("creatorId", id))
+        .take(1000);
+      for (const l of listings) await ctx.db.patch(l._id, { creditName: patch.name, updatedAt: now });
+    }
+    return { slug: patch.slug ?? creator.slug };
+  },
+});
+
+/** Delete a creator profile that no listing uses any more. */
+export const deleteCreator = mutation({
+  args: { id: v.id("creators") },
+  returns: v.null(),
+  handler: async (ctx, { id }) => {
+    await requireAdmin(ctx);
+    const used = await ctx.db
+      .query("listings")
+      .withIndex("by_creator", (q) => q.eq("creatorId", id))
+      .first();
+    if (used) fail("This creator still has listings. Move or delete them first.");
+    const claims = await ctx.db
+      .query("claims")
+      .withIndex("by_creator", (q) => q.eq("creatorId", id))
+      .collect();
+    for (const c of claims) await ctx.db.delete(c._id);
+    await ctx.db.delete(id);
+    return null;
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Users and roles
+// ─────────────────────────────────────────────────────────────────────────────
+
+const roleValue = v.union(v.literal("admin"), v.literal("super_admin"), v.null());
+
+export const listUsers = query({
+  args: {},
+  returns: v.array(
+    v.object({
+      id: v.id("users"),
+      name: v.string(),
+      email: v.string(),
+      role: roleValue,
+      listings: v.number(),
+      votes: v.number(),
+      createdAt: v.number(),
+      isYou: v.boolean(),
+    }),
+  ),
+  handler: async (ctx) => {
+    const me = await requireAdmin(ctx);
+    const users = await ctx.db.query("users").order("desc").take(1000);
+    return Promise.all(
+      users.map(async (u) => ({
+        id: u._id,
+        name: u.name,
+        email: u.email,
+        role: u.role ?? null,
+        listings: (
+          await ctx.db
+            .query("listings")
+            .withIndex("by_owner", (q) => q.eq("ownerId", u._id))
+            .take(1000)
+        ).length,
+        votes: (
+          await ctx.db
+            .query("votes")
+            .withIndex("by_user", (q) => q.eq("userId", u._id))
+            .take(1000)
+        ).length,
+        createdAt: u.createdAt,
+        isYou: u._id === me._id,
+      })),
+    );
+  },
+});
+
+/**
+ * Grant or remove admin. Only a super admin can create or remove another
+ * super admin, and nobody can change their own role (so the panel never locks out).
+ */
+export const setUserRole = mutation({
+  args: { userId: v.id("users"), role: roleValue },
+  returns: v.null(),
+  handler: async (ctx, { userId, role }) => {
+    const me = await requireAdmin(ctx);
+    const target = await ctx.db.get(userId);
+    if (!target) fail("User not found.");
+    if (target._id === me._id) fail("You can't change your own role.");
+    if ((role === "super_admin" || target.role === "super_admin") && me.role !== "super_admin") {
+      fail("Only a super admin can grant or remove super admin.");
+    }
+    await ctx.db.patch(userId, { role: role ?? undefined, updatedAt: Date.now() });
+    return null;
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLI only
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Delete every listing (with its screenshots, votes and claims) and every
+ * creator profile. CLI only:  npx convex run admin:wipeShowcase '{"confirm":"DELETE"}'
+ * Works in batches; repeat until it returns done: true.
+ */
+export const wipeShowcase = internalMutation({
+  args: { confirm: v.literal("DELETE") },
+  returns: v.object({ listings: v.number(), creators: v.number(), done: v.boolean() }),
+  handler: async (ctx) => {
+    const listings = await ctx.db.query("listings").take(50);
+    for (const l of listings) await deleteListing(ctx, l);
+    let creators = 0;
+    if (listings.length < 50) {
+      const rows = await ctx.db.query("creators").take(200);
+      for (const c of rows) {
+        const claims = await ctx.db
+          .query("claims")
+          .withIndex("by_creator", (q) => q.eq("creatorId", c._id))
+          .collect();
+        for (const claim of claims) await ctx.db.delete(claim._id);
+        await ctx.db.delete(c._id);
+        creators++;
+      }
+    }
+    const remaining = (await ctx.db.query("listings").first()) ?? (await ctx.db.query("creators").first());
+    return { listings: listings.length, creators, done: remaining === null };
+  },
+});

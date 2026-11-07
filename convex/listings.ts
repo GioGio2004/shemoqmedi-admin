@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { creatorTier, listingStatus, pillars, region } from "./schema";
@@ -280,6 +280,7 @@ const reviewListing = v.object({
   reviewedAt: v.union(v.number(), v.null()),
   publishedAt: v.union(v.number(), v.null()),
   votingEndsAt: v.union(v.number(), v.null()),
+  awardedAt: v.union(v.number(), v.null()),
   editorialScores: v.union(pillars, v.null()),
   communityVotesCount: v.number(),
   editorialAverage: v.union(v.number(), v.null()),
@@ -317,6 +318,7 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
     reviewedAt: listing.reviewedAt ?? null,
     publishedAt: listing.publishedAt ?? null,
     votingEndsAt: listing.votingEndsAt ?? null,
+    awardedAt: listing.awardedAt ?? null,
     editorialScores: listing.editorialScores ?? null,
     communityVotesCount: listing.communityVotesCount,
     editorialAverage: listing.editorialAverage ?? null,
@@ -383,7 +385,11 @@ export const reviewDetail = query({
   },
 });
 
-/** Jury (editorial) scores, 1.0–10.0 per pillar. Allowed until voting closes. */
+/**
+ * Jury (editorial) scores, 1.0–10.0 per pillar. Admins may edit them at any
+ * stage; after voting has closed the final score is recomputed but awards are
+ * left alone (change those with admin.setLifecycle).
+ */
 export const setEditorialScores = mutation({
   args: { id: v.id("listings"), scores: pillars },
   returns: v.null(),
@@ -391,9 +397,6 @@ export const setEditorialScores = mutation({
     await requireAdmin(ctx);
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
-    if (listing.status === "awarded" || listing.status === "archived") {
-      fail("Voting has closed for this site; its scores are final.");
-    }
     let editorial;
     try {
       editorial = normalizePillars(scores);
@@ -428,6 +431,8 @@ export const approve = mutation({
       reviewedAt: now,
       publishedAt: now,
       votingEndsAt: now + VOTING_DAYS * DAY_MS,
+      awards: [],
+      awardedAt: undefined,
       updatedAt: now,
     });
     return null;
@@ -478,6 +483,71 @@ export const remove = mutation({
     if (!listing) fail("Listing not found.");
     await deleteListing(ctx, listing);
     return null;
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Media replacement (bad automatic screenshots, better images from the owner)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const mediaKind = v.union(v.literal("cover"), v.literal("mobile"), v.literal("video"));
+
+async function swapMedia(
+  ctx: Parameters<typeof deleteListing>[0],
+  listing: Doc<"listings">,
+  kind: "cover" | "mobile" | "video",
+  storageId: Doc<"listings">["coverId"],
+) {
+  const label = kind === "cover" ? "Desktop screenshot" : kind === "mobile" ? "Mobile screenshot" : "Preview video";
+  await assertMedia(ctx, storageId, label, kind === "video" ? "video" : "image");
+  const field = kind === "cover" ? "coverId" : kind === "mobile" ? "mobileId" : "videoId";
+  const previous = listing[field];
+  await ctx.db.patch(listing._id, { [field]: storageId, updatedAt: Date.now() });
+  if (previous && previous !== storageId) await ctx.storage.delete(previous);
+}
+
+/** Admin: replace a listing's desktop screenshot, mobile screenshot or video. */
+export const replaceMedia = mutation({
+  args: { id: v.id("listings"), kind: mediaKind, storageId: v.id("_storage") },
+  returns: v.null(),
+  handler: async (ctx, { id, kind, storageId }) => {
+    await requireAdmin(ctx);
+    const listing = await ctx.db.get(id);
+    if (!listing) fail("Listing not found.");
+    await swapMedia(ctx, listing, kind, storageId);
+    return null;
+  },
+});
+
+/** CLI only (scripts/capture-screens.mjs): an upload URL without a user session. */
+export const uploadUrlInternal = internalMutation({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => ctx.storage.generateUploadUrl(),
+});
+
+/** CLI only (scripts/capture-screens.mjs): set a listing's cover by slug. */
+export const replaceCoverBySlug = internalMutation({
+  args: { slug: v.string(), storageId: v.id("_storage") },
+  returns: v.null(),
+  handler: async (ctx, { slug, storageId }) => {
+    const listing = await ctx.db
+      .query("listings")
+      .withIndex("by_slug", (q) => q.eq("slug", slug))
+      .first();
+    if (!listing) fail(`No listing with slug ${slug}.`);
+    await swapMedia(ctx, listing, "cover", storageId);
+    return null;
+  },
+});
+
+/** CLI only: slug + url of every listing (for the capture script). */
+export const allForCapture = internalQuery({
+  args: {},
+  returns: v.array(v.object({ slug: v.string(), url: v.string(), status: listingStatus })),
+  handler: async (ctx) => {
+    const rows = await ctx.db.query("listings").take(1000);
+    return rows.map((r) => ({ slug: r.slug, url: r.url, status: r.status }));
   },
 });
 

@@ -119,7 +119,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_listing_user", ["listingId", "userId"])
-    .index("by_listing", ["listingId"]),
+    .index("by_listing", ["listingId"])
+    .index("by_user", ["userId"]),
 
   // "This is mine" requests for unclaimed listings and creator profiles.
   claims: defineTable({

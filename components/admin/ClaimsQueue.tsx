@@ -6,10 +6,7 @@ import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
 import { formatDate, storefrontSiteUrl } from "@/lib/storefront";
-import { errorMessage, safeHref, shortUrl, storefrontCreatorUrl } from "./format";
-
-export type ClaimStatus = "pending" | "approved" | "rejected";
-export const CLAIM_STATUSES: ClaimStatus[] = ["pending", "approved", "rejected"];
+import { errorMessage, safeHref, shortUrl, storefrontCreatorUrl, type ClaimStatus } from "./format";
 
 type Claim = FunctionReturnType<typeof api.claims.queue>[number];
 

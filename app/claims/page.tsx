@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { AdminShell } from "@/components/admin/AdminShell";
-import { CLAIM_STATUSES, ClaimsQueue, type ClaimStatus } from "@/components/admin/ClaimsQueue";
+import { ClaimsQueue } from "@/components/admin/ClaimsQueue";
+import { CLAIM_STATUSES, type ClaimStatus } from "@/components/admin/format";
 
 export const metadata: Metadata = { title: "Claims | Shemoqmedi Admin" };
 

@@ -2,7 +2,14 @@ import { ConvexError } from "convex/values";
 import { AWARDS, CREATOR_TIERS, REGIONS } from "@/convex/lib/taxonomy";
 import { STOREFRONT_URL } from "@/lib/storefront";
 
+// Status lists live here (not in the "use client" components) because server
+// pages need them too: a value imported from a client module is only a client
+// reference on the server, not the real array.
 export type ListingStatus = "pending" | "in_voting" | "awarded" | "archived" | "rejected";
+export const REVIEW_STATUSES: ListingStatus[] = ["pending", "in_voting", "awarded", "archived", "rejected"];
+
+export type ClaimStatus = "pending" | "approved" | "rejected";
+export const CLAIM_STATUSES: ClaimStatus[] = ["pending", "approved", "rejected"];
 export type ListingSource = "submission" | "import" | "seed";
 export type AwardSlug = (typeof AWARDS)[number]["slug"];
 
