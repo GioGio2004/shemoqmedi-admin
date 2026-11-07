@@ -173,3 +173,55 @@ describe("admin: creators and users", () => {
     expect(await env.t.query(api.listings.listPublic, {})).toEqual([]);
   });
 });
+
+describe("admin: screenshots", () => {
+  const img = (env: Env) => env.t.run((ctx) => ctx.storage.store(new Blob(["img"], { type: "image/png" })));
+
+  it("creates with up to 4 more screenshots and rejects a 5th", async () => {
+    const env = await setup();
+    const four = [await img(env), await img(env), await img(env), await img(env)];
+    const { slug } = await create(env, { galleryIds: four });
+    const pub = await env.t.query(api.listings.getPublicBySlug, { slug });
+    expect(pub!.galleryUrls).toHaveLength(4);
+    await expect(
+      create(env, { url: "https://other.example", galleryIds: [...four, await img(env)] }),
+    ).rejects.toThrow(/up to 4 more/);
+  });
+
+  it("adds, reorders, promotes to cover and removes", async () => {
+    const env = await setup();
+    const { id } = await create(env);
+    const a = await img(env);
+    const b = await img(env);
+    await env.owner.mutation(api.listings.addGalleryImage, { id, storageId: a });
+    await env.owner.mutation(api.listings.addGalleryImage, { id, storageId: b });
+    await env.owner.mutation(api.listings.setGalleryOrder, { id, galleryIds: [b, a] });
+    let row = await env.t.run((ctx) => ctx.db.get(id));
+    expect(row!.galleryIds).toEqual([b, a]);
+
+    const oldCover = row!.coverId;
+    await env.owner.mutation(api.listings.makeGalleryCover, { id, storageId: a });
+    row = await env.t.run((ctx) => ctx.db.get(id));
+    expect(row!.coverId).toBe(a);
+    expect(row!.galleryIds).toEqual([b, oldCover]);
+
+    await env.owner.mutation(api.listings.removeGalleryImage, { id, storageId: b });
+    row = await env.t.run((ctx) => ctx.db.get(id));
+    expect(row!.galleryIds).toEqual([oldCover]);
+    expect(await env.t.run((ctx) => ctx.storage.getUrl(b))).toBeNull();
+
+    await expect(
+      env.member.mutation(api.listings.addGalleryImage, { id, storageId: await img(env) }),
+    ).rejects.toThrow(/admin/);
+  });
+
+  it("rejects a reorder that is not the same set", async () => {
+    const env = await setup();
+    const { id } = await create(env);
+    const a = await img(env);
+    await env.owner.mutation(api.listings.addGalleryImage, { id, storageId: a });
+    await expect(
+      env.owner.mutation(api.listings.setGalleryOrder, { id, galleryIds: [a, a] }),
+    ).rejects.toThrow(/changed/);
+  });
+});

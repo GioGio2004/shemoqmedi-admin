@@ -23,7 +23,7 @@ import {
   type RegionSlug,
   type TechnologyName,
 } from "@/convex/lib/taxonomy";
-import { MediaPicker, useStorageUpload } from "./MediaUpload";
+import { MediaPicker, MultiImagePicker, useStorageUpload } from "./MediaUpload";
 import { errorMessage, score } from "./format";
 import { Select } from "./Select";
 
@@ -85,7 +85,8 @@ export function ListingCreateForm() {
   const [isClaimed, setIsClaimed] = useState(false);
 
   const [cover, setCover] = useState<MediaState>(NO_MEDIA);
-  const [mobile, setMobile] = useState<MediaState>(NO_MEDIA);
+  const [extras, setExtras] = useState<File[]>([]);
+  const [extrasError, setExtrasError] = useState<string | null>(null);
   const [video, setVideo] = useState<MediaState>(NO_MEDIA);
 
   const [status, setStatus] = useState<CreateStatus>("pending");
@@ -124,8 +125,8 @@ export function ListingCreateForm() {
     if (!url.trim()) return "Add the live URL.";
     if (!category) return "Choose a category.";
     if (!creditName.trim()) return "Add who made the site.";
-    if (!cover.file) return "Add a desktop screenshot.";
-    const fileError = cover.error ?? mobile.error ?? video.error;
+    if (!cover.file) return "Add the cover screenshot.";
+    const fileError = cover.error ?? video.error;
     if (fileError) return fileError;
     if (status === "in_voting") {
       const ends = fromLocalInput(votingEnds);
@@ -156,9 +157,9 @@ export function ListingCreateForm() {
     try {
       setPhase("uploading");
       const coverId = await upload(cover.file as File);
-      let mobileId: Id<"_storage"> | undefined;
+      const galleryIds: Id<"_storage">[] = [];
+      for (const file of extras) galleryIds.push(await upload(file));
       let videoId: Id<"_storage"> | undefined;
-      if (mobile.file) mobileId = await upload(mobile.file);
       if (video.file) videoId = await upload(video.file);
 
       let votingEndsAt: number | undefined;
@@ -181,7 +182,7 @@ export function ListingCreateForm() {
         creditName: creditName.trim(),
         creditUrl: creditUrl.trim() || undefined,
         coverId,
-        mobileId,
+        galleryIds: galleryIds.length ? galleryIds : undefined,
         videoId,
         status,
         votingEndsAt,
@@ -502,8 +503,8 @@ export function ListingCreateForm() {
             <div className="grid gap-2">
               <MediaPicker
                 id="cover"
-                label="Desktop screenshot"
-                hint="1920×1080 (16:9) recommended, PNG/JPG/WebP ≤ 5 MB"
+                label="Screenshot 1 · cover"
+                hint="1920×1080 (16:9), or a full-page screenshot that scrolls in the home slider. PNG/JPG/WebP ≤ 5 MB"
                 kind="image"
                 aspect="16 / 9"
                 file={cover.file}
@@ -513,18 +514,18 @@ export function ListingCreateForm() {
             </div>
 
             <div className="grid gap-2">
-              <div className="w-full max-w-[200px]">
-                <MediaPicker
-                  id="mobile"
-                  label="Mobile screenshot (optional)"
-                  hint="PNG/JPG/WebP ≤ 5 MB"
-                  kind="image"
-                  aspect="9 / 19.5"
-                  file={mobile.file}
-                  onChange={(file, err) => setMobile({ file, error: err })}
-                />
-              </div>
-              {mobile.error && <p role="alert" className="text-xs font-medium">{mobile.error}</p>}
+              <MultiImagePicker
+                id="extras"
+                label="More screenshots (optional)"
+                hint={`Up to ${LIMITS.gallery} more, shown after the cover. 16:9 works best. PNG/JPG/WebP ≤ 5 MB each`}
+                files={extras}
+                max={LIMITS.gallery}
+                onChange={(files, err) => {
+                  setExtras(files);
+                  setExtrasError(err);
+                }}
+              />
+              {extrasError && <p role="alert" className="text-xs font-medium">{extrasError}</p>}
             </div>
 
             <div className="grid gap-2">

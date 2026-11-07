@@ -9,6 +9,7 @@ import {
   EMPTY_SCORES,
   PUBLIC_STATUSES,
   assertMedia,
+  checkGallery,
   categoryName,
   cleanText,
   deleteListing,
@@ -106,7 +107,7 @@ export const submit = mutation({
     creditUrl: v.optional(v.string()),
     submissionTier: v.union(v.literal("standard"), v.literal("express")),
     coverId: v.id("_storage"),
-    mobileId: v.optional(v.id("_storage")),
+    galleryIds: v.optional(v.array(v.id("_storage"))),
     videoId: v.optional(v.id("_storage")),
   },
   returns: v.object({ slug: v.string() }),
@@ -132,8 +133,8 @@ export const submit = mutation({
     }
     if (!technologies.every(isTechnology)) fail("Unknown technology selected.");
 
-    await assertMedia(ctx, args.coverId, "Desktop screenshot", "image");
-    if (args.mobileId) await assertMedia(ctx, args.mobileId, "Mobile screenshot", "image");
+    await assertMedia(ctx, args.coverId, "Cover screenshot", "image");
+    const galleryIds = await checkGallery(ctx, args.galleryIds);
     if (args.videoId) await assertMedia(ctx, args.videoId, "Preview video", "video");
 
     const mine = await ctx.db
@@ -180,7 +181,7 @@ export const submit = mutation({
       creditName,
       creditUrl,
       coverId: args.coverId,
-      mobileId: args.mobileId,
+      galleryIds,
       videoId: args.videoId,
       status: "pending",
       ...EMPTY_SCORES,
@@ -290,7 +291,9 @@ const reviewListing = v.object({
   isClaimed: v.boolean(),
   createdAt: v.number(),
   coverUrl: v.union(v.string(), v.null()),
-  mobileUrl: v.union(v.string(), v.null()),
+  galleryUrls: v.array(v.string()),
+  /** Extra screenshots with their ids, in order (for the admin media panel). */
+  gallery: v.array(v.object({ id: v.id("_storage"), url: v.union(v.string(), v.null()) })),
   videoUrl: v.union(v.string(), v.null()),
   submitter: v.union(v.object({ name: v.string(), email: v.string() }), v.null()),
 });
@@ -328,6 +331,9 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
     isClaimed: listing.isClaimed,
     createdAt: listing.createdAt,
     ...(await mediaUrls(ctx, listing)),
+    gallery: await Promise.all(
+      (listing.galleryIds ?? []).map(async (id) => ({ id, url: await ctx.storage.getUrl(id) })),
+    ),
     submitter: owner ? { name: owner.name, email: owner.email } : null,
   };
 }
@@ -490,23 +496,23 @@ export const remove = mutation({
 // Media replacement (bad automatic screenshots, better images from the owner)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const mediaKind = v.union(v.literal("cover"), v.literal("mobile"), v.literal("video"));
+const mediaKind = v.union(v.literal("cover"), v.literal("video"));
 
 async function swapMedia(
   ctx: Parameters<typeof deleteListing>[0],
   listing: Doc<"listings">,
-  kind: "cover" | "mobile" | "video",
+  kind: "cover" | "video",
   storageId: Doc<"listings">["coverId"],
 ) {
-  const label = kind === "cover" ? "Desktop screenshot" : kind === "mobile" ? "Mobile screenshot" : "Preview video";
+  const label = kind === "cover" ? "Cover screenshot" : "Preview video";
   await assertMedia(ctx, storageId, label, kind === "video" ? "video" : "image");
-  const field = kind === "cover" ? "coverId" : kind === "mobile" ? "mobileId" : "videoId";
+  const field = kind === "cover" ? "coverId" : "videoId";
   const previous = listing[field];
   await ctx.db.patch(listing._id, { [field]: storageId, updatedAt: Date.now() });
   if (previous && previous !== storageId) await ctx.storage.delete(previous);
 }
 
-/** Admin: replace a listing's desktop screenshot, mobile screenshot or video. */
+/** Admin: replace a listing's cover screenshot or video. */
 export const replaceMedia = mutation({
   args: { id: v.id("listings"), kind: mediaKind, storageId: v.id("_storage") },
   returns: v.null(),
@@ -515,6 +521,75 @@ export const replaceMedia = mutation({
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
     await swapMedia(ctx, listing, kind, storageId);
+    return null;
+  },
+});
+
+/** Admin: add one more screenshot (after the cover, up to LIMITS.gallery). */
+export const addGalleryImage = mutation({
+  args: { id: v.id("listings"), storageId: v.id("_storage") },
+  returns: v.null(),
+  handler: async (ctx, { id, storageId }) => {
+    await requireAdmin(ctx);
+    const listing = await ctx.db.get(id);
+    if (!listing) fail("Listing not found.");
+    const galleryIds = await checkGallery(ctx, [...(listing.galleryIds ?? []), storageId]);
+    await ctx.db.patch(id, { galleryIds, updatedAt: Date.now() });
+    return null;
+  },
+});
+
+/** Admin: remove one extra screenshot and its file. */
+export const removeGalleryImage = mutation({
+  args: { id: v.id("listings"), storageId: v.id("_storage") },
+  returns: v.null(),
+  handler: async (ctx, { id, storageId }) => {
+    await requireAdmin(ctx);
+    const listing = await ctx.db.get(id);
+    if (!listing) fail("Listing not found.");
+    const gallery = listing.galleryIds ?? [];
+    if (!gallery.includes(storageId)) fail("That screenshot is not on this listing.");
+    const rest = gallery.filter((g) => g !== storageId);
+    await ctx.db.patch(id, { galleryIds: rest.length ? rest : undefined, updatedAt: Date.now() });
+    await ctx.storage.delete(storageId);
+    return null;
+  },
+});
+
+/** Admin: reorder the extra screenshots (same ids, new order). */
+export const setGalleryOrder = mutation({
+  args: { id: v.id("listings"), galleryIds: v.array(v.id("_storage")) },
+  returns: v.null(),
+  handler: async (ctx, { id, galleryIds }) => {
+    await requireAdmin(ctx);
+    const listing = await ctx.db.get(id);
+    if (!listing) fail("Listing not found.");
+    const current = listing.galleryIds ?? [];
+    const same =
+      galleryIds.length === current.length &&
+      new Set(galleryIds).size === galleryIds.length &&
+      galleryIds.every((g) => current.includes(g));
+    if (!same) fail("The screenshots changed. Reload and try again.");
+    await ctx.db.patch(id, { galleryIds, updatedAt: Date.now() });
+    return null;
+  },
+});
+
+/** Admin: make an extra screenshot the cover; the old cover takes its place. */
+export const makeGalleryCover = mutation({
+  args: { id: v.id("listings"), storageId: v.id("_storage") },
+  returns: v.null(),
+  handler: async (ctx, { id, storageId }) => {
+    await requireAdmin(ctx);
+    const listing = await ctx.db.get(id);
+    if (!listing) fail("Listing not found.");
+    const gallery = listing.galleryIds ?? [];
+    if (!gallery.includes(storageId)) fail("That screenshot is not on this listing.");
+    await ctx.db.patch(id, {
+      coverId: storageId,
+      galleryIds: gallery.map((g) => (g === storageId ? listing.coverId : g)),
+      updatedAt: Date.now(),
+    });
     return null;
   },
 });

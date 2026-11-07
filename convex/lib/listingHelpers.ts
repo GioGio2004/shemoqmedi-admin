@@ -76,6 +76,16 @@ export async function uniqueSlug(
  * Checks an uploaded file's type and size. (No cleanup on failure: throwing
  * rolls the whole mutation back, deletes included.)
  */
+/** Validate extra screenshots: unique, at most LIMITS.gallery, all images. */
+export async function checkGallery(ctx: MutationCtx, ids: Id<"_storage">[] | undefined) {
+  const gallery = [...new Set(ids ?? [])];
+  if (gallery.length > LIMITS.gallery) {
+    fail(`Add up to ${LIMITS.gallery} more screenshots (${LIMITS.gallery + 1} in all).`);
+  }
+  for (const id of gallery) await assertMedia(ctx, id, "Screenshot", "image");
+  return gallery.length ? gallery : undefined;
+}
+
 export async function assertMedia(
   ctx: MutationCtx,
   id: Id<"_storage">,
@@ -172,7 +182,7 @@ export const EMPTY_SCORES = {
 
 export async function deleteListing(ctx: MutationCtx, listing: Doc<"listings">) {
   await ctx.storage.delete(listing.coverId);
-  if (listing.mobileId) await ctx.storage.delete(listing.mobileId);
+  for (const id of listing.galleryIds ?? []) await ctx.storage.delete(id);
   if (listing.videoId) await ctx.storage.delete(listing.videoId);
   const votes = await ctx.db
     .query("votes")
@@ -218,14 +228,16 @@ export const publicListing = v.object({
   awardedAt: v.union(v.number(), v.null()),
   isClaimed: v.boolean(),
   coverUrl: v.union(v.string(), v.null()),
-  mobileUrl: v.union(v.string(), v.null()),
+  galleryUrls: v.array(v.string()),
   videoUrl: v.union(v.string(), v.null()),
 });
 
 export async function mediaUrls(ctx: QueryCtx, listing: Doc<"listings">) {
   return {
     coverUrl: await ctx.storage.getUrl(listing.coverId),
-    mobileUrl: listing.mobileId ? await ctx.storage.getUrl(listing.mobileId) : null,
+    galleryUrls: (await Promise.all((listing.galleryIds ?? []).map((id) => ctx.storage.getUrl(id)))).filter(
+      (url): url is string => url !== null,
+    ),
     videoUrl: listing.videoId ? await ctx.storage.getUrl(listing.videoId) : null,
   };
 }

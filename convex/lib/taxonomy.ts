@@ -100,6 +100,8 @@ export const LIMITS = {
   technologies: 6,
   reviewNote: 500,
   claimMessage: 1000,
+  /** Extra screenshots after the cover (so 5 images in all). */
+  gallery: 4,
   /** Max screenshot size in bytes. */
   imageBytes: 5 * 1024 * 1024,
   /** Max hover-video size in bytes. */

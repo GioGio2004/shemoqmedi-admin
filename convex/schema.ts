@@ -77,8 +77,8 @@ export default defineSchema({
     creditName: v.string(),
     creditUrl: v.optional(v.string()),
 
-    coverId: v.id("_storage"), // desktop screenshot, 16:10
-    mobileId: v.optional(v.id("_storage")),
+    coverId: v.id("_storage"), // first screenshot (16:9, or a full page that scrolls)
+    galleryIds: v.optional(v.array(v.id("_storage"))), // up to LIMITS.gallery more screenshots
     videoId: v.optional(v.id("_storage")), // short muted hover preview
 
     status: listingStatus,

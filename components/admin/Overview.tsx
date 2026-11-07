@@ -46,7 +46,7 @@ export function Overview() {
       href: "/listings/new",
       eyebrow: "Add a site",
       title: "List a site",
-      body: "List a site by hand with your own screenshots: cover, mobile and hover video, credit, scores and lifecycle.",
+      body: "List a site by hand with your own screenshots: up to five screenshots and a hover video, credit, scores and lifecycle.",
       cta: "Add a site",
       primary: true,
     },

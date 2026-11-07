@@ -12,6 +12,7 @@ import { normalizePillars } from "./lib/scoring";
 import {
   EMPTY_SCORES,
   assertMedia,
+  checkGallery,
   cleanText,
   deleteListing,
   fail,
@@ -73,7 +74,7 @@ export const createListing = mutation({
     creditName: v.string(),
     creditUrl: v.optional(v.string()),
     coverId: v.id("_storage"),
-    mobileId: v.optional(v.id("_storage")),
+    galleryIds: v.optional(v.array(v.id("_storage"))),
     videoId: v.optional(v.id("_storage")),
     status: v.union(
       v.literal("pending"),
@@ -100,8 +101,8 @@ export const createListing = mutation({
     const awards = [...new Set(args.awards ?? [])];
     if (args.status === "awarded" && awards.length === 0) fail("Pick at least one award for an awarded site.");
 
-    await assertMedia(ctx, args.coverId, "Desktop screenshot", "image");
-    if (args.mobileId) await assertMedia(ctx, args.mobileId, "Mobile screenshot", "image");
+    await assertMedia(ctx, args.coverId, "Cover screenshot", "image");
+    const galleryIds = await checkGallery(ctx, args.galleryIds);
     if (args.videoId) await assertMedia(ctx, args.videoId, "Preview video", "video");
     await assertUniqueUrl(ctx, url);
 
@@ -140,7 +141,7 @@ export const createListing = mutation({
       creditName,
       creditUrl,
       coverId: args.coverId,
-      mobileId: args.mobileId,
+      galleryIds,
       videoId: args.videoId,
       status: args.status,
       reviewedBy: args.status === "pending" ? undefined : admin._id,
@@ -323,22 +324,22 @@ export const clearEditorialScores = mutation({
   },
 });
 
-/** Remove the mobile screenshot or the preview video (the desktop one is required). */
+/** Remove the preview video (the cover screenshot is required). */
 export const removeMedia = mutation({
-  args: { id: v.id("listings"), kind: v.union(v.literal("mobile"), v.literal("video")) },
+  args: { id: v.id("listings"), kind: v.literal("video") },
   returns: v.null(),
-  handler: async (ctx, { id, kind }) => {
+  handler: async (ctx, { id }) => {
     await requireAdmin(ctx);
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
-    const field = kind === "mobile" ? "mobileId" : "videoId";
-    const current = listing[field];
+    const current = listing.videoId;
     if (!current) return null;
-    await ctx.db.patch(id, { [field]: undefined, updatedAt: Date.now() });
+    await ctx.db.patch(id, { videoId: undefined, updatedAt: Date.now() });
     await ctx.storage.delete(current);
     return null;
   },
 });
+
 
 /** Wipe the community votes on a listing (e.g. after detecting abuse). */
 export const resetVotes = mutation({
