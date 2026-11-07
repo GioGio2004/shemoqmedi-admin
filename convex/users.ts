@@ -109,6 +109,32 @@ export const assertAdmin = internalQuery({
 });
 
 /**
+ * Point an existing user record at a new Clerk user id, keeping its _id,
+ * role and every reference to it. Needed when the Clerk application or
+ * instance changes (dev → prod), since Clerk ids are per instance:
+ *   npx convex run users:relinkClerkId '{"email":"you@example.com","externalId":"user_..."}'
+ * Any record already holding the new id (created by the webhook) is removed.
+ */
+export const relinkClerkId = internalMutation({
+  args: { email: v.string(), externalId: v.string() },
+  returns: v.string(),
+  handler: async (ctx, { email, externalId }) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("byEmail", (q) => q.eq("email", email.trim()))
+      .first();
+    if (!user) throw new Error(`No user with email ${email}.`);
+    if (user.externalId === externalId) return `${email} already uses ${externalId}`;
+
+    const duplicate = await getUserByExternalId(ctx, externalId);
+    if (duplicate) await ctx.db.delete(duplicate._id);
+
+    await ctx.db.patch(user._id, { externalId, updatedAt: Date.now() });
+    return `${email} now signs in as ${externalId}`;
+  },
+});
+
+/**
  * Grant or remove a platform role. Internal: run it from the CLI only, e.g.
  *   npx convex run users:setRole '{"email":"you@example.com","role":"admin"}'
  * Pass "role": null to remove the role.
