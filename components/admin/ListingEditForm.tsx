@@ -14,6 +14,7 @@ import {
   type RegionSlug,
 } from "@/convex/lib/taxonomy";
 import { errorMessage } from "./format";
+import { Select } from "./Select";
 
 type Listing = NonNullable<FunctionReturnType<typeof api.listings.reviewDetail>>;
 type UpdateArgs = FunctionArgs<typeof api.admin.updateListing>;
@@ -236,20 +237,15 @@ export function ListingEditForm({ listing }: { listing: Listing }) {
           </div>
 
           <div className="grid gap-6 md:grid-cols-3">
-            <label className="grid content-start gap-2">
-              <span className="admin-eyebrow">Category</span>
-              <select
-                className="admin-input"
+            <div className="grid content-start gap-2">
+              <span id="edit-category" className="admin-eyebrow">Category</span>
+              <Select
+                labelledBy="edit-category"
                 value={value.category}
-                onChange={(e) => set("category", e.target.value)}
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c.slug} value={c.slug}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={(v) => set("category", v)}
+                options={CATEGORIES.map((c) => ({ value: c.slug, label: c.name }))}
+              />
+            </div>
             <fieldset className="grid content-start gap-2">
               <legend className="admin-eyebrow mb-2">Creator tier</legend>
               <div className="flex flex-wrap gap-2">

@@ -25,6 +25,7 @@ import {
 } from "@/convex/lib/taxonomy";
 import { MediaPicker, useStorageUpload } from "./MediaUpload";
 import { errorMessage, score } from "./format";
+import { Select } from "./Select";
 
 type CreateStatus = "pending" | "in_voting" | "awarded" | "archived";
 type Phase = "idle" | "uploading" | "saving";
@@ -265,22 +266,16 @@ export function ListingCreateForm() {
                 </span>
               </div>
 
-              <label className="grid gap-2">
-                <span className="admin-eyebrow">Category</span>
-                <select
-                  required
+              <div className="grid gap-2">
+                <span id="create-category" className="admin-eyebrow">Category</span>
+                <Select
+                  labelledBy="create-category"
                   value={category}
-                  onChange={(e) => setCategory(e.target.value as CategorySlug | "")}
-                  className="admin-input"
-                >
-                  <option value="">Choose a category</option>
-                  {CATEGORIES.map((c) => (
-                    <option key={c.slug} value={c.slug}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  onChange={(v) => setCategory(v as CategorySlug)}
+                  options={CATEGORIES.map((c) => ({ value: c.slug, label: c.name }))}
+                  placeholder="Choose a category"
+                />
+              </div>
 
               <fieldset>
                 <legend className="admin-eyebrow mb-3">

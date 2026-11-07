@@ -14,6 +14,14 @@ export const CATEGORIES = [
   { slug: "editorial", name: "Editorial" },
   { slug: "fashion", name: "Fashion" },
   { slug: "culture", name: "Culture" },
+  { slug: "photography", name: "Photography" },
+  { slug: "music", name: "Music & Sound" },
+  { slug: "real-estate", name: "Real Estate" },
+  { slug: "food-drink", name: "Food & Drink" },
+  { slug: "health", name: "Health & Wellness" },
+  { slug: "education", name: "Education" },
+  { slug: "games", name: "Games & Entertainment" },
+  { slug: "travel", name: "Travel" },
   { slug: "other", name: "Other" },
 ] as const;
 

@@ -15,6 +15,7 @@ import {
   type RegionSlug,
 } from "@/convex/lib/taxonomy";
 import { errorMessage, safeHref, shortUrl } from "./format";
+import { Select } from "./Select";
 
 type ImportResult = FunctionReturnType<typeof api.importer.importUrls>[number];
 
@@ -226,16 +227,10 @@ function ImportPanel() {
                 ))}
               </div>
             </fieldset>
-            <label className="grid gap-2">
-              <span className="admin-eyebrow">Category</span>
-              <select value={category} onChange={(e) => setCategory(e.target.value)} className="admin-input">
-                {CATEGORIES.map((c) => (
-                  <option key={c.slug} value={c.slug}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="grid gap-2">
+              <span id="import-category" className="admin-eyebrow">Category</span>
+              <Select labelledBy="import-category" value={category} onChange={setCategory} options={CATEGORIES.map((c) => ({ value: c.slug, label: c.name }))} />
+            </div>
           </div>
 
           <fieldset>
