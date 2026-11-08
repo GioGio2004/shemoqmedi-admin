@@ -33,7 +33,7 @@ function indexNowKey() {
   return process.env.INDEXNOW_KEY?.trim() || null;
 }
 
-function siteUrl() {
+export function siteUrl() {
   return (process.env.SITE_URL?.trim() || DEFAULT_SITE_URL).replace(/\/+$/, "");
 }
 

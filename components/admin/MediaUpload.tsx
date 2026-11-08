@@ -37,7 +37,7 @@ export function checkFile(file: File, kind: UploadKind, label: string): string |
     if (file.size > MAX_IMAGE_INPUT_BYTES) return `${label} must be 20 MB or less.`;
   } else {
     if (!VIDEO_TYPES.includes(file.type)) return `${label} must be an MP4 or WebM video.`;
-    if (file.size > LIMITS.videoBytes) return `${label} must be 10 MB or less.`;
+    if (file.size > LIMITS.videoBytes) return `${label} must be 15 MB or less.`;
   }
   return null;
 }

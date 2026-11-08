@@ -52,6 +52,9 @@ export default defineSchema({
     name: v.string(),
     email: v.string(),
     profilePicture: v.optional(v.string()),
+    // Clerk's has_image: false while profilePicture is Clerk's generated
+    // default avatar. Jurors without a real photo get a grey placeholder.
+    hasImage: v.optional(v.boolean()),
     // Platform role, managed in Convex (never overwritten by Clerk data).
     role: v.optional(v.union(v.literal("admin"), v.literal("super_admin"))),
     createdAt: v.number(),
@@ -151,6 +154,59 @@ export default defineSchema({
     .index("by_listing_user", ["listingId", "userId"])
     .index("by_listing", ["listingId"])
     .index("by_user", ["userId"]),
+
+  // Jury members. Joining is by invitation only (juryInvites); one row per
+  // user. `active: false` removes them from the jury but keeps their
+  // evaluations. Their photo is their Clerk profile image (users.profilePicture).
+  jurors: defineTable({
+    userId: v.id("users"),
+    slug: v.string(), // anchor on /jury (#slug)
+    name: v.string(),
+    title: v.string(), // "Creative director at Studio X"
+    location: v.optional(v.string()),
+    website: v.optional(v.string()),
+    bio: v.optional(v.string()),
+    active: v.boolean(),
+    joinedAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_user", ["userId"])
+    .index("by_slug", ["slug"])
+    .index("by_active", ["active", "joinedAt"]),
+
+  // An admin's invitation to join the jury, emailed through Resend. Only the
+  // SHA-256 of the link token is stored; resending issues a new token.
+  juryInvites: defineTable({
+    email: v.string(), // lowercased; the account that accepts must use it
+    name: v.string(),
+    note: v.optional(v.string()), // personal line from the admin, in the email
+    tokenHash: v.string(),
+    status: v.union(v.literal("pending"), v.literal("accepted"), v.literal("revoked")),
+    invitedBy: v.id("users"),
+    expiresAt: v.number(),
+    sentAt: v.optional(v.number()),
+    sendError: v.optional(v.string()),
+    acceptedBy: v.optional(v.id("users")),
+    acceptedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_tokenHash", ["tokenHash"])
+    .index("by_email", ["email"])
+    .index("by_created", ["createdAt"]),
+
+  // One evaluation per juror per listing, editable while voting is open. The
+  // listing's editorialScores is the per-pillar average of these.
+  juryEvaluations: defineTable({
+    listingId: v.id("listings"),
+    jurorId: v.id("jurors"),
+    scores: pillars,
+    comment: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_listing", ["listingId"])
+    .index("by_juror", ["jurorId"])
+    .index("by_listing_juror", ["listingId", "jurorId"]),
 
   // "This is mine" requests for unclaimed listings and creator profiles.
   claims: defineTable({

@@ -9,6 +9,7 @@ const userDoc = v.object({
   name: v.string(),
   email: v.string(),
   profilePicture: v.optional(v.string()),
+  hasImage: v.optional(v.boolean()),
   role: v.optional(v.union(v.literal("admin"), v.literal("super_admin"))),
   createdAt: v.number(),
   updatedAt: v.number(),
@@ -28,6 +29,7 @@ type ClerkUserPayload = {
   last_name?: string | null;
   username?: string | null;
   image_url?: string | null;
+  has_image?: boolean;
   primary_email_address_id?: string | null;
   email_addresses?: ClerkEmail[];
 };
@@ -61,6 +63,7 @@ export const upsertFromClerk = internalMutation({
       name,
       email,
       profilePicture: clerk.image_url ?? undefined,
+      hasImage: clerk.has_image ?? undefined,
       updatedAt: Date.now(),
     };
 
@@ -82,7 +85,14 @@ export const deleteFromClerk = internalMutation({
   returns: v.null(),
   handler: async (ctx, { clerkUserId }) => {
     const user = await getUserByExternalId(ctx, clerkUserId);
-    if (user) await ctx.db.delete(user._id);
+    if (!user) return null;
+    // A deleted account leaves the jury; its evaluations stay on the listings.
+    const juror = await ctx.db
+      .query("jurors")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .unique();
+    if (juror) await ctx.db.patch(juror._id, { active: false, updatedAt: Date.now() });
+    await ctx.db.delete(user._id);
     return null;
   },
 });

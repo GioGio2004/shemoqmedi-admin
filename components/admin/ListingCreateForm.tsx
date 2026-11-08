@@ -573,7 +573,7 @@ export function ListingCreateForm() {
               <MediaPicker
                 id="video"
                 label="Hover video (optional)"
-                hint="MP4/WebM ≤ 10 MB"
+                hint="MP4/WebM ≤ 15 MB"
                 kind="video"
                 aspect="16 / 9"
                 file={video.file}

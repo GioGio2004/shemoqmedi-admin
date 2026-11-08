@@ -102,6 +102,14 @@ export const LIMITS = {
   technologies: 6,
   /** Categories per listing (the first is the primary one). */
   categories: 3,
+  /** Jury evaluation comment, shown on the listing page. */
+  juryCommentMin: 20,
+  juryComment: 1000,
+  /** Juror profile fields. */
+  juryTitle: 80,
+  juryBio: 400,
+  /** Days a jury invitation link stays valid. */
+  juryInviteDays: 14,
   /** Profile links on a creator page (Dribbble, LinkedIn, ...). */
   creatorLinks: 6,
   reviewNote: 500,
@@ -111,7 +119,7 @@ export const LIMITS = {
   /** Max screenshot size in bytes. */
   imageBytes: 5 * 1024 * 1024,
   /** Max hover-video size in bytes. */
-  videoBytes: 10 * 1024 * 1024,
+  videoBytes: 15 * 1024 * 1024,
   /** Max listings one user can have waiting for review at once. */
   pendingPerUser: 5,
   /** Max URLs per admin import batch. */

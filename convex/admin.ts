@@ -27,6 +27,7 @@ import {
   slugify,
   uniqueSlug,
 } from "./lib/listingHelpers";
+import { hasJuryEvaluations } from "./jury";
 import { awardPaths, creatorPath, listingPaths, scheduleIndexNow, sitePath } from "./seo";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -354,6 +355,9 @@ export const clearEditorialScores = mutation({
     await requireAdmin(ctx);
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
+    if (await hasJuryEvaluations(ctx, id)) {
+      fail("This site's jury score is the average of its jury evaluations. Remove an evaluation to change it.");
+    }
     await ctx.db.patch(id, {
       editorialScores: undefined,
       ...scoreFields(undefined, listing.communityTotals, listing.communityVotesCount),

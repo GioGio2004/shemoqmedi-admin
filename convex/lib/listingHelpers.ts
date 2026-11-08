@@ -146,7 +146,7 @@ export async function assertMedia(
       fail(`${field} must be an image of 5 MB or less.`);
     }
   } else if (!["video/mp4", "video/webm"].includes(type) || meta.size > LIMITS.videoBytes) {
-    fail(`${field} must be an MP4 or WebM video of 10 MB or less.`);
+    fail(`${field} must be an MP4 or WebM video of 15 MB or less.`);
   }
 }
 
@@ -247,6 +247,11 @@ export async function deleteListing(ctx: MutationCtx, listing: Doc<"listings">) 
     .withIndex("by_listing", (q) => q.eq("listingId", listing._id))
     .collect();
   for (const claim of claims) await ctx.db.delete(claim._id);
+  const evaluations = await ctx.db
+    .query("juryEvaluations")
+    .withIndex("by_listing", (q) => q.eq("listingId", listing._id))
+    .collect();
+  for (const e of evaluations) await ctx.db.delete(e._id);
   await ctx.db.delete(listing._id);
 }
 

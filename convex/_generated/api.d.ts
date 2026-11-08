@@ -15,6 +15,7 @@ import type * as creators from "../creators.js";
 import type * as crons from "../crons.js";
 import type * as http from "../http.js";
 import type * as importer from "../importer.js";
+import type * as jury from "../jury.js";
 import type * as lib_imagekitServer from "../lib/imagekitServer.js";
 import type * as lib_listingHelpers from "../lib/listingHelpers.js";
 import type * as lib_media from "../lib/media.js";
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   http: typeof http;
   importer: typeof importer;
+  jury: typeof jury;
   "lib/imagekitServer": typeof lib_imagekitServer;
   "lib/listingHelpers": typeof lib_listingHelpers;
   "lib/media": typeof lib_media;

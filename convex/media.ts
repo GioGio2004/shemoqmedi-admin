@@ -54,7 +54,7 @@ function checkLimits(kind: "image" | "video", contentType: string, size: number)
       throw new ConvexError("Screenshots must be images of 5 MB or less.");
     }
   } else if (!VIDEO_TYPES.includes(contentType) || size > LIMITS.videoBytes) {
-    throw new ConvexError("The preview video must be an MP4 or WebM of 10 MB or less.");
+    throw new ConvexError("The preview video must be an MP4 or WebM of 15 MB or less.");
   }
 }
 

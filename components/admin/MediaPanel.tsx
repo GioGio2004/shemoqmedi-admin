@@ -35,7 +35,7 @@ const SLOTS: Record<Kind, Slot> = {
     label: "Preview video",
     media: "video",
     aspect: "16 / 9",
-    hint: "MP4 or WebM, up to 10 MB. Plays on hover.",
+    hint: "MP4 or WebM, up to 15 MB. Plays on hover.",
     removable: true,
   },
 };

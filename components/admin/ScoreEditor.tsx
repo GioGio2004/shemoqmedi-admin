@@ -2,7 +2,7 @@
 
 import { showError } from "./Alerts";
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { PILLARS, type PillarKey } from "@/convex/lib/taxonomy";
@@ -40,6 +40,10 @@ export function ScoreEditor(props: Props) {
   const clear = useMutation(api.admin.clearEditorialScores);
   const resetVotes = useMutation(api.admin.resetVotes);
 
+  const evaluations = useQuery(api.jury.evaluationsForListing, { listingId: props.id });
+  const removeEvaluation = useMutation(api.jury.deleteEvaluation);
+  // With jury evaluations the jury score is their average: no manual entry.
+  const fromJury = (evaluations?.length ?? 0) > 0;
   const [draft, setDraft] = useState(() => toDraft(props.editorialScores));
   const [busy, setBusy] = useState<"save" | "clear" | "votes" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -128,6 +132,46 @@ export function ScoreEditor(props: Props) {
         </div>
       </dl>
 
+      {fromJury && evaluations && (
+        <div className="mt-6 grid gap-3">
+          <p className="admin-eyebrow">
+            Jury evaluations ({evaluations.length}), averaged into the jury score
+          </p>
+          <ul className="grid gap-3">
+            {evaluations.map((e) => {
+              const avg = (e.scores.design + e.scores.usability + e.scores.creativity + e.scores.code) / 4;
+              return (
+                <li key={e.id} className="grid gap-1 rounded-2xl border border-black/10 p-3 text-sm">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="font-medium">{e.jurorName}</span>
+                    <span className="admin-mono">{score(avg)}</span>
+                  </div>
+                  <p className="admin-mono text-xs text-black/55">
+                    D {e.scores.design} · U {e.scores.usability} · C {e.scores.creativity} · Code {e.scores.code}
+                  </p>
+                  <p className="whitespace-pre-line text-xs text-black/70">{e.comment}</p>
+                  <button
+                    type="button"
+                    className="justify-self-start text-xs underline underline-offset-4"
+                    disabled={busy !== null}
+                    onClick={() => {
+                      if (!confirm(`Delete ${e.jurorName}'s evaluation? It is removed from the site and the jury score is recalculated.`)) return;
+                      void run("clear", async () => {
+                        await removeEvaluation({ evaluationId: e.id });
+                        return "Evaluation deleted.";
+                      });
+                    }}
+                  >
+                    Delete evaluation
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {!fromJury && (
       <form onSubmit={onSubmit} className="mt-6 grid gap-4">
         <fieldset disabled={busy !== null} className="grid grid-cols-2 gap-3">
           <legend className="admin-eyebrow mb-3">Jury pillars, 1.0–10.0</legend>
@@ -174,9 +218,11 @@ export function ScoreEditor(props: Props) {
         </div>
         <p className="text-xs leading-relaxed text-black/55">
           Final = 0.6 × jury + 0.4 × community (jury only until someone votes). Changing scores after voting
-          closed updates the final score but not the awards.
+          closed updates the final score but not the awards. Once a juror evaluates the site, the jury score
+          becomes the average of the evaluations.
         </p>
       </form>
+      )}
 
       <div className="mt-6 grid gap-3 border-t border-black/10 pt-6">
         <button

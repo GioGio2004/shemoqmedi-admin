@@ -1,3 +1,4 @@
+import { hasJuryEvaluations } from "./jury";
 import { v } from "convex/values";
 import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
 import { internalMutation, mutation, query } from "./_generated/server";
@@ -434,6 +435,9 @@ export const setEditorialScores = mutation({
     await requireAdmin(ctx);
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
+    if (await hasJuryEvaluations(ctx, id)) {
+      fail("This site's jury score is the average of its jury evaluations. Remove an evaluation to change it.");
+    }
     let editorial;
     try {
       editorial = normalizePillars(scores);
