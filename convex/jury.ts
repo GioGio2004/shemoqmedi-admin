@@ -1,46 +1,46 @@
-// The jury: invitation-only members who evaluate listings during their
+// The jury. An admin pre-creates each juror's profile (unclaimed, private) and
+// shares its claim link (claimLinks.ts); claiming binds the profile to the
+// person's account and makes it public. Jurors evaluate listings during their
 // voting window. A listing's jury score (editorialScores) is the per-pillar
 // average of its jurors' evaluations; each evaluation's comment is shown on
 // the listing page.
 //
-//   admin  → invite (action: creates the invite, emails it through Resend)
-//   invitee → /jury/join?token=… on the site → acceptInvite → a jurors row
+//   admin  → createJuror (+ listings with jurorId for a bundle) → claim link
+//   person → /claim/<token> on the site → claimLinks.claim
 //   juror  → Evaluate button on /sites/<slug> → evaluate
 
 import { v } from "convex/values";
-import { action, internalMutation, mutation, query, type QueryCtx, type MutationCtx } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { getUserByExternalId } from "./users";
-import { pillars } from "./schema";
-import { DAY_MS, LIMITS } from "./lib/taxonomy";
+import { juryCategory, pillars } from "./schema";
+import { LIMITS } from "./lib/taxonomy";
 import { normalizePillars, round2, type Pillars } from "./lib/scoring";
-import { cleanText, fail, isPublicStatus, normalizeUrl, scoreFields, slugify } from "./lib/listingHelpers";
-import { listingPaths, scheduleIndexNow, siteUrl } from "./seo";
+import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
+import {
+  assertMedia,
+  cleanText,
+  fail,
+  isPublicStatus,
+  normalizeUrl,
+  scoreFields,
+  slugify,
+} from "./lib/listingHelpers";
+import { listingPaths, scheduleIndexNow } from "./seo";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function sha256Hex(text: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+/** Claimed = bound to an account. Rows without a status predate pre-creation and are claimed. */
+export function isClaimedJuror(juror: Pick<Doc<"jurors">, "status" | "userId">) {
+  return juror.status !== "unclaimed" && juror.userId !== undefined;
 }
 
-/** 32 random bytes as hex. Actions only: mutations and queries are deterministic. */
-function newToken() {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function cleanEmail(raw: string) {
-  const email = raw.trim().toLowerCase();
-  if (!EMAIL.test(email) || email.length > 254) fail("Enter a valid email address.");
-  return email;
+/** Public = claimed and on the jury. Unclaimed profiles are only reachable through their claim link. */
+export function isPublicJuror(juror: Doc<"jurors">) {
+  return juror.active && isClaimedJuror(juror);
 }
 
 /** Keeps line breaks (up to one blank line) but tidies spaces. */
@@ -58,32 +58,37 @@ function cleanComment(raw: string) {
   return text;
 }
 
-/** The user's Clerk photo, or null when they only have Clerk's default avatar. */
-function photoOf(user: Doc<"users"> | null) {
-  return user?.hasImage && user.profilePicture ? user.profilePicture : null;
+/**
+ * The juror's photo: their own Clerk image once claimed (if they uploaded
+ * one), else the avatar the admin added, else null (grey placeholder).
+ */
+export async function jurorPhoto(ctx: QueryCtx, juror: Doc<"jurors">) {
+  const user = juror.userId ? await ctx.db.get(juror.userId) : null;
+  if (user?.hasImage && user.profilePicture) return user.profilePicture;
+  return juror.avatarId ? await mediaUrl(ctx, juror.avatarId) : null;
 }
 
-async function jurorOf(ctx: QueryCtx, userId: Id<"users">) {
+export async function jurorOf(ctx: QueryCtx, userId: Id<"users">) {
   return await ctx.db
     .query("jurors")
     .withIndex("by_user", (q) => q.eq("userId", userId))
-    .unique();
+    .first();
 }
 
-/** The signed-in user and their active juror row, or null (no throw). */
+/** The signed-in user and their active, claimed juror row, or null (no throw). */
 async function currentJuror(ctx: QueryCtx) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) return null;
   const user = await getUserByExternalId(ctx, identity.subject);
   if (!user) return null;
   const juror = await jurorOf(ctx, user._id);
-  return juror?.active ? { user, juror } : null;
+  return juror && isPublicJuror(juror) ? { user, juror } : null;
 }
 
 async function requireJuror(ctx: QueryCtx) {
   const user = await requireUser(ctx);
   const juror = await jurorOf(ctx, user._id);
-  if (!juror?.active) fail("Only jury members can do this.");
+  if (!juror || !isPublicJuror(juror)) fail("Only jury members can do this.");
   return { user, juror };
 }
 
@@ -99,20 +104,49 @@ async function uniqueJurorSlug(ctx: QueryCtx, name: string, except?: Id<"jurors"
   }
 }
 
-const profileArgs = {
+const optionalUrl = (raw: string | undefined, field: string) =>
+  raw?.trim() ? normalizeUrl(raw, field) : undefined;
+
+function cleanLinkedin(raw: string | undefined) {
+  const url = optionalUrl(raw, "LinkedIn URL");
+  if (url && !/^https?:\/\/([a-z]{2,3}\.)?(www\.)?linkedin\.com\//i.test(url)) {
+    fail("The LinkedIn URL must be a linkedin.com address.");
+  }
+  return url;
+}
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function cleanEmail(raw: string | undefined) {
+  const email = raw?.trim().toLowerCase();
+  if (!email) return undefined;
+  if (!EMAIL.test(email) || email.length > 254) fail("Enter a valid email address.");
+  return email;
+}
+
+/** Fields a juror may edit on their own profile. */
+const selfProfileArgs = {
   name: v.string(),
   title: v.string(),
   location: v.optional(v.string()),
-  website: v.optional(v.string()),
+  website: v.optional(v.string()), // "" clears
+  linkedinUrl: v.optional(v.string()), // "" clears
   bio: v.optional(v.string()),
 };
 
-function cleanProfile(args: { name: string; title: string; location?: string; website?: string; bio?: string }) {
+function cleanSelfProfile(args: {
+  name: string;
+  title: string;
+  location?: string;
+  website?: string;
+  linkedinUrl?: string;
+  bio?: string;
+}) {
   return {
     name: cleanText(args.name, "Name", LIMITS.creditName),
     title: cleanText(args.title, "Role", LIMITS.juryTitle),
     location: cleanText(args.location ?? "", "Location", 80, false) || undefined,
-    website: args.website?.trim() ? normalizeUrl(args.website, "Website") : undefined,
+    website: optionalUrl(args.website, "Website"),
+    linkedinUrl: cleanLinkedin(args.linkedinUrl),
     bio: cleanText(args.bio ?? "", "Bio", LIMITS.juryBio, false) || undefined,
   };
 }
@@ -146,15 +180,21 @@ export async function recomputeJuryScore(ctx: MutationCtx, listingId: Id<"listin
   });
 }
 
-/** Why a juror can't evaluate this listing right now, or null if they can. */
-async function blockReason(ctx: QueryCtx, listing: Doc<"listings">, userId: Id<"users">) {
+/**
+ * Why this juror can't evaluate this listing right now, or null if they can.
+ * Jurors never score their own work: a listing they own, one whose creator
+ * profile they claimed, or one pre-created for them (jurorId).
+ */
+async function blockReason(ctx: QueryCtx, listing: Doc<"listings">, juror: Doc<"jurors">) {
   if (listing.status !== "in_voting" || !listing.votingEndsAt || Date.now() >= listing.votingEndsAt) {
     return "Voting is closed for this site.";
   }
-  if (listing.ownerId === userId) return "You can't evaluate your own site.";
-  if (listing.creatorId) {
+  const own = "You can't evaluate your own site.";
+  if (listing.jurorId === juror._id) return own;
+  if (juror.userId && listing.ownerId === juror.userId) return own;
+  if (juror.userId && listing.creatorId) {
     const creator = await ctx.db.get(listing.creatorId);
-    if (creator?.claimedBy === userId) return "You can't evaluate your own site.";
+    if (creator?.claimedBy === juror.userId) return own;
   }
   return null;
 }
@@ -166,52 +206,121 @@ async function listingBySlug(ctx: QueryCtx, slug: string) {
     .first();
 }
 
-const jurorPublic = v.object({
+export const jurorPublic = v.object({
   slug: v.string(),
   name: v.string(),
   title: v.string(),
+  category: v.union(juryCategory, v.null()),
   location: v.union(v.string(), v.null()),
   website: v.union(v.string(), v.null()),
+  linkedinUrl: v.union(v.string(), v.null()),
   bio: v.union(v.string(), v.null()),
+  isFounding: v.boolean(),
   imageUrl: v.union(v.string(), v.null()), // null: show the grey placeholder
 });
 
-async function toJurorPublic(ctx: QueryCtx, juror: Doc<"jurors">) {
+export async function toJurorPublic(ctx: QueryCtx, juror: Doc<"jurors">) {
   return {
     slug: juror.slug,
     name: juror.name,
     title: juror.title,
+    category: juror.category ?? null,
     location: juror.location ?? null,
     website: juror.website ?? null,
+    linkedinUrl: juror.linkedinUrl ?? null,
     bio: juror.bio ?? null,
-    imageUrl: photoOf(await ctx.db.get(juror.userId)),
+    isFounding: juror.isFounding ?? false,
+    imageUrl: await jurorPhoto(ctx, juror),
   };
+}
+
+async function evaluationCount(ctx: QueryCtx, jurorId: Id<"jurors">) {
+  return (
+    await ctx.db
+      .query("juryEvaluations")
+      .withIndex("by_juror", (q) => q.eq("jurorId", jurorId))
+      .take(1000)
+  ).length;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public (site)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Active jurors for /jury, longest-serving first, with their evaluation counts. */
+/** Claimed, active jurors for /jury, longest-serving first, with their evaluation counts. */
 export const listPublic = query({
   args: {},
   returns: v.array(v.object({ ...jurorPublic.fields, evaluations: v.number() })),
   handler: async (ctx) => {
+    const jurors = (
+      await ctx.db
+        .query("jurors")
+        .withIndex("by_active", (q) => q.eq("active", true))
+        .take(300)
+    ).filter(isPublicJuror);
+    return await Promise.all(
+      jurors.map(async (j) => ({ ...(await toJurorPublic(ctx, j)), evaluations: await evaluationCount(ctx, j._id) })),
+    );
+  },
+});
+
+/** Slugs of public jurors (sitemap, static params). */
+export const publicSlugs = query({
+  args: {},
+  returns: v.array(v.object({ slug: v.string(), updatedAt: v.number() })),
+  handler: async (ctx) => {
     const jurors = await ctx.db
       .query("jurors")
       .withIndex("by_active", (q) => q.eq("active", true))
+      .take(300);
+    return jurors.filter(isPublicJuror).map((j) => ({ slug: j.slug, updatedAt: j.updatedAt }));
+  },
+});
+
+/** A juror's public page (/jury/<slug>) with their evaluations. Null if unclaimed or off the jury. */
+export const getBySlug = query({
+  args: { slug: v.string() },
+  returns: v.union(
+    v.null(),
+    v.object({
+      juror: v.object({ ...jurorPublic.fields, joinedAt: v.number() }),
+      reviews: v.array(
+        v.object({
+          listing: v.object({ slug: v.string(), title: v.string(), coverUrl: v.union(v.string(), v.null()) }),
+          average: v.number(),
+          comment: v.string(),
+          updatedAt: v.number(),
+        }),
+      ),
+    }),
+  ),
+  handler: async (ctx, { slug }) => {
+    const juror = await ctx.db
+      .query("jurors")
+      .withIndex("by_slug", (q) => q.eq("slug", slug))
+      .first();
+    if (!juror || !isPublicJuror(juror)) return null;
+    const evaluations = await ctx.db
+      .query("juryEvaluations")
+      .withIndex("by_juror", (q) => q.eq("jurorId", juror._id))
       .take(200);
-    return await Promise.all(
-      jurors.map(async (j) => ({
-        ...(await toJurorPublic(ctx, j)),
-        evaluations: (
-          await ctx.db
-            .query("juryEvaluations")
-            .withIndex("by_juror", (q) => q.eq("jurorId", j._id))
-            .take(1000)
-        ).length,
-      })),
-    );
+    evaluations.sort((a, b) => b.updatedAt - a.updatedAt);
+    const reviews = [];
+    for (const e of evaluations) {
+      const listing = await ctx.db.get(e.listingId);
+      if (!listing || !isPublicStatus(listing.status)) continue;
+      const s = e.scores;
+      reviews.push({
+        listing: { slug: listing.slug, title: listing.title, coverUrl: await mediaUrl(ctx, listing.coverId) },
+        average: round2((s.design + s.usability + s.creativity + s.code) / 4),
+        comment: e.comment,
+        updatedAt: e.updatedAt,
+      });
+    }
+    return {
+      juror: { ...(await toJurorPublic(ctx, juror)), joinedAt: juror.claimedAt ?? juror.joinedAt },
+      reviews,
+    };
   },
 });
 
@@ -239,7 +348,7 @@ export const reviewsForListing = query({
     const out = [];
     for (const e of evaluations) {
       const juror = await ctx.db.get(e.jurorId);
-      if (!juror) continue;
+      if (!juror || !isClaimedJuror(juror)) continue;
       const s = e.scores;
       out.push({
         juror: await toJurorPublic(ctx, juror),
@@ -292,7 +401,7 @@ export const myEvaluation = query({
       .withIndex("by_listing_juror", (q) => q.eq("listingId", listing._id).eq("jurorId", current.juror._id))
       .unique();
     return {
-      blocked: await blockReason(ctx, listing, current.user._id),
+      blocked: await blockReason(ctx, listing, current.juror),
       evaluation: saved ? { scores: saved.scores, comment: saved.comment, updatedAt: saved.updatedAt } : null,
       votingEndsAt: listing.votingEndsAt ?? null,
     };
@@ -304,10 +413,10 @@ export const evaluate = mutation({
   args: { slug: v.string(), scores: pillars, comment: v.string() },
   returns: v.null(),
   handler: async (ctx, { slug, scores, comment }) => {
-    const { user, juror } = await requireJuror(ctx);
+    const { juror } = await requireJuror(ctx);
     const listing = await listingBySlug(ctx, slug);
     if (!listing) fail("Site not found.");
-    const blocked = await blockReason(ctx, listing, user._id);
+    const blocked = await blockReason(ctx, listing, juror);
     if (blocked) fail(blocked);
     let clean: Pillars;
     try {
@@ -334,95 +443,22 @@ export const evaluate = mutation({
       });
     }
     await recomputeJuryScore(ctx, listing._id);
-    if (!saved) await scheduleIndexNow(ctx, await listingPaths(ctx, listing));
+    if (!saved) await scheduleIndexNow(ctx, [...(await listingPaths(ctx, listing)), `/jury/${juror.slug}`]);
     return null;
   },
 });
 
-/** A juror edits their own public profile. */
+/** A juror edits their own public profile (the admin sets the panel and avatar). */
 export const updateProfile = mutation({
-  args: profileArgs,
-  returns: v.null(),
+  args: selfProfileArgs,
+  returns: v.object({ slug: v.string() }),
   handler: async (ctx, args) => {
     const { juror } = await requireJuror(ctx);
-    const profile = cleanProfile(args);
-    const slug = profile.name === juror.name ? juror.slug : await uniqueJurorSlug(ctx, profile.name, juror._id);
-    await ctx.db.patch(juror._id, { ...profile, slug, updatedAt: Date.now() });
-    return null;
-  },
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Invitations
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function inviteFor(ctx: QueryCtx, token: string) {
-  const hash = await sha256Hex(token);
-  return await ctx.db
-    .query("juryInvites")
-    .withIndex("by_tokenHash", (q) => q.eq("tokenHash", hash))
-    .unique();
-}
-
-/** What the join page shows for a link: who it is for and whether it still works. */
-export const inviteByToken = query({
-  args: { token: v.string() },
-  returns: v.object({
-    status: v.union(
-      v.literal("valid"),
-      v.literal("accepted"),
-      v.literal("revoked"),
-      v.literal("expired"),
-      v.literal("unknown"),
-    ),
-    name: v.union(v.string(), v.null()),
-    email: v.union(v.string(), v.null()),
-  }),
-  handler: async (ctx, { token }) => {
-    const invite = token ? await inviteFor(ctx, token) : null;
-    if (!invite) return { status: "unknown" as const, name: null, email: null };
-    const status =
-      invite.status !== "pending"
-        ? invite.status
-        : Date.now() > invite.expiresAt
-          ? ("expired" as const)
-          : ("valid" as const);
-    return { status, name: invite.name, email: invite.email };
-  },
-});
-
-/** The invitee, signed in with the invited email, joins the jury. */
-export const acceptInvite = mutation({
-  args: { token: v.string(), ...profileArgs },
-  returns: v.null(),
-  handler: async (ctx, { token, ...args }) => {
-    const user = await requireUser(ctx);
-    const invite = await inviteFor(ctx, token);
-    if (!invite || invite.status === "revoked") fail("This invitation link is not valid.");
-    if (invite.status === "accepted") fail("This invitation has already been used.");
-    if (Date.now() > invite.expiresAt) fail("This invitation has expired. Ask for a new one.");
-    if (user.email.toLowerCase() !== invite.email) {
-      fail(`This invitation was sent to ${invite.email}. Sign in with that email address to accept it.`);
-    }
-    const profile = cleanProfile(args);
-    const now = Date.now();
-    const existing = await jurorOf(ctx, user._id);
-    if (existing) {
-      // A former juror invited back.
-      await ctx.db.patch(existing._id, { ...profile, active: true, updatedAt: now });
-    } else {
-      await ctx.db.insert("jurors", {
-        userId: user._id,
-        slug: await uniqueJurorSlug(ctx, profile.name),
-        ...profile,
-        active: true,
-        joinedAt: now,
-        updatedAt: now,
-      });
-    }
-    await ctx.db.patch(invite._id, { status: "accepted", acceptedBy: user._id, acceptedAt: now });
-    await scheduleIndexNow(ctx, ["/jury"]);
-    return null;
+    const profile = cleanSelfProfile(args);
+    // The slug is a shared permalink (/jury/<slug>), so a name change keeps it.
+    await ctx.db.patch(juror._id, { ...profile, updatedAt: Date.now() });
+    await scheduleIndexNow(ctx, ["/jury", `/jury/${juror.slug}`]);
+    return { slug: juror.slug };
   },
 });
 
@@ -430,219 +466,190 @@ export const acceptInvite = mutation({
 // Admin
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const createInvite = internalMutation({
-  args: { email: v.string(), name: v.string(), note: v.optional(v.string()), tokenHash: v.string() },
-  returns: v.id("juryInvites"),
+const adminProfileArgs = {
+  name: v.string(),
+  title: v.string(),
+  category: juryCategory,
+  location: v.optional(v.string()),
+  website: v.optional(v.string()), // "" or absent: none
+  linkedinUrl: v.optional(v.string()),
+  bio: v.optional(v.string()),
+  email: v.optional(v.string()), // private; for emailing the claim link
+  avatarId: v.optional(vMediaId),
+  isFounding: v.optional(v.boolean()),
+};
+
+/** Admin: pre-create an unclaimed jury profile. Share its claim link next (claimLinks.link). */
+export const createJuror = mutation({
+  args: adminProfileArgs,
+  returns: v.object({ id: v.id("jurors"), slug: v.string() }),
   handler: async (ctx, args) => {
-    const admin = await requireAdmin(ctx);
-    const email = cleanEmail(args.email);
+    await requireAdmin(ctx);
     const name = cleanText(args.name, "Name", LIMITS.creditName);
-    const note = cleanText(args.note ?? "", "Note", 500, false) || undefined;
-    const open = await ctx.db
-      .query("juryInvites")
-      .withIndex("by_email", (q) => q.eq("email", email))
-      .collect();
-    if (open.some((i) => i.status === "pending" && i.expiresAt > Date.now())) {
-      fail("This email already has an open invitation. Resend it from the list instead.");
-    }
-    const user = await ctx.db
-      .query("users")
-      .withIndex("byEmail", (q) => q.eq("email", email))
-      .first();
-    if (user && (await jurorOf(ctx, user._id))?.active) fail("This person is already on the jury.");
+    if (args.avatarId) await assertMedia(ctx, args.avatarId, "Photo", "image");
     const now = Date.now();
-    return await ctx.db.insert("juryInvites", {
-      email,
+    const slug = await uniqueJurorSlug(ctx, name);
+    const id = await ctx.db.insert("jurors", {
+      status: "unclaimed",
+      slug,
       name,
-      note,
-      tokenHash: args.tokenHash,
-      status: "pending",
-      invitedBy: admin._id,
-      expiresAt: now + LIMITS.juryInviteDays * DAY_MS,
-      createdAt: now,
+      title: cleanText(args.title, "Role", LIMITS.juryTitle),
+      category: args.category,
+      location: cleanText(args.location ?? "", "Location", 80, false) || undefined,
+      website: optionalUrl(args.website, "Website"),
+      linkedinUrl: cleanLinkedin(args.linkedinUrl),
+      bio: cleanText(args.bio ?? "", "Bio", LIMITS.juryBio, false) || undefined,
+      email: cleanEmail(args.email),
+      avatarId: args.avatarId,
+      isFounding: args.isFounding ?? true,
+      active: true,
+      joinedAt: now,
+      updatedAt: now,
     });
+    return { id, slug };
   },
 });
 
-/** New token and expiry for a pending invite (the old link stops working). */
-export const rotateInvite = internalMutation({
-  args: { inviteId: v.id("juryInvites"), tokenHash: v.string() },
-  returns: v.object({ email: v.string(), name: v.string(), note: v.union(v.string(), v.null()) }),
-  handler: async (ctx, { inviteId, tokenHash }) => {
+/** Admin: edit any juror's profile. "" clears an optional text field; avatarId null removes the photo. */
+export const updateJuror = mutation({
+  args: {
+    jurorId: v.id("jurors"),
+    name: v.optional(v.string()),
+    title: v.optional(v.string()),
+    category: v.optional(juryCategory),
+    location: v.optional(v.string()),
+    website: v.optional(v.string()),
+    linkedinUrl: v.optional(v.string()),
+    bio: v.optional(v.string()),
+    email: v.optional(v.string()),
+    avatarId: v.optional(v.union(vMediaId, v.null())),
+    isFounding: v.optional(v.boolean()),
+  },
+  returns: v.object({ slug: v.string() }),
+  handler: async (ctx, { jurorId, ...args }) => {
     await requireAdmin(ctx);
-    const invite = await ctx.db.get(inviteId);
-    if (!invite) fail("Invitation not found.");
-    if (invite.status !== "pending") fail("Only open invitations can be resent.");
-    await ctx.db.patch(inviteId, {
-      tokenHash,
-      expiresAt: Date.now() + LIMITS.juryInviteDays * DAY_MS,
-      sendError: undefined,
-    });
-    return { email: invite.email, name: invite.name, note: invite.note ?? null };
-  },
-});
-
-export const recordSend = internalMutation({
-  args: { inviteId: v.id("juryInvites"), error: v.optional(v.string()) },
-  returns: v.null(),
-  handler: async (ctx, { inviteId, error }) => {
-    await ctx.db.patch(inviteId, error ? { sendError: error } : { sentAt: Date.now(), sendError: undefined });
-    return null;
-  },
-});
-
-const escapeHtml = (s: string) =>
-  s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-
-/** Sends the invitation through Resend. Returns an error message, or null when sent. */
-async function sendInviteEmail(to: string, name: string, note: string | null, link: string) {
-  const key = process.env.RESEND_API_KEY?.trim();
-  if (!key) return "RESEND_API_KEY is not set on this Convex deployment. Copy the link and send it yourself.";
-  const from = process.env.RESEND_FROM?.trim() || "Shemoqmedi <jury@shemoqmedi.space>";
-  const first = name.split(" ")[0];
-  const text = [
-    `Hi ${first},`,
-    "",
-    "We'd like to invite you to the jury of Shemoqmedi, the website awards platform.",
-    "Jurors score the sites in their voting week on design, usability, creativity and code, and leave a short comment that is shown on each site's page.",
-    ...(note ? ["", note] : []),
-    "",
-    `Accept the invitation and set up your jury profile (the link works for ${LIMITS.juryInviteDays} days):`,
-    link,
-    "",
-    "Shemoqmedi",
-  ].join("\n");
-  const html = `<div style="font-family:Inter,Arial,sans-serif;color:#000;max-width:520px;line-height:1.6">
-<p>Hi ${escapeHtml(first)},</p>
-<p>We'd like to invite you to the jury of <strong>Shemoqmedi</strong>, the website awards platform. Jurors score the sites in their voting week on design, usability, creativity and code, and leave a short comment that is shown on each site's page.</p>
-${note ? `<p>${escapeHtml(note)}</p>` : ""}
-<p><a href="${escapeHtml(link)}" style="display:inline-block;background:#000;color:#fff;padding:12px 22px;border-radius:999px;text-decoration:none;font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase">Join the jury</a></p>
-<p style="font-size:12px;color:#555">The link works for ${LIMITS.juryInviteDays} days and only for ${escapeHtml(to)}.</p>
-</div>`;
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to: [to], subject: "Join the Shemoqmedi jury", text, html }),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      return `Resend refused the email (${res.status}). ${body.slice(0, 200)}`.trim();
+    const juror = await ctx.db.get(jurorId);
+    if (!juror) fail("Juror not found.");
+    const patch: Partial<Doc<"jurors">> = {};
+    if (args.name !== undefined) {
+      patch.name = cleanText(args.name, "Name", LIMITS.creditName);
+      // Only private (unclaimed) profiles get a new slug; a public one is a shared permalink.
+      if (patch.name !== juror.name && !isClaimedJuror(juror)) {
+        patch.slug = await uniqueJurorSlug(ctx, patch.name, jurorId);
+      }
     }
-    return null;
-  } catch (err) {
-    return `Could not reach Resend: ${(err as Error).message}`;
-  }
-}
-
-const inviteResult = v.object({ link: v.string(), sent: v.boolean(), error: v.union(v.string(), v.null()) });
-
-/** Admin: invite someone to the jury by email. Returns the link (to copy if sending failed). */
-export const invite = action({
-  args: { email: v.string(), name: v.string(), note: v.optional(v.string()) },
-  returns: inviteResult,
-  handler: async (ctx, args): Promise<{ link: string; sent: boolean; error: string | null }> => {
-    const token = newToken();
-    const inviteId = await ctx.runMutation(internal.jury.createInvite, { ...args, tokenHash: await sha256Hex(token) });
-    const link = `${siteUrl()}/jury/join?token=${token}`;
-    const error = await sendInviteEmail(args.email.trim().toLowerCase(), args.name.trim(), args.note?.trim() || null, link);
-    await ctx.runMutation(internal.jury.recordSend, { inviteId, error: error ?? undefined });
-    return { link, sent: error === null, error };
+    if (args.title !== undefined) patch.title = cleanText(args.title, "Role", LIMITS.juryTitle);
+    if (args.category !== undefined) patch.category = args.category;
+    if (args.location !== undefined) patch.location = cleanText(args.location, "Location", 80, false) || undefined;
+    if (args.website !== undefined) patch.website = optionalUrl(args.website, "Website");
+    if (args.linkedinUrl !== undefined) patch.linkedinUrl = cleanLinkedin(args.linkedinUrl);
+    if (args.bio !== undefined) patch.bio = cleanText(args.bio, "Bio", LIMITS.juryBio, false) || undefined;
+    if (args.email !== undefined) patch.email = cleanEmail(args.email);
+    if (args.isFounding !== undefined) patch.isFounding = args.isFounding;
+    if (args.avatarId !== undefined) {
+      if (args.avatarId) await assertMedia(ctx, args.avatarId, "Photo", "image");
+      if (juror.avatarId && juror.avatarId !== args.avatarId) await deleteMedia(ctx, juror.avatarId);
+      patch.avatarId = args.avatarId ?? undefined;
+    }
+    await ctx.db.patch(jurorId, { ...patch, updatedAt: Date.now() });
+    const slug = patch.slug ?? juror.slug;
+    if (isPublicJuror(juror)) await scheduleIndexNow(ctx, ["/jury", `/jury/${slug}`]);
+    return { slug };
   },
 });
 
-/** Admin: send a pending invitation again with a fresh link. */
-export const resendInvite = action({
-  args: { inviteId: v.id("juryInvites") },
-  returns: inviteResult,
-  handler: async (ctx, { inviteId }): Promise<{ link: string; sent: boolean; error: string | null }> => {
-    const token = newToken();
-    const invite = await ctx.runMutation(internal.jury.rotateInvite, { inviteId, tokenHash: await sha256Hex(token) });
-    const link = `${siteUrl()}/jury/join?token=${token}`;
-    const error = await sendInviteEmail(invite.email, invite.name, invite.note, link);
-    await ctx.runMutation(internal.jury.recordSend, { inviteId, error: error ?? undefined });
-    return { link, sent: error === null, error };
-  },
-});
-
-export const revokeInvite = mutation({
-  args: { inviteId: v.id("juryInvites") },
+/** Admin: delete a juror profile nobody has claimed. Linked listings stay, unlinked. */
+export const deleteJuror = mutation({
+  args: { jurorId: v.id("jurors") },
   returns: v.null(),
-  handler: async (ctx, { inviteId }) => {
+  handler: async (ctx, { jurorId }) => {
     await requireAdmin(ctx);
-    const invite = await ctx.db.get(inviteId);
-    if (!invite) fail("Invitation not found.");
-    if (invite.status !== "pending") fail("Only open invitations can be revoked.");
-    await ctx.db.patch(inviteId, { status: "revoked" });
+    const juror = await ctx.db.get(jurorId);
+    if (!juror) fail("Juror not found.");
+    if (isClaimedJuror(juror)) fail("This profile has been claimed. Remove the juror from the jury instead.");
+    const linked = await ctx.db
+      .query("listings")
+      .withIndex("by_juror", (q) => q.eq("jurorId", jurorId))
+      .collect();
+    for (const l of linked) await ctx.db.patch(l._id, { jurorId: undefined, updatedAt: Date.now() });
+    if (juror.avatarId) await deleteMedia(ctx, juror.avatarId);
+    await ctx.db.delete(jurorId);
     return null;
   },
 });
 
-/** Admin: every invitation and juror. */
+/** Admin: every juror, claimed or not, with linked listings and claim tokens. */
 export const adminOverview = query({
   args: {},
-  returns: v.object({
-    invites: v.array(
-      v.object({
-        id: v.id("juryInvites"),
-        email: v.string(),
-        name: v.string(),
-        status: v.union(v.literal("pending"), v.literal("accepted"), v.literal("revoked"), v.literal("expired")),
-        createdAt: v.number(),
-        expiresAt: v.number(),
-        sentAt: v.union(v.number(), v.null()),
-        sendError: v.union(v.string(), v.null()),
-        invitedBy: v.union(v.string(), v.null()),
-      }),
-    ),
-    jurors: v.array(
-      v.object({
-        id: v.id("jurors"),
-        ...jurorPublic.fields,
-        email: v.union(v.string(), v.null()),
-        active: v.boolean(),
-        joinedAt: v.number(),
-        evaluations: v.number(),
-      }),
-    ),
-  }),
+  returns: v.array(
+    v.object({
+      id: v.id("jurors"),
+      ...jurorPublic.fields,
+      status: v.union(v.literal("unclaimed"), v.literal("claimed")),
+      email: v.union(v.string(), v.null()), // contact email, or the account's once claimed
+      accountEmail: v.union(v.string(), v.null()),
+      avatarId: v.union(vMediaId, v.null()),
+      claimToken: v.union(v.string(), v.null()),
+      active: v.boolean(),
+      joinedAt: v.number(),
+      claimedAt: v.union(v.number(), v.null()),
+      evaluations: v.number(),
+      listings: v.array(
+        v.object({ id: v.id("listings"), slug: v.string(), title: v.string(), isClaimed: v.boolean(), status: v.string() }),
+      ),
+    }),
+  ),
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    const now = Date.now();
-    const invites = await ctx.db.query("juryInvites").withIndex("by_created").order("desc").take(300);
-    const jurors = await ctx.db.query("jurors").take(300);
-    return {
-      invites: await Promise.all(
-        invites.map(async (i) => ({
-          id: i._id,
-          email: i.email,
-          name: i.name,
-          status: i.status === "pending" && now > i.expiresAt ? ("expired" as const) : i.status,
-          createdAt: i.createdAt,
-          expiresAt: i.expiresAt,
-          sentAt: i.sentAt ?? null,
-          sendError: i.sendError ?? null,
-          invitedBy: (await ctx.db.get(i.invitedBy))?.name ?? null,
-        })),
-      ),
-      jurors: await Promise.all(
-        jurors
-          .sort((a, b) => Number(b.active) - Number(a.active) || a.joinedAt - b.joinedAt)
-          .map(async (j) => ({
-            id: j._id,
-            ...(await toJurorPublic(ctx, j)),
-            email: (await ctx.db.get(j.userId))?.email ?? null,
-            active: j.active,
-            joinedAt: j.joinedAt,
-            evaluations: (
-              await ctx.db
-                .query("juryEvaluations")
-                .withIndex("by_juror", (q) => q.eq("jurorId", j._id))
-                .take(1000)
-            ).length,
+    const jurors = await ctx.db.query("jurors").take(500);
+    jurors.sort(
+      (a, b) =>
+        Number(isClaimedJuror(a)) - Number(isClaimedJuror(b)) ||
+        Number(b.active) - Number(a.active) ||
+        b.joinedAt - a.joinedAt,
+    );
+    return await Promise.all(
+      jurors.map(async (j) => {
+        const account = j.userId ? await ctx.db.get(j.userId) : null;
+        const listings = await ctx.db
+          .query("listings")
+          .withIndex("by_juror", (q) => q.eq("jurorId", j._id))
+          .take(50);
+        return {
+          id: j._id,
+          ...(await toJurorPublic(ctx, j)),
+          status: isClaimedJuror(j) ? ("claimed" as const) : ("unclaimed" as const),
+          email: j.email ?? account?.email ?? null,
+          accountEmail: account?.email ?? null,
+          avatarId: j.avatarId ?? null,
+          claimToken: isClaimedJuror(j) ? null : (j.claimToken ?? null),
+          active: j.active,
+          joinedAt: j.joinedAt,
+          claimedAt: j.claimedAt ?? null,
+          evaluations: await evaluationCount(ctx, j._id),
+          listings: listings.map((l) => ({
+            id: l._id,
+            slug: l.slug,
+            title: l.title,
+            isClaimed: l.isClaimed,
+            status: l.status,
           })),
-      ),
-    };
+        };
+      }),
+    );
+  },
+});
+
+/** Admin: jurors to pick from when linking a listing (bundle). */
+export const options = query({
+  args: {},
+  returns: v.array(v.object({ id: v.id("jurors"), name: v.string(), claimed: v.boolean() })),
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const jurors = await ctx.db.query("jurors").take(500);
+    return jurors
+      .map((j) => ({ id: j._id, name: j.name, claimed: isClaimedJuror(j) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   },
 });
 
@@ -655,7 +662,7 @@ export const setJurorActive = mutation({
     const juror = await ctx.db.get(jurorId);
     if (!juror) fail("Juror not found.");
     await ctx.db.patch(jurorId, { active, updatedAt: Date.now() });
-    await scheduleIndexNow(ctx, ["/jury"]);
+    if (isClaimedJuror(juror)) await scheduleIndexNow(ctx, ["/jury", `/jury/${juror.slug}`]);
     return null;
   },
 });

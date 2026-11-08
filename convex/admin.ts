@@ -94,6 +94,9 @@ export const createListing = mutation({
     editorialScores: v.optional(pillars),
     awards: v.optional(v.array(award)), // awarded: at least one
     isClaimed: v.boolean(),
+    isStartup: v.optional(v.boolean()),
+    // Pre-created for this juror: their claim link claims this listing too.
+    jurorId: v.optional(v.id("jurors")),
   },
   returns: v.object({ id: v.id("listings"), slug: v.string() }),
   handler: async (ctx, args) => {
@@ -114,6 +117,7 @@ export const createListing = mutation({
     const galleryIds = await checkGallery(ctx, args.galleryIds);
     if (args.videoId) await assertMedia(ctx, args.videoId, "Preview video", "video");
     await assertUniqueUrl(ctx, url);
+    if (args.jurorId && !(await ctx.db.get(args.jurorId))) fail("That juror no longer exists.");
 
     const creatorId = await findOrCreateCreator(ctx, {
       name: creditName,
@@ -165,6 +169,8 @@ export const createListing = mutation({
       awards: args.status === "awarded" ? awards : [],
       awardedAt: args.status === "awarded" ? votingEndsAt : undefined,
       isClaimed: args.isClaimed,
+      isStartup: args.isStartup || undefined,
+      jurorId: args.jurorId,
       createdAt: now,
       updatedAt: now,
     });
@@ -195,6 +201,10 @@ export const updateListing = mutation({
     creditName: v.optional(v.string()),
     creditUrl: v.optional(v.string()), // "" clears it
     isClaimed: v.optional(v.boolean()),
+    isStartup: v.optional(v.boolean()),
+    jurorId: v.optional(v.union(v.id("jurors"), v.null())), // null unlinks
+    // Outbound link follow state: true/false sets it, null returns to automatic (followed once claimed).
+    isDoFollow: v.optional(v.union(v.boolean(), v.null())),
   },
   returns: v.object({ slug: v.string() }),
   handler: async (ctx, { id, ...args }) => {
@@ -233,7 +243,20 @@ export const updateListing = mutation({
     if (args.creditUrl !== undefined) {
       patch.creditUrl = args.creditUrl.trim() ? normalizeUrl(args.creditUrl, "Creator website") : undefined;
     }
-    if (args.isClaimed !== undefined) patch.isClaimed = args.isClaimed;
+    if (args.isClaimed !== undefined) {
+      patch.isClaimed = args.isClaimed;
+      // A claimed listing has no open claim link.
+      if (args.isClaimed && listing.claimToken) {
+        patch.claimToken = undefined;
+        patch.claimTokenUsed = listing.claimToken;
+      }
+    }
+    if (args.isStartup !== undefined) patch.isStartup = args.isStartup || undefined;
+    if (args.jurorId !== undefined) {
+      if (args.jurorId && !(await ctx.db.get(args.jurorId))) fail("That juror no longer exists.");
+      patch.jurorId = args.jurorId ?? undefined;
+    }
+    if (args.isDoFollow !== undefined) patch.isDoFollow = args.isDoFollow ?? undefined;
     if (args.creditName !== undefined) {
       const creditName = cleanText(args.creditName, "Made by", LIMITS.creditName);
       if (creditName !== listing.creditName) {

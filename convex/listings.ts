@@ -19,6 +19,7 @@ import {
   fail,
   finalizeListing,
   findOrCreateCreator,
+  isDoFollow,
   isPublicStatus,
   listingCategories,
   mediaUrls,
@@ -132,6 +133,7 @@ export const submit = mutation({
     creditName: v.string(),
     creditUrl: v.optional(v.string()),
     submissionTier: v.union(v.literal("standard"), v.literal("express")),
+    isStartup: v.optional(v.boolean()),
     coverId: vMediaId,
     galleryIds: v.optional(v.array(vMediaId)),
     videoId: v.optional(vMediaId),
@@ -193,6 +195,7 @@ export const submit = mutation({
     const slug = await uniqueSlug(ctx, "listings", slugify(title));
     await ctx.db.insert("listings", {
       ownerId: user._id,
+      isStartup: args.isStartup || undefined,
       creatorId,
       source: "submission",
       submissionTier: "standard",
@@ -320,6 +323,14 @@ const reviewListing = v.object({
   finalScore: v.union(v.number(), v.null()),
   awards: v.array(v.union(v.literal("SOTD"), v.literal("BSC"), v.literal("HM"))),
   isClaimed: v.boolean(),
+  isStartup: v.boolean(),
+  /** Effective follow state of the outbound links, and the admin's explicit setting (null: automatic). */
+  isDoFollow: v.boolean(),
+  doFollowSetting: v.union(v.boolean(), v.null()),
+  /** Pre-created for this juror (bundled claim link). */
+  juror: v.union(v.object({ id: v.id("jurors"), name: v.string(), claimed: v.boolean() }), v.null()),
+  /** Secret claim link token while unclaimed (admin only). */
+  claimToken: v.union(v.string(), v.null()),
   createdAt: v.number(),
   coverUrl: v.union(v.string(), v.null()),
   galleryUrls: v.array(v.string()),
@@ -328,6 +339,11 @@ const reviewListing = v.object({
   videoUrl: v.union(v.string(), v.null()),
   submitter: v.union(v.object({ name: v.string(), email: v.string() }), v.null()),
 });
+
+async function jurorRef(ctx: Parameters<typeof mediaUrls>[0], id: Doc<"listings">["jurorId"]) {
+  const juror = id ? await ctx.db.get(id) : null;
+  return juror ? { id: juror._id, name: juror.name, claimed: juror.status !== "unclaimed" } : null;
+}
 
 async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"listings">) {
   const owner = listing.ownerId ? await ctx.db.get(listing.ownerId) : null;
@@ -361,6 +377,11 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
     finalScore: listing.finalScore ?? null,
     awards: listing.awards,
     isClaimed: listing.isClaimed,
+    isStartup: listing.isStartup ?? false,
+    isDoFollow: isDoFollow(listing),
+    doFollowSetting: listing.isDoFollow ?? null,
+    juror: await jurorRef(ctx, listing.jurorId),
+    claimToken: listing.isClaimed ? null : (listing.claimToken ?? null),
     createdAt: listing.createdAt,
     ...(await mediaUrls(ctx, listing)),
     gallery: await Promise.all(

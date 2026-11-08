@@ -292,6 +292,8 @@ export const publicListing = v.object({
   votingEndsAt: v.number(),
   awardedAt: v.union(v.number(), v.null()),
   isClaimed: v.boolean(),
+  isStartup: v.boolean(),
+  isDoFollow: v.boolean(), // false: outbound links get rel="nofollow"
   coverUrl: v.union(v.string(), v.null()),
   galleryUrls: v.array(v.string()),
   videoUrl: v.union(v.string(), v.null()),
@@ -352,12 +354,36 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
     votingEndsAt: listing.votingEndsAt ?? publishedAt,
     awardedAt: listing.awardedAt ?? null,
     isClaimed: listing.isClaimed,
+    isStartup: listing.isStartup ?? false,
+    isDoFollow: isDoFollow(listing),
     ...(await mediaUrls(ctx, listing)),
   };
 }
 
 export function categoryName(slug: string) {
   return CATEGORIES.find((c) => c.slug === slug)?.name ?? slug;
+}
+
+/** Whether a listing's outbound links are followed: explicit flag, else once claimed. */
+export function isDoFollow(listing: Pick<Doc<"listings">, "isDoFollow" | "isClaimed">) {
+  return listing.isDoFollow ?? listing.isClaimed;
+}
+
+/**
+ * The fields that hand a listing to its owner: claimed, followed links, and
+ * the claim link burned (kept as claimTokenUsed so the old URL redirects).
+ */
+export function claimedListingPatch(listing: Doc<"listings">, ownerId: Id<"users">, now: number) {
+  return {
+    ownerId,
+    isClaimed: true,
+    // Back to automatic (followed while claimed): un-claiming later returns
+    // the links to nofollow, and no stale admin override survives the claim.
+    isDoFollow: undefined,
+    claimToken: undefined,
+    ...(listing.claimToken ? { claimTokenUsed: listing.claimToken } : {}),
+    updatedAt: now,
+  };
 }
 
 /** A listing's categories, primary first (older rows only have `category`). */

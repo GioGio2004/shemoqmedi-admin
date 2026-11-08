@@ -2,9 +2,10 @@
 
 import { showError } from "./Alerts";
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import {
   CATEGORIES,
   CREATOR_TIERS,
@@ -14,6 +15,7 @@ import {
   type CreatorTier,
   type RegionSlug,
 } from "@/convex/lib/taxonomy";
+import { Select } from "./Select";
 
 type Listing = NonNullable<FunctionReturnType<typeof api.listings.reviewDetail>>;
 type UpdateArgs = FunctionArgs<typeof api.admin.updateListing>;
@@ -31,7 +33,22 @@ type Fields = {
   creatorTier: CreatorTier;
   region: RegionSlug;
   isClaimed: boolean;
+  isStartup: boolean;
+  jurorId: string; // "" = not bundled with a juror
+  doFollow: DoFollow;
 };
+
+/** Outbound link setting: automatic (followed once claimed) or forced either way. */
+type DoFollow = "auto" | "follow" | "nofollow";
+const DO_FOLLOW_OPTIONS: { value: DoFollow; label: string }[] = [
+  { value: "auto", label: "Automatic (followed once claimed)" },
+  { value: "follow", label: "Followed" },
+  { value: "nofollow", label: "Nofollow" },
+];
+const toDoFollow = (setting: boolean | null): DoFollow =>
+  setting === null ? "auto" : setting ? "follow" : "nofollow";
+const fromDoFollow = (value: DoFollow): boolean | null =>
+  value === "auto" ? null : value === "follow";
 
 type Key = keyof Fields;
 const KEYS: Key[] = [
@@ -47,6 +64,9 @@ const KEYS: Key[] = [
   "creatorTier",
   "region",
   "isClaimed",
+  "isStartup",
+  "jurorId",
+  "doFollow",
 ];
 
 function fromListing(l: Listing): Fields {
@@ -63,6 +83,9 @@ function fromListing(l: Listing): Fields {
     creatorTier: l.creatorTier,
     region: l.region,
     isClaimed: l.isClaimed,
+    isStartup: l.isStartup,
+    jurorId: l.juror?.id ?? "",
+    doFollow: toDoFollow(l.doFollowSetting),
   };
 }
 
@@ -79,6 +102,7 @@ function differs(a: Fields[Key], b: Fields[Key]): boolean {
  */
 export function ListingEditForm({ listing }: { listing: Listing }) {
   const update = useMutation(api.admin.updateListing);
+  const jurors = useQuery(api.jury.options, {});
   const saved = fromListing(listing);
   const [edits, setEdits] = useState<Partial<Fields>>({});
   const [busy, setBusy] = useState(false);
@@ -116,8 +140,12 @@ export function ListingEditForm({ listing }: { listing: Listing }) {
     if (busy || missing || changed.length === 0) return;
     const args: UpdateArgs = { id: listing.id };
     for (const k of changed) {
-      const v = value[k];
-      (args as Record<string, unknown>)[k] = typeof v === "string" ? v.trim() : v;
+      if (k === "jurorId") args.jurorId = value.jurorId ? (value.jurorId as Id<"jurors">) : null;
+      else if (k === "doFollow") args.isDoFollow = fromDoFollow(value.doFollow);
+      else {
+        const v = value[k];
+        (args as Record<string, unknown>)[k] = typeof v === "string" ? v.trim() : v;
+      }
     }
     setBusy(true);
     setError(null);
@@ -359,9 +387,54 @@ export function ListingEditForm({ listing }: { listing: Listing }) {
             />
             <span>
               Site claimed
-              <small>Mark this site as claimed by the people who made it.</small>
+              <small>Mark this site as claimed by the people who made it. This retires its claim link.</small>
             </span>
           </label>
+
+          <label className="admin-check">
+            <input
+              type="checkbox"
+              checked={value.isStartup}
+              onChange={(e) => set("isStartup", e.target.checked)}
+            />
+            <span>
+              Startup
+              <small>Shown in the Startups collection.</small>
+            </span>
+          </label>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="grid content-start gap-2">
+              <span id={`juror-${listing.id}`} className="admin-eyebrow">
+                Pre-created for juror (bundle)
+              </span>
+              <Select
+                labelledBy={`juror-${listing.id}`}
+                value={value.jurorId}
+                onChange={(next) => set("jurorId", next)}
+                placeholder={listing.juror?.name ?? "None"}
+                options={[
+                  { value: "", label: "None" },
+                  ...(jurors ?? []).map((j) => ({ value: j.id, label: j.claimed ? `${j.name} (claimed)` : j.name })),
+                ]}
+              />
+              <span className="text-xs text-black/55">The juror&apos;s claim link claims this listing too.</span>
+            </div>
+            <div className="grid content-start gap-2">
+              <span id={`follow-${listing.id}`} className="admin-eyebrow">
+                Outbound links
+              </span>
+              <Select
+                labelledBy={`follow-${listing.id}`}
+                value={value.doFollow}
+                onChange={(next) => set("doFollow", next as DoFollow)}
+                options={DO_FOLLOW_OPTIONS}
+              />
+              <span className="text-xs text-black/55">
+                Now {listing.isDoFollow ? "followed (rel=\"noopener\")" : "nofollow (rel=\"nofollow noopener\")"}.
+              </span>
+            </div>
+          </div>
         </fieldset>
 
         {error && (

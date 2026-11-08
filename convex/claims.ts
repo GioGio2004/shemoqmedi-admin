@@ -3,7 +3,7 @@ import { mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { LIMITS } from "./lib/taxonomy";
-import { cleanText, fail, normalizeUrl } from "./lib/listingHelpers";
+import { claimedListingPatch, cleanText, fail, normalizeUrl } from "./lib/listingHelpers";
 
 const claimStatus = v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"));
 
@@ -155,7 +155,7 @@ export const approve = mutation({
       const listing = await ctx.db.get(claim.listingId);
       if (!listing) fail("The site no longer exists.");
       if (listing.isClaimed) fail("This site was already claimed. Reject this claim instead.");
-      await ctx.db.patch(listing._id, { ownerId: claim.userId, isClaimed: true, updatedAt: now });
+      await ctx.db.patch(listing._id, claimedListingPatch(listing, claim.userId, now));
     } else if (claim.creatorId) {
       const creator = await ctx.db.get(claim.creatorId);
       if (!creator) fail("The creator profile no longer exists.");

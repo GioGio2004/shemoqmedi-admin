@@ -10,6 +10,7 @@
 
 import type * as admin from "../admin.js";
 import type * as authHelpers from "../authHelpers.js";
+import type * as claimLinks from "../claimLinks.js";
 import type * as claims from "../claims.js";
 import type * as creators from "../creators.js";
 import type * as crons from "../crons.js";
@@ -38,6 +39,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   authHelpers: typeof authHelpers;
+  claimLinks: typeof claimLinks;
   claims: typeof claims;
   creators: typeof creators;
   crons: typeof crons;

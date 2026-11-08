@@ -14,6 +14,7 @@ import { ListingEditForm } from "./ListingEditForm";
 import { MediaPanel } from "./MediaPanel";
 import { LifecyclePanel } from "./LifecyclePanel";
 import { BadgeKit } from "./BadgeKit";
+import { ClaimLink } from "./ClaimLink";
 import { SOURCE_LABEL, safeHref, storefrontCreatorUrl } from "./format";
 
 /** Full control panel for one listing: details, media, lifecycle, scores. */
@@ -125,6 +126,30 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
             awards={listing.awards}
           />
 
+          {!listing.isClaimed && (
+            <section className="admin-panel grid gap-4" aria-labelledby="claim-link-heading">
+              <p id="claim-link-heading" className="admin-eyebrow">
+                Claim link
+              </p>
+              <p className="text-xs leading-relaxed text-black/55">
+                Send this private link to the site&apos;s owner. Signing in through it claims the listing and makes its
+                links followed. It works once.
+              </p>
+              <ClaimLink target={{ kind: "listing", id: listing.id }} token={listing.claimToken} rotatable />
+              {listing.juror && (
+                <p className="text-xs leading-relaxed text-black/55">
+                  Bundled with juror{" "}
+                  <Link href="/jury" className="underline underline-offset-4">
+                    {listing.juror.name}
+                  </Link>
+                  {listing.juror.claimed
+                    ? " (claimed)."
+                    : ": their juror link claims this listing too."}
+                </p>
+              )}
+            </section>
+          )}
+
           <BadgeKit listing={listing} />
 
           <section className="admin-panel" aria-labelledby="facts-heading">
@@ -173,6 +198,25 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
                     </>
                   )}
                 </dd>
+              </div>
+              {listing.juror && (
+                <div className="wide">
+                  <dt>Pre-created for juror</dt>
+                  <dd>
+                    <Link href="/jury" className="underline underline-offset-4">
+                      {listing.juror.name}
+                    </Link>
+                    {listing.juror.claimed ? " (claimed)" : " (unclaimed)"}
+                  </dd>
+                </div>
+              )}
+              <div>
+                <dt>Startup</dt>
+                <dd>{listing.isStartup ? "Yes" : "No"}</dd>
+              </div>
+              <div>
+                <dt>Outbound links</dt>
+                <dd>{listing.isDoFollow ? "Followed" : "Nofollow"}</dd>
               </div>
               <div>
                 <dt>Source</dt>

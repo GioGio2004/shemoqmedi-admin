@@ -2,9 +2,9 @@
 
 import { showError } from "./Alerts";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useRef, useState } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import {
@@ -26,6 +26,7 @@ import {
 } from "@/convex/lib/taxonomy";
 import { MediaPicker, MultiImagePicker, useMediaUpload } from "./MediaUpload";
 import { score } from "./format";
+import { Select } from "./Select";
 
 type CreateStatus = "pending" | "in_voting" | "awarded" | "archived";
 type Phase = "idle" | "uploading" | "saving";
@@ -60,7 +61,9 @@ const NO_MEDIA: MediaState = { file: null, error: null };
 
 export function ListingCreateForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const createListing = useMutation(api.admin.createListing);
+  const jurors = useQuery(api.jury.options, {});
   const uploadFile = useMediaUpload();
   // Files already uploaded in this session, so a retry after a failed save
   // does not upload the same screenshot twice.
@@ -85,6 +88,9 @@ export function ListingCreateForm() {
   const [tier, setTier] = useState<CreatorTier>("solo");
   const [region, setRegion] = useState<RegionSlug>("georgia");
   const [isClaimed, setIsClaimed] = useState(false);
+  const [isStartup, setIsStartup] = useState(false);
+  // /listings/new?juror=<id> (from the Jury page) pre-picks the juror to bundle with.
+  const [jurorId, setJurorId] = useState(() => searchParams.get("juror") ?? "");
 
   const [cover, setCover] = useState<MediaState>(NO_MEDIA);
   const [extras, setExtras] = useState<File[]>([]);
@@ -134,6 +140,9 @@ export function ListingCreateForm() {
     if (categories.length === 0) return "Choose at least one category.";
     if (!creditName.trim()) return "Add who made the site.";
     if (!cover.file) return "Add the cover screenshot.";
+    if (jurorId && jurors && !jurors.some((j) => j.id === jurorId)) {
+      return "That juror no longer exists. Pick another one or None.";
+    }
     const fileError = cover.error ?? video.error;
     if (fileError) return fileError;
     if (status === "in_voting") {
@@ -198,6 +207,8 @@ export function ListingCreateForm() {
         editorialScores,
         awards: status === "awarded" ? awards : undefined,
         isClaimed,
+        isStartup,
+        jurorId: jurorId ? (jurorId as Id<"jurors">) : undefined,
       });
       router.push(`/review/${id}`);
     } catch (err) {
@@ -410,12 +421,42 @@ export function ListingCreateForm() {
               </div>
 
               <label className="admin-check">
+                <input type="checkbox" checked={isStartup} onChange={(e) => setIsStartup(e.target.checked)} />
+                <span>
+                  Startup
+                  <small>Shown in the Startups collection.</small>
+                </span>
+              </label>
+
+              <label className="admin-check">
                 <input type="checkbox" checked={isClaimed} onChange={(e) => setIsClaimed(e.target.checked)} />
                 <span>
                   Owner has claimed this site
-                  <small>Leave off for sites you list on someone&apos;s behalf.</small>
+                  <small>
+                    Leave off for sites you list on someone&apos;s behalf. Unclaimed listings get a claim link, and
+                    their links stay nofollow until claimed.
+                  </small>
                 </span>
               </label>
+
+              <div className="grid gap-2 md:max-w-md">
+                <span id="bundle-juror" className="admin-eyebrow">
+                  Pre-created for juror (bundle, optional)
+                </span>
+                <Select
+                  labelledBy="bundle-juror"
+                  value={jurorId}
+                  onChange={setJurorId}
+                  placeholder={jurors === undefined ? "Loading…" : "None"}
+                  options={[
+                    { value: "", label: "None" },
+                    ...(jurors ?? []).map((j) => ({ value: j.id, label: j.claimed ? `${j.name} (claimed)` : j.name })),
+                  ]}
+                />
+                <span className="text-xs text-black/55">
+                  The juror&apos;s claim link claims this listing too. Pick their own site.
+                </span>
+              </div>
             </section>
 
             <section className="admin-panel grid gap-6" aria-labelledby="lifecycle-heading">

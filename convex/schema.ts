@@ -29,6 +29,14 @@ export const pillars = v.object({
 /** A screenshot or video: Convex storage file or ImageKit `media` row (see lib/media.ts). */
 const mediaId = v.union(v.id("_storage"), v.id("media"));
 
+/** Jury panels (lib/taxonomy.ts JURY_CATEGORIES has the display names). */
+export const juryCategory = v.union(
+  v.literal("design"),
+  v.literal("engineering"),
+  v.literal("venture"),
+  v.literal("academic"),
+);
+
 export default defineSchema({
   // Files uploaded to ImageKit (convex/media.ts). WebP screenshots and
   // MP4/WebM previews under /listings/<slug>/ with SEO-friendly names.
@@ -131,7 +139,19 @@ export default defineSchema({
     awards: v.array(award),
     awardedAt: v.optional(v.number()),
 
+    // Unclaimed = admin-created and not yet owned (ownerId empty). Claiming
+    // (claimLinks.claim, or an approved claim request) sets ownerId.
     isClaimed: v.boolean(),
+    // Secret claim link token (64 hex chars) while unclaimed; moved to
+    // claimTokenUsed when claimed so an old link redirects instead of failing.
+    claimToken: v.optional(v.string()),
+    claimTokenUsed: v.optional(v.string()),
+    // Pre-created for an invited juror: claiming the juror's link claims this too.
+    jurorId: v.optional(v.id("jurors")),
+    isStartup: v.optional(v.boolean()), // shown in the Startups collection
+    // Outbound links are rel="nofollow" until claimed. Absent: follows isClaimed;
+    // an admin can set it explicitly either way.
+    isDoFollow: v.optional(v.boolean()),
 
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -142,6 +162,9 @@ export default defineSchema({
     .index("by_creator", ["creatorId"])
     .index("by_status", ["status", "createdAt"])
     .index("by_status_published", ["status", "publishedAt"])
+    .index("by_claimToken", ["claimToken"])
+    .index("by_claimTokenUsed", ["claimTokenUsed"])
+    .index("by_juror", ["jurorId"])
     .index("by_status_votingEndsAt", ["status", "votingEndsAt"]),
 
   // One community vote per user per listing, during the voting window.
@@ -155,27 +178,42 @@ export default defineSchema({
     .index("by_listing", ["listingId"])
     .index("by_user", ["userId"]),
 
-  // Jury members. Joining is by invitation only (juryInvites); one row per
-  // user. `active: false` removes them from the jury but keeps their
-  // evaluations. Their photo is their Clerk profile image (users.profilePicture).
+  // Jury members. An admin pre-creates the profile (status "unclaimed", no
+  // userId) and shares its claim link; claiming binds it to the user's
+  // account. Unclaimed profiles are never public. Rows without a status were
+  // created by the older email-invite flow and are claimed. `active: false`
+  // takes someone off the jury but keeps their evaluations. Photo: the
+  // user's Clerk image if they have one, else the admin-uploaded avatar,
+  // else a grey placeholder.
   jurors: defineTable({
-    userId: v.id("users"),
-    slug: v.string(), // anchor on /jury (#slug)
+    userId: v.optional(v.id("users")),
+    status: v.optional(v.union(v.literal("unclaimed"), v.literal("claimed"))),
+    slug: v.string(), // /jury/<slug>
     name: v.string(),
     title: v.string(), // "Creative director at Studio X"
+    category: v.optional(juryCategory),
     location: v.optional(v.string()),
-    website: v.optional(v.string()),
+    website: v.optional(v.string()), // personal site; no link shown when empty
+    linkedinUrl: v.optional(v.string()),
     bio: v.optional(v.string()),
+    avatarId: v.optional(mediaId), // admin-uploaded (ImageKit)
+    email: v.optional(v.string()), // private: for emailing the claim link
+    isFounding: v.optional(v.boolean()), // "Founding Jury" badge
+    claimToken: v.optional(v.string()),
+    claimTokenUsed: v.optional(v.string()),
+    claimedAt: v.optional(v.number()),
     active: v.boolean(),
-    joinedAt: v.number(),
+    joinedAt: v.number(), // created (unclaimed) or joined
     updatedAt: v.number(),
   })
     .index("by_user", ["userId"])
     .index("by_slug", ["slug"])
-    .index("by_active", ["active", "joinedAt"]),
+    .index("by_active", ["active", "joinedAt"])
+    .index("by_claimToken", ["claimToken"])
+    .index("by_claimTokenUsed", ["claimTokenUsed"]),
 
-  // An admin's invitation to join the jury, emailed through Resend. Only the
-  // SHA-256 of the link token is stored; resending issues a new token.
+  // Legacy: email invitations from before pre-created profiles and claim
+  // links. Nothing writes here any more; kept so existing rows stay valid.
   juryInvites: defineTable({
     email: v.string(), // lowercased; the account that accepts must use it
     name: v.string(),

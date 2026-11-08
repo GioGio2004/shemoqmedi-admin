@@ -27,6 +27,10 @@ export const cast = mutation({
       const creator = await ctx.db.get(listing.creatorId);
       if (creator?.claimedBy === user._id) fail("You can't vote on your own site.");
     }
+    if (listing.jurorId) {
+      const juror = await ctx.db.get(listing.jurorId);
+      if (juror?.userId === user._id) fail("You can't vote on your own site.");
+    }
 
     const existing = await ctx.db
       .query("votes")
