@@ -20,6 +20,7 @@ import type * as jury from "../jury.js";
 import type * as lib_imagekitServer from "../lib/imagekitServer.js";
 import type * as lib_listingHelpers from "../lib/listingHelpers.js";
 import type * as lib_media from "../lib/media.js";
+import type * as lib_r2 from "../lib/r2.js";
 import type * as lib_scoring from "../lib/scoring.js";
 import type * as lib_taxonomy from "../lib/taxonomy.js";
 import type * as lib_utils from "../lib/utils.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   "lib/imagekitServer": typeof lib_imagekitServer;
   "lib/listingHelpers": typeof lib_listingHelpers;
   "lib/media": typeof lib_media;
+  "lib/r2": typeof lib_r2;
   "lib/scoring": typeof lib_scoring;
   "lib/taxonomy": typeof lib_taxonomy;
   "lib/utils": typeof lib_utils;

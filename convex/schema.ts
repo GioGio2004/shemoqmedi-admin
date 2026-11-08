@@ -56,8 +56,11 @@ export default defineSchema({
   // Files uploaded to ImageKit (convex/media.ts). WebP screenshots and
   // MP4/WebM previews under /listings/<slug>/ with SEO-friendly names.
   media: defineTable({
-    fileId: v.string(), // ImageKit file id
-    url: v.string(), // https://ik.imagekit.io/<id>/listings/<slug>/<name>
+    // ImageKit (screenshots, older videos): fileId = ImageKit file id.
+    // R2 (videos, store "r2"): fileId = object key listings/<slug>/<name>.mp4.
+    store: v.optional(v.literal("r2")),
+    fileId: v.string(),
+    url: v.string(), // public URL at upload time (R2 rows are re-read from R2_PUBLIC_URL)
     filePath: v.string(),
     kind: v.union(v.literal("image"), v.literal("video")),
     contentType: v.string(),

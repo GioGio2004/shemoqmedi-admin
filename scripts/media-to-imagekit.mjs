@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Keeps every listing file on ImageKit and as small as possible.
 //
-//   1. Moves any screenshot/video still in Convex storage to ImageKit:
-//      screenshots → WebP (max 2560 px wide, q 86), videos → compressed MP4.
-//   2. Re-compresses preview videos on ImageKit bigger than 3 MB
-//      (H.264, max 1280 px wide, no audio track, fast start).
-//   3. Deletes every Convex storage file no listing uses any more.
+//   1. Moves any screenshot still in Convex storage to ImageKit as WebP
+//      (max 2560 px wide, q 86).
+//   2. Deletes every Convex storage file no listing uses any more.
+// Videos are skipped: they live on Cloudflare R2 now (every new video on
+// ImageKit costs video processing units). Move them with "Move files" on the
+// admin overview, which compresses each one in the browser.
 // Files get SEO names in /listings/<slug>/, same as browser uploads.
 //
 // Needs ffmpeg + ffprobe on PATH and IMAGEKIT_PRIVATE_KEY in .env.local.
@@ -22,7 +23,6 @@ import { join } from "node:path";
 const argv = process.argv.slice(2);
 const prod = argv.includes("--prod");
 const dryRun = argv.includes("--dry-run");
-const VIDEO_TARGET_BYTES = 3 * 1024 * 1024;
 const WEBP_MAX_SIDE = 16383; // libwebp limit
 
 function envFile(name) {
@@ -68,18 +68,6 @@ function optimizeImage(dir, input, type) {
   return { path: out, type: "image/webp", ...probe(out) };
 }
 
-/** Preview video → small H.264 MP4 without audio; keeps the original if that is smaller. */
-function optimizeVideo(dir, input, type) {
-  const out = join(dir, "out.mp4");
-  execFileSync("ffmpeg", [
-    "-y", "-loglevel", "error", "-i", input, "-an",
-    "-vf", "scale='min(1280,iw)':-2", "-c:v", "libx264", "-preset", "slow", "-crf", "28",
-    "-pix_fmt", "yuv420p", "-profile:v", "high", "-movflags", "+faststart", out,
-  ]);
-  if (statSync(out).size >= statSync(input).size) return { path: input, type, ...probe(input), note: "original was smaller" };
-  return { path: out, type: "video/mp4", ...probe(out) };
-}
-
 async function upload(path, type, { slug, label }) {
   const ext = { "image/webp": "webp", "image/png": "png", "image/jpeg": "jpg", "video/mp4": "mp4", "video/webm": "webm" }[type] ?? "bin";
   const fileName = `${slug}-website-${label}.${ext}`;
@@ -114,7 +102,7 @@ async function processOne({ listingId, slug, from, url, label }, totals) {
   try {
     const src = await download(url, dir);
     const before = statSync(src.path).size;
-    const opt = src.type.startsWith("video/") ? optimizeVideo(dir, src.path, src.type) : optimizeImage(dir, src.path, src.type);
+    const opt = optimizeImage(dir, src.path, src.type);
     const after = statSync(opt.path).size;
     totals.before += before;
     totals.after += after;
@@ -135,7 +123,7 @@ async function main() {
 
   const legacy = convexRun("media:legacyFilesInternal");
   const jobs = legacy.flatMap((l) =>
-    l.items.map((item) => ({
+    l.items.filter((item) => item.role !== "video").map((item) => ({
       listingId: l.listingId,
       slug: l.slug,
       from: item.id,
@@ -143,11 +131,7 @@ async function main() {
       label: item.role === "cover" ? "cover" : item.role === "video" ? "preview" : `screenshot-${item.position}`,
     })),
   );
-  console.log(`${jobs.length} file(s) still in Convex storage.`);
-
-  const big = convexRun("media:largeVideos", { minBytes: VIDEO_TARGET_BYTES });
-  for (const v of big) jobs.push({ listingId: v.listingId, slug: v.slug, from: v.mediaId, url: v.url, label: "preview" });
-  console.log(`${big.length} ImageKit video(s) over ${mb(VIDEO_TARGET_BYTES)} to compress.`);
+  console.log(`${jobs.length} screenshot(s) still in Convex storage.`);
 
   for (const job of jobs) {
     try {

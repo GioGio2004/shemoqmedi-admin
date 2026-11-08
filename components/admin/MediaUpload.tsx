@@ -6,24 +6,37 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { LIMITS } from "@/convex/lib/taxonomy";
 import { MAX_IMAGE_INPUT_BYTES, uploadToImageKit } from "@/lib/imagekitUpload";
+import { uploadVideoToR2 } from "@/lib/videoUpload";
 
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
-const VIDEO_TYPES = ["video/mp4", "video/webm"];
+// MOV (QuickTime) too: it is re-encoded to MP4 before upload.
+const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
 
 export type UploadKind = "image" | "video";
 
 /**
- * Uploads one file to ImageKit (screenshots converted to WebP, SEO file
- * names; see lib/imagekitUpload.ts) and returns the media id the listing
- * mutations take.
+ * Uploads one file and returns the media id the listing mutations take.
+ * Screenshots go to ImageKit as WebP (lib/imagekitUpload.ts); videos are
+ * compressed in the browser and go to Cloudflare R2 (lib/videoUpload.ts).
+ * Both get SEO file names.
  *
- * @param seo.site  the listing's slug or title, used for the folder and file name
- * @param seo.label what the file is: "cover", "screenshot-3", "preview"
+ * @param seo.site   the listing's slug or title, used for the folder and file name
+ * @param seo.label  what the file is: "cover", "screenshot-3", "preview"
+ * @param onProgress videos only: 0–1 while compressing
  */
 export function useMediaUpload() {
   const getAuth = useAction(api.media.uploadAuth);
   const register = useMutation(api.media.register);
-  return async (file: File, seo: { site: string; label: string }): Promise<Id<"media">> => {
+  const getVideoUrl = useAction(api.media.videoUploadUrl);
+  const registerVideo = useMutation(api.media.registerVideo);
+  return async (
+    file: File,
+    seo: { site: string; label: string },
+    onProgress?: (fraction: number) => void,
+  ): Promise<Id<"media">> => {
+    if (file.type.startsWith("video/")) {
+      return await registerVideo(await uploadVideoToR2(file, seo, (args) => getVideoUrl(args), onProgress));
+    }
     const args = await uploadToImageKit(file, seo, () => getAuth({}));
     return await register(args);
   };
@@ -36,8 +49,9 @@ export function checkFile(file: File, kind: UploadKind, label: string): string |
     // Checked again after WebP conversion against LIMITS.imageBytes (5 MB).
     if (file.size > MAX_IMAGE_INPUT_BYTES) return `${label} must be 20 MB or less.`;
   } else {
-    if (!VIDEO_TYPES.includes(file.type)) return `${label} must be an MP4 or WebM video.`;
-    if (file.size > LIMITS.videoBytes) return `${label} must be 15 MB or less.`;
+    if (!VIDEO_TYPES.includes(file.type)) return `${label} must be an MP4, WebM or MOV video.`;
+    // Compressed before upload; length and the 15 MB stored limit are checked then.
+    if (file.size > LIMITS.videoInputBytes) return `${label} must be 500 MB or less.`;
   }
   return null;
 }

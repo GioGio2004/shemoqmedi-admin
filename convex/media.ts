@@ -5,10 +5,19 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { LIMITS } from "./lib/taxonomy";
-import { assertMedia, fail } from "./lib/listingHelpers";
+import { assertMedia, fail, slugify } from "./lib/listingHelpers";
 import { deleteMedia, mediaUrl, vMediaId, type MediaId } from "./lib/media";
+import { R2_KEY, deleteObject, headObject, presignPut, r2Configured, r2PublicUrl } from "./lib/r2";
 
-// ImageKit media pipeline.
+// Media pipeline. Screenshots go to ImageKit, preview videos to Cloudflare R2.
+//
+// ImageKit re-encodes every new video it delivers (once per browser
+// format), which burns the free plan's 500 video processing units in a few
+// uploads. R2 serves the file exactly as uploaded, so videos are compressed
+// in the browser first (lib/videoUpload.ts) and stored on R2 (lib/r2.ts):
+// videoUploadUrl → browser PUT → registerVideo → verifyVideo.
+//
+// ImageKit (screenshots):
 //
 //   1. The browser converts screenshots to WebP and names files for SEO
 //      (lib/imagekitUpload.ts in both apps).
@@ -84,7 +93,7 @@ export const uploadAuth = action({
   },
 });
 
-/** Record a finished ImageKit upload; returns the id listing mutations take. */
+/** Record a finished ImageKit upload (screenshots only); returns the id listing mutations take. */
 export const register = mutation({
   args: {
     fileId: v.string(),
@@ -105,6 +114,8 @@ export const register = mutation({
       throw new ConvexError("That upload did not come from this site. Please upload it again.");
     }
     if (!/^[A-Za-z0-9_-]{6,64}$/.test(args.fileId)) throw new ConvexError("Invalid upload.");
+    // Videos go to R2 (videoUploadUrl): an ImageKit video costs processing units.
+    if (args.kind === "video") throw new ConvexError("Videos now upload a different way. Reload the page and try again.");
     checkLimits(args.kind, args.contentType, args.size);
     const existing = await ctx.db
       .query("media")
@@ -147,6 +158,105 @@ export const verify = internalAction({
           method: "DELETE",
           headers: { Authorization: authHeader() },
         });
+      }
+    }
+    return null;
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Preview videos on R2
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A presigned URL for one direct browser → R2 video upload (valid 15 minutes). */
+export const videoUploadUrl = action({
+  args: { site: v.string(), label: v.string(), contentType: v.string(), size: v.number() },
+  returns: v.object({ uploadUrl: v.string(), key: v.string() }),
+  handler: async (ctx, { site, label, contentType, size }) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new ConvexError("Please log in to upload.");
+    if (!r2Configured()) throw new ConvexError("Video uploads are not configured yet. Please try again later.");
+    checkLimits("video", contentType, size);
+    const slug = slugify(site);
+    const ext = contentType === "video/webm" ? "webm" : "mp4";
+    // Random suffix: a replaced video never reuses a cached URL, and keys cannot be guessed.
+    const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
+    const key = `listings/${slug}/${slug}-website-${slugify(label, "preview")}-${suffix}.${ext}`;
+    return { uploadUrl: await presignPut(key), key };
+  },
+});
+
+/** Record a finished R2 video upload; returns the id listing mutations take. */
+export const registerVideo = mutation({
+  args: {
+    key: v.string(),
+    contentType: v.string(),
+    size: v.number(),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+  },
+  returns: v.id("media"),
+  handler: async (ctx, { key, contentType, size, width, height }) => {
+    const user = await requireUser(ctx);
+    if (!R2_KEY.test(key)) throw new ConvexError("That upload did not come from this site. Please upload it again.");
+    checkLimits("video", contentType, size);
+    const existing = await ctx.db
+      .query("media")
+      .withIndex("by_fileId", (q) => q.eq("fileId", key))
+      .first();
+    if (existing) return existing._id;
+    const url = r2PublicUrl(key);
+    if (!url) throw new ConvexError("Video uploads are not configured yet. Please try again later.");
+    const id = await ctx.db.insert("media", {
+      store: "r2",
+      fileId: key,
+      url,
+      filePath: `/${key}`,
+      kind: "video",
+      contentType,
+      size,
+      width,
+      height,
+      uploadedBy: user._id,
+      createdAt: Date.now(),
+    });
+    await ctx.scheduler.runAfter(0, internal.media.verifyVideo, { id, key });
+    return id;
+  },
+});
+
+/** Double-check a registered video against R2 (it exists, real size and type). */
+export const verifyVideo = internalAction({
+  args: { id: v.id("media"), key: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { id, key }) => {
+    const file = await headObject(key); // throws (and retries) on R2 errors
+    let ok = !!file;
+    if (file) {
+      try {
+        checkLimits("video", file.contentType.split(";")[0].trim(), file.size);
+      } catch {
+        ok = false;
+      }
+    }
+    if (!ok) {
+      await ctx.runMutation(internal.media.markInvalid, { id });
+      if (file) await deleteObject(key);
+    }
+    return null;
+  },
+});
+
+/** Delete videos from R2 (after a listing or its video is removed). */
+export const deleteR2 = internalAction({
+  args: { keys: v.array(v.string()) },
+  returns: v.null(),
+  handler: async (_ctx, { keys }) => {
+    for (const key of keys) {
+      try {
+        await deleteObject(key);
+      } catch (err) {
+        console.error(String(err));
       }
     }
     return null;
@@ -257,6 +367,7 @@ async function swapOnListing(ctx: MutationCtx, listing: Doc<"listings">, from: M
 }
 
 const serverFile = v.object({
+  store: v.optional(v.literal("r2")),
   fileId: v.string(),
   url: v.string(),
   filePath: v.string(),
@@ -323,7 +434,7 @@ export const deleteOrphanStorage = internalMutation({
   },
 });
 
-/** CLI: ImageKit preview videos bigger than minBytes (to re-compress). */
+/** CLI: preview videos still on ImageKit bigger than minBytes (scripts/videos-to-r2.mjs moves them to R2). */
 export const largeVideos = internalQuery({
   args: { minBytes: v.number() },
   returns: v.array(
@@ -341,7 +452,7 @@ export const largeVideos = internalQuery({
       if (!l.videoId) continue;
       const mediaId = ctx.db.normalizeId("media", l.videoId);
       const row = mediaId ? await ctx.db.get(mediaId) : null;
-      if (mediaId && row && !row.invalid && row.size > minBytes) {
+      if (mediaId && row && !row.invalid && row.store !== "r2" && row.size > minBytes) {
         out.push({ listingId: l._id, slug: l.slug, mediaId, url: row.url, size: row.size });
       }
     }
@@ -349,9 +460,37 @@ export const largeVideos = internalQuery({
   },
 });
 
-/** Admin: put an uploaded ImageKit file where an old Convex file was, then delete the old one. */
+/**
+ * Admin: every preview video still on ImageKit, with a URL for the original
+ * upload (tr=orig-true: delivered as stored, no processing units). The
+ * overview's media panel re-encodes each one and moves it to R2.
+ */
+export const imagekitVideos = query({
+  args: {},
+  returns: v.array(
+    v.object({ listingId: v.id("listings"), slug: v.string(), title: v.string(), id: v.id("media"), url: v.string() }),
+  ),
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const out = [];
+    for (const l of await ctx.db.query("listings").take(1000)) {
+      const mediaId = l.videoId ? ctx.db.normalizeId("media", l.videoId) : null;
+      const row = mediaId ? await ctx.db.get(mediaId) : null;
+      if (!mediaId || !row || row.invalid || row.store === "r2") continue;
+      const url = new URL(row.url);
+      url.searchParams.set("tr", "orig-true");
+      out.push({ listingId: l._id, slug: l.slug, title: l.title, id: mediaId, url: url.toString() });
+    }
+    return out;
+  },
+});
+
+/**
+ * Admin: put a newly uploaded file where an older one was (a Convex storage
+ * file, or a video still on ImageKit), then delete the old one.
+ */
 export const adoptLegacy = mutation({
-  args: { listingId: v.id("listings"), from: v.id("_storage"), to: v.id("media") },
+  args: { listingId: v.id("listings"), from: vMediaId, to: v.id("media") },
   returns: v.null(),
   handler: async (ctx, { listingId, from, to }) => {
     await requireAdmin(ctx);

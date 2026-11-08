@@ -35,7 +35,7 @@ const SLOTS: Record<Kind, Slot> = {
     label: "Preview video",
     media: "video",
     aspect: "16 / 9",
-    hint: "MP4 or WebM, up to 15 MB. Plays on hover.",
+    hint: "MP4, WebM or MOV, up to 60 seconds. Compressed to 720p in this tab before upload. Plays muted on a loop.",
     removable: true,
   },
 };
@@ -60,6 +60,7 @@ function MediaSlot({
   // Remounts the picker after an upload so its file input is cleared too.
   const [pickerKey, setPickerKey] = useState(0);
   const [busy, setBusy] = useState<"upload" | "remove" | null>(null);
+  const [progress, setProgress] = useState<number | null>(null); // video compression, 0–1
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -69,7 +70,11 @@ function MediaSlot({
     setError(null);
     setMessage(null);
     try {
-      const storageId = await upload(file, { site: slug, label: slot.kind === "cover" ? "cover" : "preview" });
+      const storageId = await upload(
+        file,
+        { site: slug, label: slot.kind === "cover" ? "cover" : "preview" },
+        setProgress,
+      );
       await replace({ id: listingId, kind: slot.kind, storageId });
       setFile(null);
       setPickerKey((k) => k + 1);
@@ -78,6 +83,7 @@ function MediaSlot({
       showError(err);
     } finally {
       setBusy(null);
+      setProgress(null);
     }
   }
 
@@ -128,7 +134,13 @@ function MediaSlot({
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {file && !pickError && (
           <button type="button" className="admin-button" disabled={busy !== null} onClick={onReplace}>
-            {busy === "upload" ? "Uploading…" : currentUrl ? "Upload & replace" : "Upload"}
+            {busy === "upload"
+              ? progress !== null && progress < 1
+                ? `Compressing ${Math.round(progress * 100)}%`
+                : "Uploading…"
+              : currentUrl
+                ? "Upload & replace"
+                : "Upload"}
           </button>
         )}
         {!file && currentUrl && (

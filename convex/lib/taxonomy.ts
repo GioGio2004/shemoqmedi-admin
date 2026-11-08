@@ -136,8 +136,12 @@ export const LIMITS = {
   gallery: 4,
   /** Max screenshot size in bytes. */
   imageBytes: 5 * 1024 * 1024,
-  /** Max hover-video size in bytes. */
+  /** Max preview-video size in bytes, as stored (after compression in the browser). */
   videoBytes: 15 * 1024 * 1024,
+  /** Largest video file people can pick (it is compressed before upload). */
+  videoInputBytes: 500 * 1024 * 1024,
+  /** Max preview-video length in seconds. */
+  videoSeconds: 60,
   /** Max listings one user can have waiting for review at once. */
   pendingPerUser: 5,
   /** Max URLs per admin import batch. */

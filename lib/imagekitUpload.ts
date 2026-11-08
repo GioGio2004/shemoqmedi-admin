@@ -1,10 +1,13 @@
 // Browser-side media pipeline (identical copy in shemoqmedi/lib/imagekitUpload.ts).
 //
 //   screenshot ─▶ WebP (max 2560 px wide, q 0.86) ─▶ SEO file name ─▶ ImageKit
-//   video      ─────────────────────────────────────▶ SEO file name ─▶ ImageKit
+//
+// Videos do not come here: they are compressed and stored on Cloudflare R2
+// (lib/videoUpload.ts), because ImageKit re-encodes every new video and
+// that spends its free video processing units.
 //
 // Files land in /listings/<site-slug>/ as e.g.
-//   kencho-group-website-screenshot-2.webp, kencho-group-website-preview.mp4
+//   kencho-group-website-screenshot-2.webp
 // (ImageKit appends a short unique suffix so a replaced file never serves a
 // stale CDN copy). The upload is signed by Convex (media.uploadAuth) and the
 // result is registered with media.register, which returns the id that the

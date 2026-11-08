@@ -34,6 +34,11 @@ const vars = {
   INDEXNOW_KEY,
   SITE_URL,
 };
+// Cloudflare R2 for preview videos (convex/lib/r2.ts). Optional until the bucket exists.
+for (const name of ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET", "R2_PUBLIC_URL"]) {
+  const value = fromEnvFile(name);
+  if (value) vars[name] = value;
+}
 if (flag("clerk")) vars.CLERK_FRONTEND_API_URL = flag("clerk").replace(/\/+$/, "");
 if (flag("clerk-webhook")) vars.CLERK_WEBHOOK_SECRET = flag("clerk-webhook");
 

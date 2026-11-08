@@ -72,7 +72,7 @@ export function ListingCreateForm() {
     const known = uploaded.current.get(file);
     if (known) return known;
     // Folder + file names come from the site title (the slug is derived from it).
-    const id = await uploadFile(file, { site: title, label });
+    const id = await uploadFile(file, { site: title, label }, setProgress);
     uploaded.current.set(file, id);
     return id;
   }
@@ -106,6 +106,7 @@ export function ListingCreateForm() {
   const [pillarDraft, setPillarDraft] = useState(EMPTY_PILLARS);
 
   const [phase, setPhase] = useState<Phase>("idle");
+  const [progress, setProgress] = useState<number | null>(null); // video compression, 0–1
   const [error, setError] = useState<string | null>(null);
   const busy = phase !== "idle";
   // Synchronous guard: two submits in the same tick both see busy === false.
@@ -173,6 +174,7 @@ export function ListingCreateForm() {
 
     try {
       setPhase("uploading");
+      setProgress(null);
       const coverId = await upload(cover.file as File, "cover");
       const galleryIds: Id<"media">[] = [];
       for (const [i, file] of extras.entries()) galleryIds.push(await upload(file, `screenshot-${i + 2}`));
@@ -613,8 +615,8 @@ export function ListingCreateForm() {
             <div className="grid gap-2">
               <MediaPicker
                 id="video"
-                label="Hover video (optional)"
-                hint="MP4/WebM ≤ 15 MB"
+                label="Preview video (optional)"
+                hint="MP4, WebM or MOV, up to 60 s. Compressed to 720p in this tab before upload."
                 kind="video"
                 aspect="16 / 9"
                 file={video.file}
@@ -627,7 +629,13 @@ export function ListingCreateForm() {
 
         <div className="mt-8 flex flex-wrap items-center gap-4 border-t border-black/10 pt-8">
           <button type="submit" className="admin-button" disabled={busy}>
-            {phase === "uploading" ? "Uploading…" : phase === "saving" ? "Saving…" : "Create listing"}
+            {phase === "uploading"
+              ? progress !== null && progress < 1
+                ? `Compressing video ${Math.round(progress * 100)}%`
+                : "Uploading…"
+              : phase === "saving"
+                ? "Saving…"
+                : "Create listing"}
           </button>
           {busy && <span className="text-xs text-black/55">Keep this tab open.</span>}
           {error && (
