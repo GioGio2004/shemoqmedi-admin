@@ -3,7 +3,7 @@
 // and manage creators and user roles. Every function requires an admin.
 
 import { v } from "convex/values";
-import { deleteMedia, vMediaId } from "./lib/media";
+import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin } from "./authHelpers";
@@ -680,5 +680,79 @@ export const wipeShowcase = internalMutation({
     }
     const remaining = (await ctx.db.query("listings").first()) ?? (await ctx.db.query("creators").first());
     return { listings: listings.length, creators, done: remaining === null };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Featured header (home page slider)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const featuredOption = v.object({
+  id: v.id("listings"),
+  slug: v.string(),
+  title: v.string(),
+  creditName: v.string(),
+  status: listingStatus,
+  awards: v.array(award),
+  coverUrl: v.union(v.string(), v.null()),
+  featuredRank: v.union(v.number(), v.null()),
+  publishedAt: v.number(),
+});
+
+/**
+ * Admin: every live listing (it has a /sites page), featured ones first in
+ * header order, then the rest newest first. Only these can be featured.
+ */
+export const featuredOptions = query({
+  args: {},
+  returns: v.array(featuredOption),
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const rows = (await ctx.db.query("listings").take(1000)).filter((l) => isPublicStatus(l.status));
+    const out = await Promise.all(
+      rows.map(async (l) => ({
+        id: l._id,
+        slug: l.slug,
+        title: l.title,
+        creditName: l.creditName,
+        status: l.status,
+        awards: l.awards,
+        coverUrl: await mediaUrl(ctx, l.coverId),
+        featuredRank: l.featuredRank ?? null,
+        publishedAt: l.publishedAt ?? l.createdAt,
+      })),
+    );
+    return out.sort(
+      (a, b) =>
+        (a.featuredRank ?? Infinity) - (b.featuredRank ?? Infinity) || b.publishedAt - a.publishedAt,
+    );
+  },
+});
+
+/**
+ * Admin: set the featured header, in order (first = first slide). Replaces
+ * the whole list; an empty list hands the header back to the automatic
+ * order (award winners, top scores, newest).
+ */
+export const setFeatured = mutation({
+  args: { ids: v.array(v.id("listings")) },
+  returns: v.null(),
+  handler: async (ctx, { ids }) => {
+    await requireAdmin(ctx);
+    if (new Set(ids).size !== ids.length) fail("A site is in the featured list twice.");
+    if (ids.length > LIMITS.featured) fail(`Feature up to ${LIMITS.featured} sites.`);
+    for (const id of ids) {
+      const listing = await ctx.db.get(id);
+      if (!listing) fail("One of these sites no longer exists. Reload and try again.");
+      if (!isPublicStatus(listing.status)) fail(`“${listing.title}” is not live yet, so it can't be featured.`);
+      if (!(await mediaUrl(ctx, listing.coverId))) fail(`“${listing.title}” has no cover screenshot.`);
+    }
+    // Not a content change: updatedAt (sitemap lastmod) stays as it is.
+    for (const listing of await ctx.db.query("listings").take(1000)) {
+      const rank = ids.indexOf(listing._id);
+      const next = rank === -1 ? undefined : rank + 1;
+      if (listing.featuredRank !== next) await ctx.db.patch(listing._id, { featuredRank: next });
+    }
+    return null;
   },
 });

@@ -296,6 +296,7 @@ export const publicListing = v.object({
   isClaimed: v.boolean(),
   isStartup: v.boolean(),
   isDoFollow: v.boolean(), // false: outbound links get rel="nofollow"
+  featuredRank: v.union(v.number(), v.null()), // home header position (1 = first); null: not featured
   coverUrl: v.union(v.string(), v.null()),
   galleryUrls: v.array(v.string()),
   videoUrl: v.union(v.string(), v.null()),
@@ -359,6 +360,7 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
     isClaimed: listing.isClaimed,
     isStartup: listing.isStartup ?? false,
     isDoFollow: isDoFollow(listing),
+    featuredRank: listing.featuredRank ?? null,
     ...(await mediaUrls(ctx, listing)),
   };
 }

@@ -134,6 +134,8 @@ export const LIMITS = {
   claimMessage: 1000,
   /** Extra screenshots after the cover (so 5 images in all). */
   gallery: 4,
+  /** Max sites in the home page's featured header. */
+  featured: 12,
   /** Max screenshot size in bytes. */
   imageBytes: 5 * 1024 * 1024,
   /** Max preview-video size in bytes, as stored (after compression in the browser). */

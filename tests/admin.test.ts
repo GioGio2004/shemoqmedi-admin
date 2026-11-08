@@ -242,3 +242,47 @@ describe("admin: screenshots", () => {
     ).rejects.toThrow(/changed/);
   });
 });
+
+describe("admin: featured header", () => {
+  it("sets the header in order, replaces it, and clears it", async () => {
+    const env = await setup();
+    const a = await create(env, { title: "Alpha", url: "https://alpha.io" });
+    const b = await create(env, { title: "Bravo", url: "https://bravo.io" });
+    const c = await create(env, { title: "Charlie", url: "https://charlie.io" });
+    const pending = await create(env, { title: "Delta", url: "https://delta.io", status: "pending" });
+    const id = async (slug: string) =>
+      (await env.owner.query(api.admin.featuredOptions, {})).find((o) => o.slug === slug)!.id;
+    const [ia, ib, ic] = [await id(a.slug), await id(b.slug), await id(c.slug)];
+
+    // Only live listings are options; non-admins are refused.
+    expect((await env.owner.query(api.admin.featuredOptions, {})).map((o) => o.slug)).not.toContain(pending.slug);
+    await expect(env.member.mutation(api.admin.setFeatured, { ids: [ia] })).rejects.toThrow(/admin/);
+
+    await env.helper.mutation(api.admin.setFeatured, { ids: [ic, ia] });
+    const rank = async (slug: string) => (await env.t.query(api.listings.getPublicBySlug, { slug }))!.featuredRank;
+    expect([await rank(c.slug), await rank(a.slug), await rank(b.slug)]).toEqual([1, 2, null]);
+    // Featured first, in order.
+    expect((await env.owner.query(api.admin.featuredOptions, {})).slice(0, 2).map((o) => o.slug)).toEqual([
+      c.slug,
+      a.slug,
+    ]);
+
+    await env.owner.mutation(api.admin.setFeatured, { ids: [ib] });
+    expect([await rank(a.slug), await rank(b.slug), await rank(c.slug)]).toEqual([null, 1, null]);
+
+    await env.owner.mutation(api.admin.setFeatured, { ids: [] });
+    expect(await rank(b.slug)).toBeNull();
+  });
+
+  it("rejects duplicates and listings that are not live", async () => {
+    const env = await setup();
+    const a = await create(env, { title: "Alpha", url: "https://alpha.io" });
+    await create(env, { title: "Delta", url: "https://delta.io", status: "pending" });
+    const all = await env.t.run((ctx) => ctx.db.query("listings").collect());
+    const live = all.find((l) => l.slug === a.slug)!._id;
+    const notLive = all.find((l) => l.status === "pending")!._id;
+    await expect(env.owner.mutation(api.admin.setFeatured, { ids: [live, live] })).rejects.toThrow(/twice/);
+    await expect(env.owner.mutation(api.admin.setFeatured, { ids: [notLive] })).rejects.toThrow(/not live/);
+  });
+});
+

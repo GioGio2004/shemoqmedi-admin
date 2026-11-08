@@ -173,6 +173,9 @@ export default defineSchema({
     // Outbound links are rel="nofollow" until claimed. Absent: follows isClaimed;
     // an admin can set it explicitly either way.
     isDoFollow: v.optional(v.boolean()),
+    // Position in the home page's featured header (1 = first), chosen by an
+    // admin on /featured. Absent: not featured.
+    featuredRank: v.optional(v.number()),
 
     createdAt: v.number(),
     updatedAt: v.number(),
