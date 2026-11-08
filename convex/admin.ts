@@ -8,11 +8,12 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin } from "./authHelpers";
 import { award, creatorTier, listingStatus, pillars, region } from "./schema";
-import { DAY_MS, LIMITS, VOTING_DAYS, isCategory, isTechnology } from "./lib/taxonomy";
+import { DAY_MS, LIMITS, VOTING_DAYS, isTechnology } from "./lib/taxonomy";
 import { normalizePillars } from "./lib/scoring";
 import {
   EMPTY_SCORES,
   assertMedia,
+  checkCategories,
   checkGallery,
   cleanText,
   deleteListing,
@@ -73,7 +74,7 @@ export const createListing = mutation({
     tagline: v.string(),
     juryNote: v.optional(v.string()),
     url: v.string(),
-    category: v.string(),
+    categories: v.array(v.string()), // primary first
     technologies: v.array(v.string()),
     region,
     creatorTier,
@@ -102,7 +103,7 @@ export const createListing = mutation({
     const creditName = cleanText(args.creditName, "Made by", LIMITS.creditName);
     const url = normalizeUrl(args.url);
     const creditUrl = args.creditUrl?.trim() ? normalizeUrl(args.creditUrl, "Creator website") : undefined;
-    if (!isCategory(args.category)) fail("Choose a category.");
+    const categories = checkCategories(args.categories);
     const technologies = checkTechnologies(args.technologies);
     const editorialScores = checkPillars(args.editorialScores);
     const awards = [...new Set(args.awards ?? [])];
@@ -142,7 +143,8 @@ export const createListing = mutation({
       tagline,
       juryNote,
       url,
-      category: args.category,
+      category: categories[0],
+      categories,
       technologies,
       region: args.region,
       creatorTier: args.creatorTier,
@@ -185,7 +187,7 @@ export const updateListing = mutation({
     tagline: v.optional(v.string()),
     juryNote: v.optional(v.string()), // "" clears it
     url: v.optional(v.string()),
-    category: v.optional(v.string()),
+    categories: v.optional(v.array(v.string())), // primary first
     technologies: v.optional(v.array(v.string())),
     region: v.optional(region),
     creatorTier: v.optional(creatorTier),
@@ -220,9 +222,9 @@ export const updateListing = mutation({
         patch.previousSlugs = previousSlugsAfterRename(listing, wanted);
       }
     }
-    if (args.category !== undefined) {
-      if (!isCategory(args.category)) fail("Choose a category.");
-      patch.category = args.category;
+    if (args.categories !== undefined) {
+      patch.categories = checkCategories(args.categories);
+      patch.category = patch.categories[0];
     }
     if (args.technologies !== undefined) patch.technologies = checkTechnologies(args.technologies);
     if (args.region !== undefined) patch.region = args.region;

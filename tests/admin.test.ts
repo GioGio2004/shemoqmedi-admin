@@ -44,7 +44,7 @@ async function create(env: Env, overrides: Record<string, unknown> = {}) {
     title: "Floema",
     tagline: "Furniture, quietly.",
     url: "https://floema.pt",
-    category: "architecture",
+    categories: ["architecture"],
     technologies: ["WebGL", "GSAP"],
     region: "global",
     creatorTier: "agency",
@@ -62,7 +62,7 @@ describe("admin: listings", () => {
     const coverId = await env.t.run((ctx) => ctx.storage.store(new Blob(["img"], { type: "image/png" })));
     await expect(
       env.member.mutation(api.admin.createListing, {
-        title: "x", tagline: "", url: "https://x.com", category: "other", technologies: [],
+        title: "x", tagline: "", url: "https://x.com", categories: ["other"], technologies: [],
         region: "global", creatorTier: "solo", creditName: "x", coverId, status: "pending", isClaimed: false,
       }),
     ).rejects.toThrow(/admin/);
@@ -101,6 +101,12 @@ describe("admin: listings", () => {
       technologies: ["Three.js"],
       creator: { slug: "studio-x" },
     });
+    await env.owner.mutation(api.admin.updateListing, { id, categories: ["portfolio", "agency"] });
+    expect(await env.t.query(api.listings.getPublicBySlug, { slug: "floema-furniture" })).toMatchObject({
+      category: "portfolio",
+      categories: ["portfolio", "agency"],
+    });
+    await expect(env.owner.mutation(api.admin.updateListing, { id, categories: [] })).rejects.toThrow(/category/);
     await create(env, { url: "https://another.site", title: "Another" });
     await expect(env.owner.mutation(api.admin.updateListing, { id, slug: "another" })).rejects.toThrow(/already taken/);
   });

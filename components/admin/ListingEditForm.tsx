@@ -14,7 +14,6 @@ import {
   type CreatorTier,
   type RegionSlug,
 } from "@/convex/lib/taxonomy";
-import { Select } from "./Select";
 
 type Listing = NonNullable<FunctionReturnType<typeof api.listings.reviewDetail>>;
 type UpdateArgs = FunctionArgs<typeof api.admin.updateListing>;
@@ -25,7 +24,7 @@ type Fields = {
   url: string;
   tagline: string;
   juryNote: string;
-  category: string;
+  categories: string[];
   technologies: string[];
   creditName: string;
   creditUrl: string;
@@ -41,7 +40,7 @@ const KEYS: Key[] = [
   "url",
   "tagline",
   "juryNote",
-  "category",
+  "categories",
   "technologies",
   "creditName",
   "creditUrl",
@@ -57,7 +56,7 @@ function fromListing(l: Listing): Fields {
     url: l.url,
     tagline: l.tagline,
     juryNote: l.juryNote ?? "",
-    category: l.category,
+    categories: l.categories,
     technologies: l.technologies,
     creditName: l.creditName,
     creditUrl: l.creditUrl ?? "",
@@ -89,13 +88,22 @@ export function ListingEditForm({ listing }: { listing: Listing }) {
   const value: Fields = { ...saved, ...edits };
   const changed = KEYS.filter((k) => differs(value[k], saved[k]));
   const missing =
-    !value.title.trim() || !value.slug.trim() || !value.url.trim() || !value.creditName.trim();
+    !value.title.trim() ||
+    !value.slug.trim() ||
+    !value.url.trim() ||
+    !value.creditName.trim() ||
+    value.categories.length === 0;
   const renaming = changed.includes("creditName");
 
   function set<K extends Key>(key: K, next: Fields[K]) {
     setDone(false);
     setError(null);
     setEdits((e) => ({ ...e, [key]: next }));
+  }
+
+  function toggleCategory(slug: string) {
+    const list = value.categories;
+    set("categories", list.includes(slug) ? list.filter((c) => c !== slug) : [...list, slug]);
   }
 
   function toggleTech(name: string) {
@@ -257,16 +265,35 @@ export function ListingEditForm({ listing }: { listing: Listing }) {
             </label>
           </div>
 
-          <div className="grid gap-6 md:grid-cols-3">
-            <div className="grid content-start gap-2">
-              <span id="edit-category" className="admin-eyebrow">Category</span>
-              <Select
-                labelledBy="edit-category"
-                value={value.category}
-                onChange={(v) => set("category", v)}
-                options={CATEGORIES.map((c) => ({ value: c.slug, label: c.name }))}
-              />
+          <fieldset>
+            <legend className="admin-eyebrow mb-3">
+              Categories <span className="admin-mono">{value.categories.length}/{LIMITS.categories}</span>
+            </legend>
+            <div className="flex flex-wrap gap-2">
+              {CATEGORIES.map((c) => {
+                const on = value.categories.includes(c.slug);
+                return (
+                  <button
+                    key={c.slug}
+                    type="button"
+                    className="admin-toggle"
+                    aria-pressed={on}
+                    disabled={!on && value.categories.length >= LIMITS.categories}
+                    onClick={() => toggleCategory(c.slug)}
+                  >
+                    {c.name}
+                  </button>
+                );
+              })}
             </div>
+            <p className="mt-2 text-xs text-black/55">
+              {value.categories.length === 0
+                ? "Pick at least one category."
+                : "The first one you pick is the main category."}
+            </p>
+          </fieldset>
+
+          <div className="grid gap-6 md:grid-cols-2">
             <fieldset className="grid content-start gap-2">
               <legend className="admin-eyebrow mb-2">Creator tier</legend>
               <div className="flex flex-wrap gap-2">

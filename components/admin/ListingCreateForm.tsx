@@ -26,7 +26,6 @@ import {
 } from "@/convex/lib/taxonomy";
 import { MediaPicker, MultiImagePicker, useMediaUpload } from "./MediaUpload";
 import { score } from "./format";
-import { Select } from "./Select";
 
 type CreateStatus = "pending" | "in_voting" | "awarded" | "archived";
 type Phase = "idle" | "uploading" | "saving";
@@ -79,7 +78,7 @@ export function ListingCreateForm() {
   const [url, setUrl] = useState("");
   const [tagline, setTagline] = useState("");
   const [juryNote, setJuryNote] = useState("");
-  const [category, setCategory] = useState<CategorySlug | "">("");
+  const [categories, setCategories] = useState<CategorySlug[]>([]);
   const [technologies, setTechnologies] = useState<TechnologyName[]>([]);
   const [creditName, setCreditName] = useState("");
   const [creditUrl, setCreditUrl] = useState("");
@@ -118,6 +117,12 @@ export function ListingCreateForm() {
     );
   }
 
+  function toggleCategory(slug: CategorySlug) {
+    setCategories((list) =>
+      list.includes(slug) ? list.filter((c) => c !== slug) : list.length >= LIMITS.categories ? list : [...list, slug],
+    );
+  }
+
   function toggleAward(slug: AwardSlug) {
     setAwards((list) => (list.includes(slug) ? list.filter((a) => a !== slug) : [...list, slug]));
   }
@@ -126,7 +131,7 @@ export function ListingCreateForm() {
   function validate(): string | null {
     if (!title.trim()) return "Add the site title.";
     if (!url.trim()) return "Add the live URL.";
-    if (!category) return "Choose a category.";
+    if (categories.length === 0) return "Choose at least one category.";
     if (!creditName.trim()) return "Add who made the site.";
     if (!cover.file) return "Add the cover screenshot.";
     const fileError = cover.error ?? video.error;
@@ -179,7 +184,7 @@ export function ListingCreateForm() {
         tagline: tagline.trim(),
         juryNote: juryNote.trim() || undefined,
         url: url.trim(),
-        category,
+        categories,
         technologies,
         region,
         creatorTier: tier,
@@ -290,16 +295,29 @@ export function ListingCreateForm() {
                 </span>
               </div>
 
-              <div className="grid gap-2">
-                <span id="create-category" className="admin-eyebrow">Category</span>
-                <Select
-                  labelledBy="create-category"
-                  value={category}
-                  onChange={(v) => setCategory(v as CategorySlug)}
-                  options={CATEGORIES.map((c) => ({ value: c.slug, label: c.name }))}
-                  placeholder="Choose a category"
-                />
-              </div>
+              <fieldset>
+                <legend className="admin-eyebrow mb-3">
+                  Categories {categories.length}/{LIMITS.categories}
+                </legend>
+                <div className="flex flex-wrap gap-2">
+                  {CATEGORIES.map((c) => {
+                    const on = categories.includes(c.slug);
+                    return (
+                      <button
+                        key={c.slug}
+                        type="button"
+                        className="admin-toggle"
+                        aria-pressed={on}
+                        disabled={!on && categories.length >= LIMITS.categories}
+                        onClick={() => toggleCategory(c.slug)}
+                      >
+                        {c.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-xs text-black/55">The first one you pick is the main category.</p>
+              </fieldset>
 
               <fieldset>
                 <legend className="admin-eyebrow mb-3">

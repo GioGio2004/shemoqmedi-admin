@@ -100,6 +100,8 @@ export const LIMITS = {
   creditName: 80,
   url: 500,
   technologies: 6,
+  /** Categories per listing (the first is the primary one). */
+  categories: 3,
   reviewNote: 500,
   claimMessage: 1000,
   /** Extra screenshots after the cover (so 5 images in all). */

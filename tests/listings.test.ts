@@ -108,6 +108,10 @@ describe("submission", () => {
     const cover = await storeFile(t);
     await expect(maker.mutation(api.listings.submit, input(cover, { url: "localhost:3000" }))).rejects.toThrow(/public website/);
     await expect(maker.mutation(api.listings.submit, input(cover, { category: "restaurants" }))).rejects.toThrow(/category/);
+    await expect(maker.mutation(api.listings.submit, input(cover, { category: undefined }))).rejects.toThrow(/category/);
+    await expect(
+      maker.mutation(api.listings.submit, input(cover, { categories: ["ai", "saas", "fintech", "agency"] })),
+    ).rejects.toThrow(/up to 3 categories/);
     await expect(maker.mutation(api.listings.submit, input(cover, { technologies: ["COBOL"] }))).rejects.toThrow(/technology/);
     await expect(maker.mutation(api.listings.submit, input(await storeFile(t, "application/pdf")))).rejects.toThrow(/image/);
     await expect(
@@ -115,6 +119,16 @@ describe("submission", () => {
     ).rejects.toThrow(/MP4 or WebM/);
     const ok = await maker.mutation(api.listings.submit, input(cover, { videoId: await storeFile(t, "video/mp4") }));
     expect(ok.slug).toBe("paper-weather");
+  });
+
+  it("stores several categories, primary first", async () => {
+    const { t, maker } = await setup();
+    const { slug } = await maker.mutation(
+      api.listings.submit,
+      input(await storeFile(t), { category: undefined, categories: ["ai", "saas", "ai"] }),
+    );
+    const row = await t.run((ctx) => ctx.db.query("listings").withIndex("by_slug", (q) => q.eq("slug", slug)).unique());
+    expect(row).toMatchObject({ category: "ai", categories: ["ai", "saas"] });
   });
 
   it("refuses a duplicate website", async () => {

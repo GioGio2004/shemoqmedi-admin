@@ -53,7 +53,7 @@ async function create(env: Env, overrides: Record<string, unknown> = {}) {
     title: "Floema",
     tagline: "Furniture, quietly.",
     url: "https://floema.pt",
-    category: "architecture",
+    categories: ["architecture"],
     technologies: ["WebGL"],
     region: "global",
     creatorTier: "agency",

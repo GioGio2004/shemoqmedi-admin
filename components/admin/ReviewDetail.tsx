@@ -64,7 +64,7 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
           <Link href={`/review?status=${status}`} className="admin-text-link">
             ← Back to {STATUS_LABEL[status].toLowerCase()}
           </Link>
-          <p className="admin-eyebrow mt-6">{listing.categoryName}</p>
+          <p className="admin-eyebrow mt-6">{listing.categoryNames.join(" · ")}</p>
           <h1>{listing.title}</h1>
           {listing.tagline && <p>{listing.tagline}</p>}
         </div>

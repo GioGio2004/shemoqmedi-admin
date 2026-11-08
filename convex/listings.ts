@@ -4,7 +4,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { creatorTier, listingStatus, pillars, region } from "./schema";
-import { DAY_MS, LIMITS, VOTING_DAYS, isCategory, isTechnology } from "./lib/taxonomy";
+import { DAY_MS, LIMITS, VOTING_DAYS, isTechnology } from "./lib/taxonomy";
 import { normalizePillars } from "./lib/scoring";
 import {
   EMPTY_SCORES,
@@ -12,12 +12,14 @@ import {
   assertMedia,
   checkGallery,
   categoryName,
+  checkCategories,
   cleanText,
   deleteListing,
   fail,
   finalizeListing,
   findOrCreateCreator,
   isPublicStatus,
+  listingCategories,
   mediaUrls,
   normalizeUrl,
   publicListing,
@@ -121,7 +123,8 @@ export const submit = mutation({
     title: v.string(),
     tagline: v.string(),
     url: v.string(),
-    category: v.string(),
+    categories: v.optional(v.array(v.string())), // primary first
+    category: v.optional(v.string()), // older clients: a single category
     technologies: v.array(v.string()),
     creatorTier,
     region,
@@ -147,7 +150,7 @@ export const submit = mutation({
       ? normalizeUrl(args.creditUrl, "Creator website")
       : undefined;
 
-    if (!isCategory(args.category)) fail("Choose a category.");
+    const categories = checkCategories(args.categories ?? (args.category ? [args.category] : []));
     const technologies = [...new Set(args.technologies)];
     if (technologies.length === 0) fail("Choose at least one technology.");
     if (technologies.length > LIMITS.technologies) {
@@ -196,7 +199,8 @@ export const submit = mutation({
       title,
       tagline,
       url,
-      category: args.category,
+      category: categories[0],
+      categories,
       technologies,
       region: args.region,
       creatorTier: args.creatorTier,
@@ -290,8 +294,8 @@ const reviewListing = v.object({
   tagline: v.string(),
   juryNote: v.union(v.string(), v.null()),
   url: v.string(),
-  category: v.string(),
-  categoryName: v.string(),
+  categories: v.array(v.string()), // primary first
+  categoryNames: v.array(v.string()),
   technologies: v.array(v.string()),
   region,
   creatorTier,
@@ -334,8 +338,8 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
     tagline: listing.tagline,
     juryNote: listing.juryNote ?? null,
     url: listing.url,
-    category: listing.category,
-    categoryName: categoryName(listing.category),
+    categories: listingCategories(listing),
+    categoryNames: listingCategories(listing).map(categoryName),
     technologies: listing.technologies,
     region: listing.region,
     creatorTier: listing.creatorTier,

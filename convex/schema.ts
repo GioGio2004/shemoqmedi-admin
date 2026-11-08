@@ -94,7 +94,10 @@ export default defineSchema({
     tagline: v.string(),
     juryNote: v.optional(v.string()), // short public review by the jury (LIMITS.juryNote)
     url: v.string(), // normalized live URL
-    category: v.string(), // CATEGORIES slug
+    category: v.string(), // primary CATEGORIES slug (= categories[0])
+    // Every CATEGORIES slug, primary first. Absent on older rows: read it with
+    // listingCategories(), which falls back to [category].
+    categories: v.optional(v.array(v.string())),
     technologies: v.array(v.string()), // TECHNOLOGIES names
     region,
     creatorTier,

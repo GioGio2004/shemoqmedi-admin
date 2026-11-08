@@ -107,7 +107,7 @@ export function ReviewQueue({ status }: { status: ReviewStatus }) {
                   {row.coverUrl && <img src={row.coverUrl} alt="" />}
                 </div>
                 <div className="min-w-0">
-                  <p className="admin-eyebrow">{row.categoryName}</p>
+                  <p className="admin-eyebrow">{row.categoryNames.join(" · ")}</p>
                   <h2>{row.title}</h2>
                   <p>{shortUrl(row.url)}</p>
                 </div>

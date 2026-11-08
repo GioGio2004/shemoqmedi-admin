@@ -3,7 +3,7 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { award, creatorTier, listingStatus, pillars, region } from "../schema";
 import { deleteMedia, mediaInfo, mediaUrl, type MediaId } from "./media";
-import { CATEGORIES, LIMITS, type CreatorTier, type RegionSlug } from "./taxonomy";
+import { CATEGORIES, LIMITS, isCategory, type CategorySlug, type CreatorTier, type RegionSlug } from "./taxonomy";
 import { ZERO_PILLARS, decideAwards, summarize, type Pillars } from "./scoring";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -267,7 +267,8 @@ export const publicListing = v.object({
   tagline: v.string(),
   juryNote: v.union(v.string(), v.null()),
   url: v.string(),
-  category: v.string(),
+  category: v.string(), // primary
+  categories: v.array(v.string()), // all, primary first
   technologies: v.array(v.string()),
   region,
   creatorTier,
@@ -319,6 +320,7 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
     juryNote: listing.juryNote ?? null,
     url: listing.url,
     category: listing.category,
+    categories: listingCategories(listing),
     technologies: listing.technologies,
     region: listing.region,
     creatorTier: listing.creatorTier,
@@ -351,6 +353,20 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
 
 export function categoryName(slug: string) {
   return CATEGORIES.find((c) => c.slug === slug)?.name ?? slug;
+}
+
+/** A listing's categories, primary first (older rows only have `category`). */
+export function listingCategories(listing: Pick<Doc<"listings">, "category" | "categories">) {
+  return listing.categories?.length ? listing.categories : [listing.category];
+}
+
+/** Validate a category pick: 1 to LIMITS.categories known slugs, deduped, order kept. */
+export function checkCategories(values: string[]): CategorySlug[] {
+  const categories = [...new Set(values)];
+  if (categories.length === 0) fail("Choose a category.");
+  if (categories.length > LIMITS.categories) fail(`Choose up to ${LIMITS.categories} categories.`);
+  if (!categories.every(isCategory)) fail("Unknown category selected.");
+  return categories as CategorySlug[];
 }
 
 export { listingStatus };
