@@ -182,6 +182,25 @@ describe("jury claim links", () => {
     expect((await env.t.query(api.claimLinks.resolve, { token })).redirect).toBe(`/sites/${env.site.slug}`);
   });
 
+  it("the photo prepared with the invitation beats the account photo until the juror changes it", async () => {
+    const env = await setup();
+    const avatarId = await env.t.run((ctx) => ctx.storage.store(new Blob(["img"], { type: "image/webp" })));
+    const { token } = await juror(env, "Ana", { avatarId });
+    const preset = (await env.t.query(api.claimLinks.resolve, { token })).juror!.imageUrl;
+    expect(preset).toBeTruthy();
+    // ana's account has its own photo (e.g. Google's): the preset still shows.
+    await env.ana.mutation(api.claimLinks.claim, { token });
+    expect(await env.ana.query(api.jury.me, {})).toMatchObject({ imageUrl: preset, hasPresetPhoto: true });
+    expect((await env.t.query(api.jury.listPublic, {}))[0].imageUrl).toBe(preset);
+    // Changing the photo on the profile page drops the preset.
+    await env.ana.mutation(api.jury.dropPresetPhoto, {});
+    expect(await env.ana.query(api.jury.me, {})).toMatchObject({
+      imageUrl: "https://img.clerk.com/ana.png",
+      hasPresetPhoto: false,
+    });
+    await expect(env.stranger.mutation(api.jury.dropPresetPhoto, {})).rejects.toThrow(/jury members/);
+  });
+
   it("a juror can't community-vote on a site linked to them after they claimed; slugs stay put", async () => {
     const env = await setup();
     const jurorId = await joinJury(env, "Ana", env.ana);

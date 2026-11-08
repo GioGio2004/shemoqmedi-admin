@@ -59,13 +59,20 @@ function cleanComment(raw: string) {
 }
 
 /**
- * The juror's photo: their own Clerk image once claimed (if they uploaded
- * one), else the avatar the admin added, else null (grey placeholder).
+ * The juror's photo: the avatar prepared with the invitation while they keep
+ * it, else their account (Clerk) photo, else null (grey placeholder). The
+ * preset wins over the account photo on purpose: signing in with Google gives
+ * every account a photo (often just a letter), which must not replace the
+ * photo picked for the jury. Changing or removing the photo on /jury/profile
+ * drops the preset (dropPresetPhoto).
  */
 export async function jurorPhoto(ctx: QueryCtx, juror: Doc<"jurors">) {
+  if (juror.avatarId) {
+    const preset = await mediaUrl(ctx, juror.avatarId);
+    if (preset) return preset;
+  }
   const user = juror.userId ? await ctx.db.get(juror.userId) : null;
-  if (user?.hasImage && user.profilePicture) return user.profilePicture;
-  return juror.avatarId ? await mediaUrl(ctx, juror.avatarId) : null;
+  return user?.hasImage && user.profilePicture ? user.profilePicture : null;
 }
 
 export async function jurorOf(ctx: QueryCtx, userId: Id<"users">) {
@@ -370,10 +377,29 @@ export const reviewsForListing = query({
 /** The signed-in user's jury profile, or null if they are not on the jury. */
 export const me = query({
   args: {},
-  returns: v.union(jurorPublic, v.null()),
+  returns: v.union(v.object({ ...jurorPublic.fields, hasPresetPhoto: v.boolean() }), v.null()),
   handler: async (ctx) => {
     const current = await currentJuror(ctx);
-    return current ? await toJurorPublic(ctx, current.juror) : null;
+    if (!current) return null;
+    return { ...(await toJurorPublic(ctx, current.juror)), hasPresetPhoto: !!current.juror.avatarId };
+  },
+});
+
+/**
+ * The juror replaces or removes their photo on /jury/profile: the photo
+ * prepared with the invitation is dropped, so their account photo (or the grey
+ * placeholder) shows from now on.
+ */
+export const dropPresetPhoto = mutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    const { juror } = await requireJuror(ctx);
+    if (!juror.avatarId) return null;
+    await deleteMedia(ctx, juror.avatarId);
+    await ctx.db.patch(juror._id, { avatarId: undefined, updatedAt: Date.now() });
+    await scheduleIndexNow(ctx, ["/jury", `/jury/${juror.slug}`]);
+    return null;
   },
 });
 
