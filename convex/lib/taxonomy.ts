@@ -3,26 +3,69 @@
 // copy in lib/taxonomy.ts — keep the two files identical.
 
 export const CATEGORIES = [
+  // Studios & portfolios
   { slug: "portfolio", name: "Portfolio" },
   { slug: "agency", name: "Agency" },
-  { slug: "e-commerce", name: "E-Commerce" },
+  { slug: "photography", name: "Photography" },
+  { slug: "illustration", name: "Illustration & Art" },
+  { slug: "film", name: "Film & Video" },
+  { slug: "3d-motion", name: "3D & Motion" },
+  { slug: "architecture", name: "Architecture" },
+  { slug: "interior", name: "Interior Design" },
+  // Product & tech
   { slug: "saas", name: "SaaS" },
   { slug: "ai", name: "AI" },
   { slug: "fintech", name: "Fintech" },
-  { slug: "hospitality", name: "Hospitality" },
-  { slug: "architecture", name: "Architecture" },
-  { slug: "editorial", name: "Editorial" },
+  { slug: "web3", name: "Crypto & Web3" },
+  { slug: "dev-tools", name: "Developer Tools" },
+  { slug: "apps", name: "Mobile Apps" },
+  { slug: "hardware", name: "Hardware & Devices" },
+  { slug: "corporate", name: "Business & Corporate" },
+  // Brands & shopping
+  { slug: "e-commerce", name: "E-Commerce" },
   { slug: "fashion", name: "Fashion" },
-  { slug: "culture", name: "Culture" },
-  { slug: "photography", name: "Photography" },
-  { slug: "music", name: "Music & Sound" },
-  { slug: "real-estate", name: "Real Estate" },
+  { slug: "beauty", name: "Beauty & Cosmetics" },
   { slug: "food-drink", name: "Food & Drink" },
-  { slug: "health", name: "Health & Wellness" },
-  { slug: "education", name: "Education" },
-  { slug: "games", name: "Games & Entertainment" },
+  { slug: "home-living", name: "Furniture & Home" },
+  { slug: "automotive", name: "Automotive" },
+  // Places & experiences
+  { slug: "hospitality", name: "Hospitality" },
+  { slug: "real-estate", name: "Real Estate" },
   { slug: "travel", name: "Travel" },
+  { slug: "health", name: "Health & Wellness" },
+  { slug: "sports", name: "Sports & Fitness" },
+  { slug: "events", name: "Events & Festivals" },
+  // Culture & media
+  { slug: "editorial", name: "Editorial" },
+  { slug: "culture", name: "Culture" },
+  { slug: "music", name: "Music & Sound" },
+  { slug: "games", name: "Games & Entertainment" },
+  { slug: "education", name: "Education" },
+  { slug: "institutions", name: "Museums & Institutions" },
+  { slug: "nonprofit", name: "Non-profit & Causes" },
+  { slug: "experimental", name: "Experimental" },
   { slug: "other", name: "Other" },
+] as const;
+
+/**
+ * CATEGORIES in groups, for the site's menu and pickers. Every category
+ * except "other" is in exactly one group, in CATEGORIES order.
+ */
+export const CATEGORY_GROUPS = [
+  {
+    name: "Studios & portfolios",
+    slugs: ["portfolio", "agency", "photography", "illustration", "film", "3d-motion", "architecture", "interior"],
+  },
+  {
+    name: "Product & tech",
+    slugs: ["saas", "ai", "fintech", "web3", "dev-tools", "apps", "hardware", "corporate"],
+  },
+  { name: "Brands & shopping", slugs: ["e-commerce", "fashion", "beauty", "food-drink", "home-living", "automotive"] },
+  { name: "Places & experiences", slugs: ["hospitality", "real-estate", "travel", "health", "sports", "events"] },
+  {
+    name: "Culture & media",
+    slugs: ["editorial", "culture", "music", "games", "education", "institutions", "nonprofit", "experimental"],
+  },
 ] as const;
 
 /** `slug` is used in /collections/<slug> URLs. */
