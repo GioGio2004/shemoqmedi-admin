@@ -14,7 +14,7 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { getUserByExternalId } from "./users";
-import { juryCategory, pillars } from "./schema";
+import { juryCategory, juryExperience, juryWork, pillars } from "./schema";
 import { LIMITS } from "./lib/taxonomy";
 import { normalizePillars, round2, type Pillars } from "./lib/scoring";
 import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
@@ -130,6 +130,38 @@ function cleanEmail(raw: string | undefined) {
   return email;
 }
 
+type ExperienceRows = NonNullable<Doc<"jurors">["experience"]>;
+type WorkRows = NonNullable<Doc<"jurors">["work"]>;
+
+/** Tidies the Experience list: trims, drops empty rows, caps the count. [] clears it. */
+function cleanExperience(rows: ExperienceRows): ExperienceRows | undefined {
+  const out = rows
+    .map((r) => ({
+      title: cleanText(r.title, "Experience role", 80, false),
+      organization: cleanText(r.organization, "Experience organisation", 80, false),
+      period: cleanText(r.period ?? "", "Experience period", 40, false) || undefined,
+    }))
+    .filter((r) => r.title || r.organization);
+  if (out.some((r) => !r.title || !r.organization)) fail("Each experience entry needs a role and an organisation.");
+  if (out.length > LIMITS.juryExperience) fail(`Add up to ${LIMITS.juryExperience} experience entries.`);
+  return out.length ? out : undefined;
+}
+
+/** Tidies the Work list: trims, normalises links, drops empty rows, caps the count. [] clears it. */
+function cleanWork(rows: WorkRows): WorkRows | undefined {
+  const out = rows
+    .map((r) => ({
+      title: cleanText(r.title, "Work title", 80, false),
+      url: optionalUrl(r.url, "Work link"),
+      year: cleanText(r.year ?? "", "Work year", 20, false) || undefined,
+      description: cleanText(r.description ?? "", "Work description", 200, false) || undefined,
+    }))
+    .filter((r) => r.title || r.url);
+  if (out.some((r) => !r.title)) fail("Each work entry needs a title.");
+  if (out.length > LIMITS.juryWork) fail(`Add up to ${LIMITS.juryWork} work entries.`);
+  return out.length ? out : undefined;
+}
+
 /** Fields a juror may edit on their own profile. */
 const selfProfileArgs = {
   name: v.string(),
@@ -138,6 +170,8 @@ const selfProfileArgs = {
   website: v.optional(v.string()), // "" clears
   linkedinUrl: v.optional(v.string()), // "" clears
   bio: v.optional(v.string()),
+  experience: v.optional(v.array(juryExperience)), // [] clears; absent keeps
+  work: v.optional(v.array(juryWork)), // [] clears; absent keeps
 };
 
 function cleanSelfProfile(args: {
@@ -147,8 +181,12 @@ function cleanSelfProfile(args: {
   website?: string;
   linkedinUrl?: string;
   bio?: string;
+  experience?: ExperienceRows;
+  work?: WorkRows;
 }) {
   return {
+    ...(args.experience !== undefined ? { experience: cleanExperience(args.experience) } : {}),
+    ...(args.work !== undefined ? { work: cleanWork(args.work) } : {}),
     name: cleanText(args.name, "Name", LIMITS.creditName),
     title: cleanText(args.title, "Role", LIMITS.juryTitle),
     location: cleanText(args.location ?? "", "Location", 80, false) || undefined,
@@ -222,6 +260,8 @@ export const jurorPublic = v.object({
   website: v.union(v.string(), v.null()),
   linkedinUrl: v.union(v.string(), v.null()),
   bio: v.union(v.string(), v.null()),
+  experience: v.array(juryExperience),
+  work: v.array(juryWork),
   isFounding: v.boolean(),
   imageUrl: v.union(v.string(), v.null()), // null: show the grey placeholder
 });
@@ -236,6 +276,8 @@ export async function toJurorPublic(ctx: QueryCtx, juror: Doc<"jurors">) {
     website: juror.website ?? null,
     linkedinUrl: juror.linkedinUrl ?? null,
     bio: juror.bio ?? null,
+    experience: juror.experience ?? [],
+    work: juror.work ?? [],
     isFounding: juror.isFounding ?? false,
     imageUrl: await jurorPhoto(ctx, juror),
   };
@@ -503,6 +545,8 @@ const adminProfileArgs = {
   email: v.optional(v.string()), // private; for emailing the claim link
   avatarId: v.optional(vMediaId),
   isFounding: v.optional(v.boolean()),
+  experience: v.optional(v.array(juryExperience)),
+  work: v.optional(v.array(juryWork)),
 };
 
 /** Admin: pre-create an unclaimed jury profile. Share its claim link next (claimLinks.link). */
@@ -528,6 +572,8 @@ export const createJuror = mutation({
       email: cleanEmail(args.email),
       avatarId: args.avatarId,
       isFounding: args.isFounding ?? true,
+      experience: args.experience ? cleanExperience(args.experience) : undefined,
+      work: args.work ? cleanWork(args.work) : undefined,
       active: true,
       joinedAt: now,
       updatedAt: now,
@@ -550,6 +596,8 @@ export const updateJuror = mutation({
     email: v.optional(v.string()),
     avatarId: v.optional(v.union(vMediaId, v.null())),
     isFounding: v.optional(v.boolean()),
+    experience: v.optional(v.array(juryExperience)), // [] clears
+    work: v.optional(v.array(juryWork)), // [] clears
   },
   returns: v.object({ slug: v.string() }),
   handler: async (ctx, { jurorId, ...args }) => {
@@ -572,6 +620,8 @@ export const updateJuror = mutation({
     if (args.bio !== undefined) patch.bio = cleanText(args.bio, "Bio", LIMITS.juryBio, false) || undefined;
     if (args.email !== undefined) patch.email = cleanEmail(args.email);
     if (args.isFounding !== undefined) patch.isFounding = args.isFounding;
+    if (args.experience !== undefined) patch.experience = cleanExperience(args.experience);
+    if (args.work !== undefined) patch.work = cleanWork(args.work);
     if (args.avatarId !== undefined) {
       if (args.avatarId) await assertMedia(ctx, args.avatarId, "Photo", "image");
       if (juror.avatarId && juror.avatarId !== args.avatarId) await deleteMedia(ctx, juror.avatarId);
@@ -690,6 +740,112 @@ export const setJurorActive = mutation({
     await ctx.db.patch(jurorId, { active, updatedAt: Date.now() });
     if (isClaimedJuror(juror)) await scheduleIndexNow(ctx, ["/jury", `/jury/${juror.slug}`]);
     return null;
+  },
+});
+
+/**
+ * Admin: every site in its voting window, soonest to close first, with each
+ * juror's evaluation. `juryTarget` is how many evaluations a site should get
+ * before it closes (fewer after 7 days extends voting once by a week).
+ */
+export const nomineesOverview = query({
+  args: {},
+  returns: v.object({
+    juryTarget: v.number(),
+    activeJurors: v.number(),
+    nominees: v.array(
+      v.object({
+        id: v.id("listings"),
+        slug: v.string(),
+        title: v.string(),
+        url: v.string(),
+        creditName: v.string(),
+        coverUrl: v.union(v.string(), v.null()),
+        publishedAt: v.union(v.number(), v.null()),
+        votingEndsAt: v.union(v.number(), v.null()),
+        votingExtended: v.boolean(),
+        isStartup: v.boolean(),
+        editorialScores: v.union(pillars, v.null()),
+        editorialAverage: v.union(v.number(), v.null()),
+        communityAverage: v.union(v.number(), v.null()),
+        communityVotesCount: v.number(),
+        finalScore: v.union(v.number(), v.null()),
+        evaluations: v.array(
+          v.object({
+            id: v.id("juryEvaluations"),
+            juror: v.object({
+              name: v.string(),
+              slug: v.string(),
+              title: v.string(),
+              imageUrl: v.union(v.string(), v.null()),
+            }),
+            scores: pillars,
+            average: v.number(),
+            comment: v.string(),
+            updatedAt: v.number(),
+          }),
+        ),
+      }),
+    ),
+  }),
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const listings = await ctx.db
+      .query("listings")
+      .withIndex("by_status_votingEndsAt", (q) => q.eq("status", "in_voting"))
+      .take(200);
+    const activeJurors = (
+      await ctx.db
+        .query("jurors")
+        .withIndex("by_active", (q) => q.eq("active", true))
+        .take(500)
+    ).filter(isPublicJuror).length;
+    const nominees = await Promise.all(
+      listings.map(async (l) => {
+        const rows = await ctx.db
+          .query("juryEvaluations")
+          .withIndex("by_listing", (q) => q.eq("listingId", l._id))
+          .collect();
+        rows.sort((a, b) => a.createdAt - b.createdAt);
+        const evaluations = [];
+        for (const e of rows) {
+          const juror = await ctx.db.get(e.jurorId);
+          const s = e.scores;
+          evaluations.push({
+            id: e._id,
+            juror: {
+              name: juror?.name ?? "Former juror",
+              slug: juror?.slug ?? "",
+              title: juror?.title ?? "",
+              imageUrl: juror ? await jurorPhoto(ctx, juror) : null,
+            },
+            scores: s,
+            average: round2((s.design + s.usability + s.creativity + s.code) / 4),
+            comment: e.comment,
+            updatedAt: e.updatedAt,
+          });
+        }
+        return {
+          id: l._id,
+          slug: l.slug,
+          title: l.title,
+          url: l.url,
+          creditName: l.creditName,
+          coverUrl: await mediaUrl(ctx, l.coverId),
+          publishedAt: l.publishedAt ?? null,
+          votingEndsAt: l.votingEndsAt ?? null,
+          votingExtended: l.votingExtendedAt !== undefined,
+          isStartup: l.isStartup ?? false,
+          editorialScores: l.editorialScores ?? null,
+          editorialAverage: l.editorialAverage ?? null,
+          communityAverage: l.communityAverage ?? null,
+          communityVotesCount: l.communityVotesCount,
+          finalScore: l.finalScore ?? null,
+          evaluations,
+        };
+      }),
+    );
+    return { juryTarget: LIMITS.juryMinEvaluations, activeJurors, nominees };
   },
 });
 

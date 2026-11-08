@@ -29,6 +29,21 @@ export const pillars = v.object({
 /** A screenshot or video: Convex storage file or ImageKit `media` row (see lib/media.ts). */
 const mediaId = v.union(v.id("_storage"), v.id("media"));
 
+/** A juror's past role, shown on their jury page. */
+export const juryExperience = v.object({
+  title: v.string(), // "Art director"
+  organization: v.string(), // "Studio X"
+  period: v.optional(v.string()), // "2019 – present"
+});
+
+/** A notable piece of a juror's work, shown on their jury page. */
+export const juryWork = v.object({
+  title: v.string(),
+  url: v.optional(v.string()),
+  year: v.optional(v.string()),
+  description: v.optional(v.string()),
+});
+
 /** Jury panels (lib/taxonomy.ts JURY_CATEGORIES has the display names). */
 export const juryCategory = v.union(
   v.literal("design"),
@@ -127,7 +142,10 @@ export default defineSchema({
     reviewedBy: v.optional(v.id("users")),
     reviewedAt: v.optional(v.number()),
     publishedAt: v.optional(v.number()), // voting window start
-    votingEndsAt: v.optional(v.number()), // publishedAt + 7 days
+    votingEndsAt: v.optional(v.number()), // publishedAt + 7 days (+7 more if extended)
+    // Set when the window was extended because fewer than LIMITS.juryMinEvaluations
+    // jurors had evaluated the site: every site gets up to 14 days for its jury.
+    votingExtendedAt: v.optional(v.number()),
 
     // Scores. Community totals are running sums so reads stay O(1).
     editorialScores: v.optional(pillars),
@@ -196,6 +214,8 @@ export default defineSchema({
     website: v.optional(v.string()), // personal site; no link shown when empty
     linkedinUrl: v.optional(v.string()),
     bio: v.optional(v.string()),
+    experience: v.optional(v.array(juryExperience)), // newest first, up to LIMITS.juryExperience
+    work: v.optional(v.array(juryWork)), // up to LIMITS.juryWork
     avatarId: v.optional(mediaId), // admin-uploaded (ImageKit)
     email: v.optional(v.string()), // private: for emailing the claim link
     isFounding: v.optional(v.boolean()), // "Founding Jury" badge

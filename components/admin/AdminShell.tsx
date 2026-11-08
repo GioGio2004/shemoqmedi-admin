@@ -35,6 +35,7 @@ function ClaimsCount() {
 const NAV = [
   { href: "/dashboard", label: "Overview", count: null },
   { href: "/review", label: "Review", count: ReviewCount },
+  { href: "/nominees", label: "Nominees", count: null },
   { href: "/listings/new", label: "Add site", count: null },
   { href: "/creators", label: "Creators", count: null },
   { href: "/jury", label: "Jury", count: null },
@@ -58,7 +59,7 @@ function AdminHeader() {
         <Wordmark />
         <span className="admin-brand-label">Admin</span>
       </Link>
-      {/* Nine items: tighter padding than the base style, and the bar scrolls
+      {/* Ten items: tighter padding than the base style, and the bar scrolls
           sideways instead of wrapping when the window is narrow. */}
       <nav
         className="admin-navigation"

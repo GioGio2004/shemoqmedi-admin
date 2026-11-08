@@ -103,8 +103,8 @@ export function Overview() {
           <h1>Control room.</h1>
         </div>
         <p className="workspace-intro">
-          Add sites by hand, or approve submissions. Live sites vote for 7 days, then close with
-          their final score and awards.
+          Add sites by hand, or approve submissions. Live sites vote for 7 days (14 if fewer than 5
+          jurors have scored them), then close with their final score and awards.
         </p>
       </div>
 

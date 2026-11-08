@@ -73,8 +73,8 @@ export function ReviewQueue({ status }: { status: ReviewStatus }) {
           <p className="admin-eyebrow">02 / Review</p>
           <h1>Listings.</h1>
           <p>
-            Approve a submission to open its 7-day voting window. Awards are assigned when the
-            window closes.
+            Approve a submission to open its 7-day voting window (extended once by 7 days if fewer
+            than 5 jurors have scored it). Awards are assigned when the window closes.
           </p>
         </div>
         <nav className="admin-tabs" aria-label="Filter by status">

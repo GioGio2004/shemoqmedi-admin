@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "../convex/schema";
-import { api } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 
 const modules = import.meta.glob("../convex/**/*.{ts,js}");
@@ -212,6 +212,66 @@ describe("jury claim links", () => {
     expect(out.slug).toBe(before);
     await env.admin.mutation(api.jury.updateJuror, { jurorId, name: "Ana B." });
     expect((await env.ana.query(api.jury.me, {}))!.slug).toBe(before);
+  });
+
+  it("with 5 jury evaluations the window closes on time instead of being extended", async () => {
+    const env = await setup();
+    const now = Date.now();
+    await env.t.run(async (ctx) => {
+      for (let i = 0; i < 5; i++) {
+        const jurorId = await ctx.db.insert("jurors", {
+          slug: `juror-${i}`,
+          name: `Juror ${i}`,
+          title: "Designer",
+          status: "claimed",
+          active: true,
+          joinedAt: now,
+          updatedAt: now,
+        });
+        await ctx.db.insert("juryEvaluations", {
+          listingId: env.site.id,
+          jurorId,
+          scores: p(9),
+          comment: COMMENT,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      await ctx.db.patch(env.site.id, { votingEndsAt: now - 1 });
+    });
+    await env.t.mutation(internal.listings.closeExpiredVoting, {});
+    expect(await env.t.query(api.listings.getPublicBySlug, { slug: env.site.slug })).toMatchObject({
+      status: "archived", // no jury score was recomputed here, so no award; what matters is it closed
+      votingExtended: false,
+    });
+    const overview = await env.admin.query(api.jury.nomineesOverview, {});
+    expect(overview.juryTarget).toBe(5);
+    expect(overview.nominees).toHaveLength(0);
+  });
+
+  it("jurors list their experience and work; empty rows are dropped, broken ones refused", async () => {
+    const env = await setup();
+    await joinJury(env, "Ana", env.ana);
+    await env.ana.mutation(api.jury.updateProfile, {
+      name: "Ana",
+      title: "Designer",
+      experience: [
+        { title: "Art director", organization: "Studio X", period: "2021 – present" },
+        { title: " ", organization: "" },
+      ],
+      work: [{ title: "Floema", url: "floema.com", year: "2024" }],
+    });
+    const me = await env.ana.query(api.jury.me, {});
+    expect(me!.experience).toEqual([{ title: "Art director", organization: "Studio X", period: "2021 – present" }]);
+    expect(me!.work).toEqual([{ title: "Floema", url: "https://floema.com", year: "2024" }]);
+    await expect(
+      env.ana.mutation(api.jury.updateProfile, { name: "Ana", title: "Designer", experience: [{ title: "Lead", organization: "" }] }),
+    ).rejects.toThrow(/role and an organisation/);
+    // Absent keeps, [] clears.
+    await env.ana.mutation(api.jury.updateProfile, { name: "Ana", title: "Designer", work: [] });
+    const after = await env.ana.query(api.jury.me, {});
+    expect(after!.experience).toHaveLength(1);
+    expect(after!.work).toEqual([]);
   });
 
   it("admins can force the follow state either way", async () => {

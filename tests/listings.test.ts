@@ -66,6 +66,17 @@ async function submitAndApprove(env: Awaited<ReturnType<typeof setup>>) {
   return { slug, id };
 }
 
+/** Voting needs a badge: give `who` a listed site of their own first. */
+async function giveBadge(env: Awaited<ReturnType<typeof setup>>, who: "voter1" | "voter2") {
+  const { t, admin } = env;
+  await env[who].mutation(
+    api.listings.submit,
+    input(await storeFile(t), { title: `${who} site`, url: `https://${who}.example`, creditName: who }),
+  );
+  const [{ id }] = await env[who].query(api.listings.myListings, {});
+  await admin.mutation(api.listings.approve, { id });
+}
+
 describe("submission", () => {
   it("requires a signed-in user", async () => {
     const { t } = await setup();
@@ -169,6 +180,8 @@ describe("review and voting window", () => {
     await env.admin.mutation(api.listings.setEditorialScores, { id, scores: p(8) });
     expect((await env.t.query(api.listings.getPublicBySlug, { slug }))!.finalScore).toBe(8);
 
+    await giveBadge(env, "voter1");
+    await giveBadge(env, "voter2");
     await env.voter1.mutation(api.votes.cast, { slug, scores: p(9) });
     await env.voter2.mutation(api.votes.cast, { slug, scores: { design: 10, usability: 9, creativity: 9, code: 8 } });
     const listing = await env.t.query(api.listings.getPublicBySlug, { slug });
@@ -185,7 +198,16 @@ describe("review and voting window", () => {
   it("allows one vote per person, not by the owner, only while voting is open", async () => {
     const env = await setup();
     const { slug, id } = await submitAndApprove(env);
+    // No badge yet: voter2 has never had a site listed.
+    expect(await env.voter2.query(api.votes.eligibility, { slug })).toMatchObject({ canVote: false, kind: "badge" });
+    await expect(env.voter2.mutation(api.votes.cast, { slug, scores: p(8) })).rejects.toThrow(/at least one Shemoqmedi badge/);
+    // The maker's only listed site is this one: that badge doesn't count here, and it's their own site.
+    expect(await env.maker.query(api.votes.eligibility, { slug })).toMatchObject({ canVote: false, kind: "own" });
+    await giveBadge(env, "voter1");
+    await giveBadge(env, "voter2");
+    expect(await env.voter1.query(api.votes.eligibility, { slug })).toMatchObject({ canVote: true, kind: "ok" });
     await env.voter1.mutation(api.votes.cast, { slug, scores: p(7) });
+    expect(await env.voter1.query(api.votes.eligibility, { slug })).toMatchObject({ canVote: false, kind: "voted" });
     await expect(env.voter1.mutation(api.votes.cast, { slug, scores: p(9) })).rejects.toThrow(/already voted/);
     await expect(env.maker.mutation(api.votes.cast, { slug, scores: p(10) })).rejects.toThrow(/own site/);
     await expect(env.t.mutation(api.votes.cast, { slug, scores: p(10) })).rejects.toThrow(/Unauthenticated/);
@@ -201,6 +223,14 @@ describe("review and voting window", () => {
     await env.admin.mutation(api.listings.setEditorialScores, { id, scores: p(8.6) });
     await env.t.run((ctx) => ctx.db.patch(id, { votingEndsAt: Date.now() - 1 }));
 
+    // Fewer than 5 jury evaluations after 7 days: voting runs one more week.
+    expect(await env.t.mutation(internal.listings.closeExpiredVoting, {})).toBe(1);
+    const extended = await env.t.query(api.listings.getPublicBySlug, { slug });
+    expect(extended).toMatchObject({ status: "in_voting", votingExtended: true });
+    expect(extended!.votingEndsAt - Date.now()).toBeGreaterThan(6.9 * DAY);
+
+    // After the extra week it closes regardless.
+    await env.t.run((ctx) => ctx.db.patch(id, { votingEndsAt: Date.now() - 1 }));
     expect(await env.t.mutation(internal.listings.closeExpiredVoting, {})).toBe(1);
     const listing = await env.t.query(api.listings.getPublicBySlug, { slug });
     expect(listing).toMatchObject({ status: "awarded", awards: ["BSC", "SOTD"], finalScore: 8.6 });
@@ -208,6 +238,44 @@ describe("review and voting window", () => {
     // Admins can still correct the jury score; awards stay as assigned.
     await env.admin.mutation(api.listings.setEditorialScores, { id, scores: p(5) });
     expect(await env.t.query(api.listings.getPublicBySlug, { slug })).toMatchObject({ finalScore: 5, awards: ["BSC", "SOTD"] });
+  });
+
+  it("re-approving starts a fresh window with its own jury extension", async () => {
+    const env = await setup();
+    const { slug, id } = await submitAndApprove(env);
+    await env.t.run((ctx) => ctx.db.patch(id, { votingEndsAt: Date.now() - 1 }));
+    await env.t.mutation(internal.listings.closeExpiredVoting, {});
+    expect((await env.t.query(api.listings.getPublicBySlug, { slug }))!.votingExtended).toBe(true);
+    await env.admin.mutation(api.listings.reject, { id, note: "Unpublished for a fix." });
+    await env.admin.mutation(api.listings.approve, { id });
+    expect((await env.t.query(api.listings.getPublicBySlug, { slug }))!.votingExtended).toBe(false);
+  });
+
+  it("submitting under someone's creator name doesn't borrow their badge", async () => {
+    const env = await setup();
+    const { slug } = await submitAndApprove(env); // the maker's site, credited "Fold & Co."
+    // voter1 submits a (still pending) site credited to an unused name, then the
+    // admin imports a public site by that studio: it isn't voter1's badge.
+    await env.voter1.mutation(
+      api.listings.submit,
+      input(await storeFile(env.t), { title: "Copycat", url: "https://copycat.example", creditName: "Big Studio" }),
+    );
+    await env.t.mutation(internal.importer.insertImported, {
+      url: "https://bigstudio.example",
+      title: "Big Studio",
+      tagline: "",
+      category: "agency",
+      technologies: [],
+      region: "global",
+      creatorTier: "agency",
+      creditName: "Big Studio",
+      status: "in_voting",
+      votingDaysLeft: 6,
+      isClaimed: false,
+      coverId: await storeFile(env.t),
+      source: "import",
+    });
+    expect(await env.voter1.query(api.votes.eligibility, { slug })).toMatchObject({ canVote: false, kind: "badge" });
   });
 
   it("closes without an award (archived) below 7.50", async () => {
@@ -231,11 +299,13 @@ describe("review and voting window", () => {
   it("only the owner can withdraw; files and votes are deleted", async () => {
     const env = await setup();
     const { slug, id } = await submitAndApprove(env);
+    await giveBadge(env, "voter1");
     await env.voter1.mutation(api.votes.cast, { slug, scores: p(8) });
     await expect(env.voter1.mutation(api.listings.withdraw, { id })).rejects.toThrow(/not found/);
     await env.maker.mutation(api.listings.withdraw, { id });
     expect(await env.t.run((ctx) => ctx.db.query("votes").collect())).toEqual([]);
-    expect(await env.t.run((ctx) => ctx.db.query("listings").collect())).toEqual([]);
+    // Only voter1's own listing (their badge) is left.
+    expect((await env.t.run((ctx) => ctx.db.query("listings").collect())).map((l) => l.title)).toEqual(["voter1 site"]);
   });
 });
 

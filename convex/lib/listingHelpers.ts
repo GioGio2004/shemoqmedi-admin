@@ -290,6 +290,8 @@ export const publicListing = v.object({
   finalScore: v.union(v.number(), v.null()),
   publishedAt: v.number(),
   votingEndsAt: v.number(),
+  /** Voting was extended a week to give the jury time (fewer than 5 jury evaluations after 7 days). */
+  votingExtended: v.boolean(),
   awardedAt: v.union(v.number(), v.null()),
   isClaimed: v.boolean(),
   isStartup: v.boolean(),
@@ -352,6 +354,7 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
     finalScore: listing.finalScore ?? null,
     publishedAt,
     votingEndsAt: listing.votingEndsAt ?? publishedAt,
+    votingExtended: listing.votingExtendedAt !== undefined,
     awardedAt: listing.awardedAt ?? null,
     isClaimed: listing.isClaimed,
     isStartup: listing.isStartup ?? false,

@@ -11,6 +11,18 @@ import { JURY_CATEGORIES, LIMITS, type JuryCategory } from "@/convex/lib/taxonom
 import { formatDate, STOREFRONT_URL } from "@/lib/storefront";
 import { ClaimLink, CopyUrl, EmailClaimLink } from "./ClaimLink";
 import { MediaPicker, useMediaUpload } from "./MediaUpload";
+import {
+  cleanExperience,
+  cleanWork,
+  ExperienceEditor,
+  experienceDrafts,
+  listsProblem,
+  sameRows,
+  WorkEditor,
+  workDrafts,
+  type ExperienceDraft,
+  type WorkDraft,
+} from "./ProfileListEditor";
 
 type Juror = FunctionReturnType<typeof api.jury.adminOverview>[number];
 type UpdateArgs = FunctionArgs<typeof api.jury.updateJuror>;
@@ -239,6 +251,25 @@ function ProfileFields({
   );
 }
 
+function ProfileLists({
+  experience,
+  work,
+  onExperience,
+  onWork,
+}: {
+  experience: ExperienceDraft[];
+  work: WorkDraft[];
+  onExperience: (rows: ExperienceDraft[]) => void;
+  onWork: (rows: WorkDraft[]) => void;
+}) {
+  return (
+    <>
+      <ExperienceEditor rows={experience} onChange={onExperience} />
+      <WorkEditor rows={work} onChange={onWork} />
+    </>
+  );
+}
+
 type Avatar = { file: File | null; error: string | null };
 const NO_AVATAR: Avatar = { file: null, error: null };
 
@@ -267,6 +298,8 @@ function CreateJurorForm() {
   const link = useAction(api.claimLinks.link);
   const uploadAvatar = useAvatarUpload();
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const [experience, setExperience] = useState<ExperienceDraft[]>([]);
+  const [work, setWork] = useState<WorkDraft[]>([]);
   const [avatar, setAvatar] = useState<Avatar>(NO_AVATAR);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -281,7 +314,7 @@ function CreateJurorForm() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (busy || submitting.current) return;
-    const problem = draftProblem(draft) ?? avatar.error;
+    const problem = draftProblem(draft) ?? listsProblem(experience, work) ?? avatar.error;
     if (problem) {
       setError(problem);
       return;
@@ -292,6 +325,8 @@ function CreateJurorForm() {
     try {
       // Profile first, photo second: a profile the server rejects never leaves
       // an uploaded photo behind.
+      const experienceRows = cleanExperience(experience);
+      const workRows = cleanWork(work);
       const { id } = await create({
         name: draft.name.trim(),
         title: draft.title.trim(),
@@ -302,6 +337,8 @@ function CreateJurorForm() {
         bio: draft.bio.trim() || undefined,
         email: draft.email.trim() || undefined,
         isFounding: draft.isFounding,
+        experience: experienceRows.length ? experienceRows : undefined,
+        work: workRows.length ? workRows : undefined,
       });
       if (avatar.file) {
         try {
@@ -319,6 +356,8 @@ function CreateJurorForm() {
       }
       setCreated({ id, name: draft.name.trim(), url });
       setDraft(EMPTY_DRAFT);
+      setExperience([]);
+      setWork([]);
       setAvatar(NO_AVATAR);
     } catch (err) {
       showError(err);
@@ -338,6 +377,18 @@ function CreateJurorForm() {
           <legend className="sr-only">New jury profile</legend>
           <div className="grid min-w-0 gap-4">
             <ProfileFields draft={draft} set={set} idPrefix="new-juror" />
+            <ProfileLists
+              experience={experience}
+              work={work}
+              onExperience={(rows) => {
+                setError(null);
+                setExperience(rows);
+              }}
+              onWork={(rows) => {
+                setError(null);
+                setWork(rows);
+              }}
+            />
           </div>
           <div className="grid gap-2">
             <MediaPicker
@@ -393,6 +444,9 @@ function EditJurorForm({ juror, onDone }: { juror: Juror; onDone: () => void }) 
   const uploadAvatar = useAvatarUpload();
   const saved = fromJuror(juror);
   const [edits, setEdits] = useState<Partial<Draft>>({});
+  // null = untouched: the saved rows show (and stay current) until edited.
+  const [experienceEdit, setExperienceEdit] = useState<ExperienceDraft[] | null>(null);
+  const [workEdit, setWorkEdit] = useState<WorkDraft[] | null>(null);
   const [avatar, setAvatar] = useState<Avatar>(NO_AVATAR);
   const [removeAvatar, setRemoveAvatar] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -404,6 +458,12 @@ function EditJurorForm({ juror, onDone }: { juror: Juror; onDone: () => void }) 
     const b = saved[k];
     return typeof a === "string" && typeof b === "string" ? a.trim() !== b.trim() : a !== b;
   });
+  const savedExperience = experienceDrafts(juror.experience);
+  const savedWork = workDrafts(juror.work);
+  const experience = experienceEdit ?? savedExperience;
+  const work = workEdit ?? savedWork;
+  const experienceChanged = !sameRows(cleanExperience(experience), cleanExperience(savedExperience));
+  const workChanged = !sameRows(cleanWork(work), cleanWork(savedWork));
   const avatarChanged = avatar.file !== null || removeAvatar;
   // Until claimed, the photo shown is the admin avatar (if any).
   const currentAvatar = juror.avatarId && juror.status === "unclaimed" && !removeAvatar ? juror.imageUrl : null;
@@ -416,12 +476,12 @@ function EditJurorForm({ juror, onDone }: { juror: Juror; onDone: () => void }) 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
-    const problem = draftProblem(draft) ?? avatar.error;
+    const problem = draftProblem(draft) ?? listsProblem(experience, work) ?? avatar.error;
     if (problem) {
       setError(problem);
       return;
     }
-    if (changed.length === 0 && !avatarChanged) {
+    if (changed.length === 0 && !experienceChanged && !workChanged && !avatarChanged) {
       onDone();
       return;
     }
@@ -433,6 +493,8 @@ function EditJurorForm({ juror, onDone }: { juror: Juror; onDone: () => void }) 
         const v = draft[k];
         (args as Record<string, unknown>)[k] = typeof v === "string" ? v.trim() : v;
       }
+      if (experienceChanged) args.experience = cleanExperience(experience); // [] clears
+      if (workChanged) args.work = cleanWork(work);
       if (avatar.file) args.avatarId = await uploadAvatar(avatar.file, draft.name);
       else if (removeAvatar) args.avatarId = null;
       await update(args);
@@ -450,6 +512,18 @@ function EditJurorForm({ juror, onDone }: { juror: Juror; onDone: () => void }) 
         <legend className="sr-only">Edit {juror.name}</legend>
         <div className="grid min-w-0 gap-4">
           <ProfileFields draft={draft} set={set} idPrefix={`juror-${juror.id}`} />
+          <ProfileLists
+            experience={experience}
+            work={work}
+            onExperience={(rows) => {
+              setError(null);
+              setExperienceEdit(rows);
+            }}
+            onWork={(rows) => {
+              setError(null);
+              setWorkEdit(rows);
+            }}
+          />
         </div>
         <div className="grid gap-2">
           <MediaPicker
@@ -511,6 +585,35 @@ function StatusChip({ juror }: { juror: Juror }) {
   );
 }
 
+/** First entries of Experience and Work, for the row summary. */
+function ProfileListSummary({ juror }: { juror: Juror }) {
+  const more = (n: number) => (n > 2 ? ` +${n - 2} more` : "");
+  return (
+    <>
+      {juror.experience.length > 0 && (
+        <p className="text-xs text-black/55">
+          Experience:{" "}
+          {juror.experience
+            .slice(0, 2)
+            .map((r) => `${r.title}, ${r.organization}`)
+            .join("; ")}
+          {more(juror.experience.length)}
+        </p>
+      )}
+      {juror.work.length > 0 && (
+        <p className="text-xs text-black/55">
+          Work:{" "}
+          {juror.work
+            .slice(0, 2)
+            .map((r) => (r.year ? `${r.title} (${r.year})` : r.title))
+            .join("; ")}
+          {more(juror.work.length)}
+        </p>
+      )}
+    </>
+  );
+}
+
 function JurorRow({ juror }: { juror: Juror }) {
   const setActive = useMutation(api.jury.setJurorActive);
   const remove = useMutation(api.jury.deleteJuror);
@@ -566,6 +669,7 @@ function JurorRow({ juror }: { juror: Juror }) {
             {juror.email ?? (unclaimed ? "No email" : "Account deleted")}
             {juror.accountEmail && juror.email !== juror.accountEmail ? ` · account ${juror.accountEmail}` : ""}
           </p>
+          <ProfileListSummary juror={juror} />
           {juror.listings.length > 0 && (
             <p className="text-xs text-black/55">
               Listings:{" "}
@@ -655,13 +759,18 @@ export function JuryAdmin() {
           <h1>Jury.</h1>
           <p>
             Create a profile for each person you want on the jury, then send them its private claim link. Claiming
-            puts the profile on the site. Jurors evaluate sites in their voting week with the Evaluate button on each
+            puts the profile on the site. Jurors evaluate sites in their voting window with the Evaluate button on each
             listing page; a site&apos;s jury score is the average of its evaluations.
           </p>
         </div>
-        <Link href="/outreach" className="admin-button admin-button-secondary">
-          Outreach
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/nominees" className="admin-button admin-button-secondary">
+            Nominees
+          </Link>
+          <Link href="/outreach" className="admin-button admin-button-secondary">
+            Outreach
+          </Link>
+        </div>
       </div>
 
       <div className="grid gap-6">

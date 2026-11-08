@@ -111,6 +111,15 @@ export const LIMITS = {
   technologies: 6,
   /** Categories per listing (the first is the primary one). */
   categories: 3,
+  /**
+   * Jury evaluations a site should get. With fewer when its 7-day window ends,
+   * voting is extended once by LIMITS.votingExtensionDays (14 days in all).
+   */
+  juryMinEvaluations: 5,
+  votingExtensionDays: 7,
+  /** Entries in a juror's Experience and Work sections. */
+  juryExperience: 8,
+  juryWork: 8,
   /** Jury evaluation comment, shown on the listing page. */
   juryCommentMin: 20,
   juryComment: 1000,

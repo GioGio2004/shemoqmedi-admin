@@ -493,6 +493,7 @@ export const approve = mutation({
       reviewedAt: now,
       publishedAt: now,
       votingEndsAt: now + VOTING_DAYS * DAY_MS,
+      votingExtendedAt: undefined, // a new window gets its own jury extension
       awards: [],
       awardedAt: undefined,
       updatedAt: now,
@@ -679,6 +680,23 @@ export const closeExpiredVoting = internalMutation({
       .take(100);
     const paths: string[] = [];
     for (const listing of expired) {
+      // Fewer than LIMITS.juryMinEvaluations jury evaluations: one more week,
+      // so every site gets up to 14 days for its jury. Then it closes anyway.
+      if (!listing.votingExtendedAt && listing.votingEndsAt) {
+        const evaluations = await ctx.db
+          .query("juryEvaluations")
+          .withIndex("by_listing", (q) => q.eq("listingId", listing._id))
+          .take(LIMITS.juryMinEvaluations);
+        if (evaluations.length < LIMITS.juryMinEvaluations) {
+          await ctx.db.patch(listing._id, {
+            votingEndsAt: Math.max(listing.votingEndsAt, now) + LIMITS.votingExtensionDays * DAY_MS,
+            votingExtendedAt: now,
+            updatedAt: now,
+          });
+          paths.push(...(await listingPaths(ctx, listing)));
+          continue;
+        }
+      }
       const awards = await finalizeListing(ctx, listing);
       paths.push(...(await listingPaths(ctx, listing)), ...awardPaths(awards ?? []));
     }

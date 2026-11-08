@@ -313,6 +313,9 @@ export const setLifecycle = mutation({
           ...base,
           votingEndsAt: ends,
           publishedAt: keepStart ? listing.publishedAt : Math.min(now, ends - VOTING_DAYS * DAY_MS),
+          // Reopening starts a new window, which gets its own jury extension;
+          // moving the end of a running window keeps the flag.
+          ...(keepStart ? {} : { votingExtendedAt: undefined }),
           awards: [],
           awardedAt: undefined,
           reviewNote: undefined,
