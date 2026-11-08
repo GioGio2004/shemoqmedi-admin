@@ -6,7 +6,7 @@
 //   2. Deletes every Convex storage file no listing uses any more.
 // Videos are skipped: they live on Cloudflare R2 now (every new video on
 // ImageKit costs video processing units). Move them with "Move files" on the
-// admin overview, which compresses each one in the browser.
+// admin overview (compresses in the browser) or scripts/videos-to-r2.mjs (ffmpeg).
 // Files get SEO names in /listings/<slug>/, same as browser uploads.
 //
 // Needs ffmpeg + ffprobe on PATH and IMAGEKIT_PRIVATE_KEY in .env.local.
