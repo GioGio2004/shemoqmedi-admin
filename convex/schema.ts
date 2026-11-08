@@ -68,6 +68,8 @@ export default defineSchema({
     region,
     location: v.optional(v.string()), // e.g. "Tbilisi, GE"
     website: v.optional(v.string()),
+    // Profile links (Dribbble, Behance, LinkedIn, X, ...), up to LIMITS.creatorLinks.
+    links: v.optional(v.array(v.string())),
     bio: v.optional(v.string()),
     isClaimed: v.boolean(),
     claimedBy: v.optional(v.id("users")),

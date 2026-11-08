@@ -102,6 +102,8 @@ export const LIMITS = {
   technologies: 6,
   /** Categories per listing (the first is the primary one). */
   categories: 3,
+  /** Profile links on a creator page (Dribbble, LinkedIn, ...). */
+  creatorLinks: 6,
   reviewNote: 500,
   claimMessage: 1000,
   /** Extra screenshots after the cover (so 5 images in all). */

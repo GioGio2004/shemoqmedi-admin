@@ -415,6 +415,7 @@ const adminCreator = v.object({
   region,
   location: v.union(v.string(), v.null()),
   website: v.union(v.string(), v.null()),
+  links: v.array(v.string()),
   bio: v.union(v.string(), v.null()),
   isClaimed: v.boolean(),
   claimedBy: v.union(v.object({ name: v.string(), email: v.string() }), v.null()),
@@ -443,6 +444,7 @@ export const listCreators = query({
           region: c.region,
           location: c.location ?? null,
           website: c.website ?? null,
+          links: c.links ?? [],
           bio: c.bio ?? null,
           isClaimed: c.isClaimed,
           claimedBy: owner ? { name: owner.name, email: owner.email } : null,
@@ -464,6 +466,7 @@ export const updateCreator = mutation({
     region: v.optional(region),
     location: v.optional(v.string()), // "" clears
     website: v.optional(v.string()), // "" clears
+    links: v.optional(v.array(v.string())), // [] clears
     bio: v.optional(v.string()), // "" clears
     isClaimed: v.optional(v.boolean()),
   },
@@ -491,6 +494,13 @@ export const updateCreator = mutation({
     if (args.location !== undefined) patch.location = cleanText(args.location, "Location", 80, false) || undefined;
     if (args.website !== undefined) patch.website = args.website.trim() ? normalizeUrl(args.website, "Website") : undefined;
     if (args.bio !== undefined) patch.bio = cleanText(args.bio, "Bio", 600, false) || undefined;
+    if (args.links !== undefined) {
+      const links = [
+        ...new Set(args.links.map((l) => l.trim()).filter(Boolean).map((l) => normalizeUrl(l, "Profile link"))),
+      ];
+      if (links.length > LIMITS.creatorLinks) fail(`Add up to ${LIMITS.creatorLinks} profile links.`);
+      patch.links = links.length ? links : undefined;
+    }
     if (args.isClaimed !== undefined) {
       patch.isClaimed = args.isClaimed;
       if (!args.isClaimed) patch.claimedBy = undefined;

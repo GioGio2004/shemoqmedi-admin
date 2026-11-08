@@ -48,12 +48,16 @@ function CreatorForm({ creator, onDone }: { creator: Creator; onDone: () => void
   const [location, setLocation] = useState(creator.location ?? "");
   const [website, setWebsite] = useState(creator.website ?? "");
   const [bio, setBio] = useState(creator.bio ?? "");
+  const [links, setLinks] = useState(creator.links.join("\n"));
   const [isClaimed, setIsClaimed] = useState(creator.isClaimed);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const websiteInvalid = website.trim() !== "" && safeHref(website.trim()) === null;
+  const linkList = links.split(/\s+/).map((l) => l.trim()).filter(Boolean);
+  const badLink = linkList.find((l) => safeHref(/^https?:\/\//i.test(l) ? l : `https://${l}`) === null);
+  const linksInvalid = Boolean(badLink) || linkList.length > LIMITS.creatorLinks;
   const slugValue = toSlug(slug);
   const slugInvalid = slugValue === "";
 
@@ -67,13 +71,14 @@ function CreatorForm({ creator, onDone }: { creator: Creator; onDone: () => void
     if (location.trim() !== (creator.location ?? "")) patch.location = location.trim();
     if (website.trim() !== (creator.website ?? "")) patch.website = website.trim();
     if (bio.trim() !== (creator.bio ?? "")) patch.bio = bio.trim();
+    if (linkList.join(" ") !== creator.links.join(" ")) patch.links = linkList;
     if (isClaimed !== creator.isClaimed) patch.isClaimed = isClaimed;
     return patch;
   }
 
   const patch = changes();
   const changed = Object.keys(patch).length > 0;
-  const canSave = changed && name.trim() !== "" && !slugInvalid && !websiteInvalid && !busy;
+  const canSave = changed && name.trim() !== "" && !slugInvalid && !websiteInvalid && !linksInvalid && !busy;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -199,6 +204,29 @@ function CreatorForm({ creator, onDone }: { creator: Creator; onDone: () => void
             )}
           </label>
         </div>
+
+        <label className="grid gap-2">
+          <span className="admin-eyebrow">
+            Profile links (optional) {linkList.length}/{LIMITS.creatorLinks}
+          </span>
+          <textarea
+            rows={3}
+            value={links}
+            onChange={(e) => setLinks(e.target.value)}
+            className="admin-input resize-y"
+            placeholder={"One per line, e.g.\nhttps://dribbble.com/studio"}
+            spellCheck={false}
+            aria-invalid={linksInvalid || undefined}
+            aria-describedby={`${prefix}-links-help`}
+          />
+          <span id={`${prefix}-links-help`} className="text-xs text-black/55">
+            {badLink
+              ? `"${badLink}" is not a web address.`
+              : linkList.length > LIMITS.creatorLinks
+                ? `Add up to ${LIMITS.creatorLinks} links.`
+                : "Shown on the creator page and told to Google as the same person or studio."}
+          </span>
+        </label>
 
         <label className="grid gap-2">
           <span className="admin-eyebrow">
@@ -331,6 +359,21 @@ function CreatorRow({ creator }: { creator: Creator }) {
             )}
           </dd>
         </div>
+        {creator.links.length > 0 && (
+          <div className="wide">
+            <dt>Profile links</dt>
+            <dd className="flex flex-wrap gap-x-4 gap-y-1">
+              {creator.links.map((l) => {
+                const href = safeHref(l);
+                return href ? (
+                  <a key={l} href={href} target="_blank" rel="noopener noreferrer nofollow" className="underline underline-offset-4">
+                    {shortUrl(href)}
+                  </a>
+                ) : null;
+              })}
+            </dd>
+          </div>
+        )}
         {creator.bio && (
           <div className="wide">
             <dt>Bio</dt>

@@ -13,6 +13,7 @@ import { ScoreEditor } from "./ScoreEditor";
 import { ListingEditForm } from "./ListingEditForm";
 import { MediaPanel } from "./MediaPanel";
 import { LifecyclePanel } from "./LifecyclePanel";
+import { BadgeKit } from "./BadgeKit";
 import { SOURCE_LABEL, safeHref, storefrontCreatorUrl } from "./format";
 
 /** Full control panel for one listing: details, media, lifecycle, scores. */
@@ -123,6 +124,8 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
             finalScore={listing.finalScore}
             awards={listing.awards}
           />
+
+          <BadgeKit listing={listing} />
 
           <section className="admin-panel" aria-labelledby="facts-heading">
             <p id="facts-heading" className="admin-eyebrow mb-5">

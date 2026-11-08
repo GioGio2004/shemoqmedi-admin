@@ -10,6 +10,7 @@ const publicCreator = v.object({
   region,
   location: v.union(v.string(), v.null()),
   website: v.union(v.string(), v.null()),
+  links: v.array(v.string()), // profile links (Dribbble, LinkedIn, ...)
   bio: v.union(v.string(), v.null()),
   isClaimed: v.boolean(),
   awards: v.object({ SOTD: v.number(), BSC: v.number(), HM: v.number() }),
@@ -49,6 +50,7 @@ export const getBySlug = query({
         region: creator.region,
         location: creator.location ?? null,
         website: creator.website ?? null,
+        links: creator.links ?? [],
         bio: creator.bio ?? null,
         isClaimed: creator.isClaimed,
         awards,

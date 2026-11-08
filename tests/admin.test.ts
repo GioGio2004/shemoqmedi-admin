@@ -156,6 +156,17 @@ describe("admin: creators and users", () => {
     expect(creator).toMatchObject({ name: "Bürocratik", listings: 1 });
     await env.owner.mutation(api.admin.updateCreator, { id: creator.id, name: "Burocratik Studio", location: "Braga, PT", isClaimed: true });
     expect((await env.t.query(api.listings.getPublicBySlug, { slug }))!.creditName).toBe("Burocratik Studio");
+    await env.owner.mutation(api.admin.updateCreator, {
+      id: creator.id,
+      links: ["dribbble.com/burocratik", " https://www.linkedin.com/company/burocratik/ ", "https://dribbble.com/burocratik"],
+    });
+    const profile = await env.t.query(api.creators.getBySlug, { slug: creator.slug });
+    expect(profile!.creator.links).toEqual(["https://dribbble.com/burocratik", "https://www.linkedin.com/company/burocratik/"]);
+    await expect(
+      env.owner.mutation(api.admin.updateCreator, { id: creator.id, links: ["javascript:alert(1)"] }),
+    ).rejects.toThrow(/Profile link/);
+    await env.owner.mutation(api.admin.updateCreator, { id: creator.id, links: [] });
+    expect((await env.t.query(api.creators.getBySlug, { slug: creator.slug }))!.creator.links).toEqual([]);
     await expect(env.owner.mutation(api.admin.deleteCreator, { id: creator.id })).rejects.toThrow(/still has listings/);
   });
 
