@@ -6,7 +6,7 @@ import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 
 const modules = import.meta.glob("../convex/**/*.{ts,js}");
-const p = (n: number) => ({ design: n, usability: n, creativity: n, code: n });
+const p = (n: number) => ({ design: n, usability: n, creativity: n, content: n });
 const COMMENT = "Confident typography and a calm, precise grid. The 3D kitchen loads fast.";
 
 async function setup() {
@@ -214,7 +214,7 @@ describe("jury claim links", () => {
     expect((await env.ana.query(api.jury.me, {}))!.slug).toBe(before);
   });
 
-  it("with 5 jury evaluations the window closes on time instead of being extended", async () => {
+  it("closing counts every jury evaluation: enough votes make the site eligible", async () => {
     const env = await setup();
     const now = Date.now();
     await env.t.run(async (ctx) => {
@@ -239,13 +239,12 @@ describe("jury claim links", () => {
       }
       await ctx.db.patch(env.site.id, { votingEndsAt: now - 1 });
     });
-    await env.t.mutation(internal.listings.closeExpiredVoting, {});
-    expect(await env.t.query(api.listings.getPublicBySlug, { slug: env.site.slug })).toMatchObject({
-      status: "archived", // no jury score was recomputed here, so no award; what matters is it closed
-      votingExtended: false,
-    });
+    await env.t.mutation(internal.awards.tick, {});
+    const closed = await env.t.query(api.listings.getPublicBySlug, { slug: env.site.slug });
+    expect(closed).toMatchObject({ juryVotes: 5, finalScore: 9, votingExtended: false });
+    expect(closed!.awards).toContain("HM");
     const overview = await env.admin.query(api.jury.nomineesOverview, {});
-    expect(overview.juryTarget).toBe(5);
+    expect(overview.juryTarget).toBe(3); // config.minVotes
     expect(overview.nominees).toHaveLength(0);
   });
 

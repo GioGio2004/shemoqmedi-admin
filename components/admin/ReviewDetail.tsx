@@ -13,6 +13,7 @@ import { ScoreEditor } from "./ScoreEditor";
 import { ListingEditForm } from "./ListingEditForm";
 import { MediaPanel } from "./MediaPanel";
 import { LifecyclePanel } from "./LifecyclePanel";
+import { IntegrityPanel } from "./IntegrityPanel";
 import { BadgeKit } from "./BadgeKit";
 import { ClaimLink } from "./ClaimLink";
 import { SOURCE_LABEL, safeHref, storefrontCreatorUrl } from "./format";
@@ -111,9 +112,11 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
 
         <aside className="grid min-w-0 content-start gap-6 lg:sticky lg:top-[132px] lg:max-h-[calc(100dvh-156px)] lg:self-start lg:overflow-y-auto lg:overscroll-contain">
           <LifecyclePanel
-            key={[listing.id, status, listing.votingEndsAt, listing.awards.join(","), listing.sotdDay, listing.reviewNote].join("|")}
+            key={[listing.id, status, listing.votingEndsAt, listing.awards.join(","), listing.sotdQueued, listing.reviewNote].join("|")}
             listing={listing}
           />
+
+          <IntegrityPanel listingId={listing.id} byTeam={listing.byTeam} title={listing.title} />
 
           <ScoreEditor
             key={listing.id}

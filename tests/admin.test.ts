@@ -6,7 +6,7 @@ import { api, internal } from "../convex/_generated/api";
 
 const modules = import.meta.glob("../convex/**/*.{ts,js}");
 const DAY = 24 * 60 * 60 * 1000;
-const p = (n: number) => ({ design: n, usability: n, creativity: n, code: n });
+const p = (n: number) => ({ design: n, usability: n, creativity: n, content: n });
 
 async function setup() {
   const t = convexTest(schema, modules);
@@ -81,9 +81,17 @@ describe("admin: listings", () => {
   it("creates awarded listings only with an award, and duplicates are refused", async () => {
     const env = await setup();
     await expect(create(env, { status: "awarded" })).rejects.toThrow(/at least one award/);
-    const { slug } = await create(env, { status: "awarded", awards: ["SOTD"], editorialScores: p(9) });
+    await expect(create(env, { status: "awarded", awards: ["SOTD"] })).rejects.toThrow(/reason/);
+    const { slug, id } = await create(env, {
+      status: "awarded",
+      awards: ["SOTD"],
+      awardReason: "Won before the platform launched",
+      editorialScores: p(9),
+    });
     expect(await env.t.query(api.listings.getPublicBySlug, { slug })).toMatchObject({ status: "awarded", awards: ["SOTD"] });
-    await expect(create(env, { title: "Other" })).rejects.toThrow(/already uses this website/);
+    const [award] = await env.t.run((ctx) => ctx.db.query("awards").withIndex("by_listing", (q) => q.eq("listingId", id)).collect());
+    expect(award).toMatchObject({ tier: "SOTD", source: "manual", reason: "Won before the platform launched" });
+    await expect(create(env, { title: "Other" })).rejects.toThrow(/redesign/);
   });
 
   it("edits fields, slug and creator", async () => {
@@ -111,15 +119,17 @@ describe("admin: listings", () => {
     await expect(env.owner.mutation(api.admin.updateListing, { id, slug: "another" })).rejects.toThrow(/already taken/);
   });
 
-  it("lifecycle overrides: award, archive, reopen voting, reject", async () => {
+  it("lifecycle overrides: archive, reopen voting, reject; awards only through the logged award tools", async () => {
     const env = await setup();
     const { id, slug } = await create(env, { editorialScores: p(8) });
-    await expect(env.owner.mutation(api.admin.setLifecycle, { id, status: "awarded" })).rejects.toThrow(/award/);
-    await env.owner.mutation(api.admin.setLifecycle, { id, status: "awarded", awards: ["HM", "BSC"] });
-    expect(await env.t.query(api.listings.getPublicBySlug, { slug })).toMatchObject({ status: "awarded", awards: ["HM", "BSC"] });
+    await expect(env.owner.mutation(api.admin.setLifecycle, { id, status: "awarded" })).rejects.toThrow(/Awards page/);
 
     await env.owner.mutation(api.admin.setLifecycle, { id, status: "archived" });
     expect(await env.t.query(api.listings.getPublicBySlug, { slug })).toMatchObject({ status: "archived", awards: [] });
+    const awardId = await env.owner.mutation(api.awards.grant, { listingId: id, tier: "HM", reason: "Jury chair" });
+    expect(await env.t.query(api.listings.getPublicBySlug, { slug })).toMatchObject({ status: "awarded", awards: ["HM"] });
+    await expect(env.owner.mutation(api.admin.setLifecycle, { id, status: "in_voting" })).rejects.toThrow(/Revoke/);
+    await env.owner.mutation(api.awards.revoke, { awardId, reason: "Granted by mistake" });
 
     const ends = Date.now() + 3 * DAY;
     await env.owner.mutation(api.admin.setLifecycle, { id, status: "in_voting", votingEndsAt: ends });

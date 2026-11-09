@@ -1,10 +1,10 @@
 // Flagship launch listings, loaded from the admin "Import" page (or
 // `npx convex run importer:seedFlagship` while signed in as an admin).
 //
-// Policy: only Giorgi Khvichia's own projects carry awards and scores.
-// Third-party sites enter as unawarded, unclaimed nominees in the live
-// voting window, so their results come from the real jury and community
-// vote. Their owners can claim the listing or ask for removal.
+// Policy: Giorgi Khvichia's own projects are Shemoqmedi team sites: shown
+// as such and never eligible for awards (byTeam). Third-party sites enter as
+// unawarded, unclaimed nominees in the live voting window, so their results
+// come from the real jury. Their owners can claim the listing or ask for removal.
 
 export const FLAGSHIP = [
   {
@@ -19,8 +19,8 @@ export const FLAGSHIP = [
     status: "awarded",
     publishedDaysAgo: 12,
     editorialScore: 8.9,
-    awards: ["BSC"],
     isClaimed: true,
+    byTeam: true,
   },
   {
     url: "https://kalami.space",
@@ -34,8 +34,8 @@ export const FLAGSHIP = [
     status: "awarded",
     publishedDaysAgo: 9,
     editorialScore: 8.7,
-    awards: ["BSC"],
     isClaimed: true,
+    byTeam: true,
   },
   {
     url: "https://kenchogroup.ge",
@@ -50,6 +50,7 @@ export const FLAGSHIP = [
     votingDaysLeft: 5,
     editorialScore: 8.65,
     isClaimed: true,
+    byTeam: true,
   },
   // Third-party nominees: no scores, no awards, unclaimed.
   {
@@ -139,4 +140,6 @@ export const FLAGSHIP = [
   editorialScore?: number;
   awards?: readonly ("SOTD" | "BSC" | "HM")[];
   isClaimed: boolean;
+  /** Built by the Shemoqmedi team: never eligible for awards. */
+  byTeam?: boolean;
 }>;

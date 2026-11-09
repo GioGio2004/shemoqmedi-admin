@@ -5,7 +5,7 @@ import schema from "../convex/schema";
 import { api, internal } from "../convex/_generated/api";
 
 const modules = import.meta.glob("../convex/**/*.{ts,js}");
-const p = (n: number) => ({ design: n, usability: n, creativity: n, code: n });
+const p = (n: number) => ({ design: n, usability: n, creativity: n, content: n });
 const KEY = "0123456789abcdef0123456789abcdef";
 
 async function setup() {
@@ -197,19 +197,22 @@ describe("IndexNow", () => {
     expect((await pings(env))[2]).toEqual(["/sites/floema-furniture", "/creators/burocratik", "/sites/floema"]);
 
     await env.admin.mutation(api.listings.closeVotingNow, { id });
-    expect((await pings(env))[3]).toEqual([
-      "/sites/floema-furniture",
-      "/creators/burocratik",
-      "/site-of-the-day",
-    ]);
+    expect((await pings(env))[3]).toEqual(["/sites/floema-furniture", "/creators/burocratik"]);
 
-    await env.admin.mutation(api.listings.remove, { id });
+    // An award pings its award pages too.
+    await env.admin.mutation(api.awards.grant, { listingId: id, tier: "SOTD", reason: "Test" });
+    const award = (await env.t.run((ctx) => ctx.db.query("awards").first()))!;
     expect((await pings(env))[4]).toEqual([
       "/sites/floema-furniture",
       "/creators/burocratik",
       "/site-of-the-day",
+      `/awards/${award.slug}`,
     ]);
-    expect(await pings(env)).toHaveLength(5);
+
+    await env.admin.mutation(api.awards.revoke, { awardId: award._id, reason: "Test" });
+    await env.admin.mutation(api.listings.remove, { id });
+    expect((await pings(env))[6]).toEqual(["/sites/floema-furniture", "/creators/burocratik"]);
+    expect(await pings(env)).toHaveLength(7);
   });
 
   it("pings creator profile edits and closes a batch of windows with one ping", async () => {
@@ -223,7 +226,7 @@ describe("IndexNow", () => {
 
     for (const { id } of [a, b]) await env.t.run((ctx) => ctx.db.patch(id, { votingEndsAt: Date.now() - 1 }));
     const before = (await pings(env)).length;
-    expect(await env.t.mutation(internal.listings.closeExpiredVoting, {})).toBe(2);
+    expect((await env.t.mutation(internal.awards.tick, {})).closed).toBe(2);
     const all = await pings(env);
     expect(all).toHaveLength(before + 1);
     expect(all.at(-1)).toEqual(expect.arrayContaining(["/sites/floema", "/sites/bee", "/creators/burocratik-studio"]));

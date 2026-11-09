@@ -4,8 +4,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { award, creatorTier, listingStatus, pillars, region } from "../schema";
 import { deleteMedia, mediaInfo, mediaUrl, type MediaId } from "./media";
 import { CATEGORIES, LIMITS, isCategory, type CategorySlug, type CreatorTier, type RegionSlug } from "./taxonomy";
-import { ZERO_PILLARS, decideAwards, summarize, type Pillars } from "./scoring";
-import { winnerFields } from "./sotd";
+import { ZERO_PILLARS, readPillars, round2, summarize, type Pillars, type StoredPillars } from "./scoring";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Validation
@@ -192,46 +191,23 @@ export async function findOrCreateCreator(
 // Scores and lifecycle
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The score fields to patch after editorial scores or community totals change. */
+/**
+ * The score fields to patch after editorial scores or community totals
+ * change. The final score is the jury's weighted score only; the community
+ * score is kept for display. (Voting close recomputes it from the votes
+ * themselves: lib/awards.ts closeVoting.)
+ */
 export function scoreFields(
-  editorial: Pillars | undefined,
-  totals: Pillars,
+  editorial: StoredPillars | Pillars | undefined,
+  totals: StoredPillars | Pillars,
   count: number,
 ) {
-  const s = summarize(editorial ?? null, totals, count);
+  const s = summarize(editorial ? readPillars(editorial) : null, readPillars(totals), count);
   return {
     editorialAverage: s.editorialAverage ?? undefined,
     communityAverage: s.communityAverage ?? undefined,
     finalScore: s.finalScore ?? undefined,
   };
-}
-
-/**
- * Locks voting and assigns awards. Safe to call more than once. Returns the
- * awards given now (possibly none), or null when the listing was not in voting.
- * A Site of the Day winner gets the first free day (lib/sotd.ts); "SOTD" is
- * in the returned awards only when that day is today.
- */
-export async function finalizeListing(
-  ctx: MutationCtx,
-  listing: Doc<"listings">,
-): Promise<Doc<"listings">["awards"] | null> {
-  if (listing.status !== "in_voting") return null;
-  const fields = scoreFields(listing.editorialScores, listing.communityTotals, listing.communityVotesCount);
-  const decided = decideAwards(listing.creatorTier, fields.finalScore ?? null);
-  const now = Date.now();
-  const sotd = decided.includes("SOTD") ? await winnerFields(ctx, listing, decided, now) : null;
-  const awards = sotd?.awards ?? decided;
-  const won = decided.length > 0;
-  await ctx.db.patch(listing._id, {
-    ...fields,
-    awards,
-    sotdDay: sotd?.sotdDay,
-    status: won ? "awarded" : "archived",
-    awardedAt: won ? now : undefined,
-    updatedAt: now,
-  });
-  return awards;
 }
 
 export const EMPTY_SCORES = {
@@ -297,11 +273,17 @@ export const publicListing = v.object({
   finalScore: v.union(v.number(), v.null()),
   publishedAt: v.number(),
   votingEndsAt: v.number(),
-  /** Voting was extended a week to give the jury time (fewer than 5 jury evaluations after 7 days). */
+  /** Legacy: voting was extended a week for the jury (before weekly batches). */
   votingExtended: v.boolean(),
   awardedAt: v.union(v.number(), v.null()),
-  /** Site of the Day ("YYYY-MM-DD", UTC). Later than today: scheduled, "SOTD" is not in awards yet. */
+  /** The Tbilisi day it won Site of the Day ("2026-11-12"), or null. */
   sotdDay: v.union(v.string(), v.null()),
+  /** Jury votes counted in the score (eligibility needs the configured minimum). */
+  juryVotes: v.number(),
+  /** Built by the Shemoqmedi team: shown as such, never eligible for awards. */
+  byTeam: v.boolean(),
+  /** A redesign of this earlier listing (its slug). */
+  redesignOf: v.union(v.string(), v.null()),
   isClaimed: v.boolean(),
   isStartup: v.boolean(),
   isDoFollow: v.boolean(), // false: outbound links get rel="nofollow"
@@ -321,8 +303,6 @@ export async function mediaUrls(ctx: QueryCtx, listing: Doc<"listings">) {
   };
 }
 
-const round2 = (n: number) => Number(n.toFixed(2));
-
 /** The public shape: no owner ids, emails or review metadata. */
 export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
   if (listing.status !== "in_voting" && listing.status !== "awarded" && listing.status !== "archived") {
@@ -330,8 +310,17 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
   }
   const creator = listing.creatorId ? await ctx.db.get(listing.creatorId) : null;
   const count = listing.communityVotesCount;
-  const t = listing.communityTotals;
+  const t = readPillars(listing.communityTotals);
   const publishedAt = listing.publishedAt ?? listing.createdAt;
+  const sotd = listing.awards.includes("SOTD")
+    ? (
+        await ctx.db
+          .query("awards")
+          .withIndex("by_listing", (q) => q.eq("listingId", listing._id))
+          .collect()
+      ).find((a) => a.tier === "SOTD" && a.status === "active")
+    : undefined;
+  const previous = listing.redesignOf ? await ctx.db.get(listing.redesignOf) : null;
   return {
     slug: listing.slug,
     title: listing.title,
@@ -348,14 +337,14 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
     creator: creator ? { slug: creator.slug, name: creator.name } : null,
     status: listing.status,
     awards: listing.awards,
-    editorialScores: listing.editorialScores ?? null,
+    editorialScores: listing.editorialScores ? readPillars(listing.editorialScores) : null,
     communityScores:
       count > 0
         ? {
             design: round2(t.design / count),
             usability: round2(t.usability / count),
             creativity: round2(t.creativity / count),
-            code: round2(t.code / count),
+            content: round2(t.content / count),
           }
         : null,
     communityVotesCount: count,
@@ -366,7 +355,10 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
     votingEndsAt: listing.votingEndsAt ?? publishedAt,
     votingExtended: listing.votingExtendedAt !== undefined,
     awardedAt: listing.awardedAt ?? null,
-    sotdDay: listing.sotdDay ?? null,
+    sotdDay: sotd?.period ?? null,
+    juryVotes: listing.juryVotes ?? 0,
+    byTeam: listing.byTeam ?? false,
+    redesignOf: previous && isPublicStatus(previous.status) ? previous.slug : null,
     isClaimed: listing.isClaimed,
     isStartup: listing.isStartup ?? false,
     isDoFollow: isDoFollow(listing),

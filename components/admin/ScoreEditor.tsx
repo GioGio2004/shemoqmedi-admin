@@ -26,14 +26,15 @@ function toDraft(scores: Pillars | null): Record<PillarKey, string> {
     design: scores ? String(scores.design) : "",
     usability: scores ? String(scores.usability) : "",
     creativity: scores ? String(scores.creativity) : "",
-    code: scores ? String(scores.code) : "",
+    content: scores ? String(scores.content) : "",
   };
 }
 
 /**
  * Jury score editor (4 pillars, 1.0–10.0) plus the live score summary.
- * Editable at any status; after voting has closed the final score is
- * recomputed but awards stay as they are (change those in Lifecycle).
+ * A score typed here is the admin's estimate: it shows on the site but makes
+ * no site eligible for awards, which need jury votes (award settings).
+ * Awards are given and revoked on the Awards page.
  */
 export function ScoreEditor(props: Props) {
   const save = useMutation(api.listings.setEditorialScores);
@@ -139,7 +140,8 @@ export function ScoreEditor(props: Props) {
           </p>
           <ul className="grid gap-3">
             {evaluations.map((e) => {
-              const avg = (e.scores.design + e.scores.usability + e.scores.creativity + e.scores.code) / 4;
+              // Weighted like the final score: Design 40%, Usability 30%, Creativity 20%, Content 10%.
+              const avg = e.scores.design * 0.4 + e.scores.usability * 0.3 + e.scores.creativity * 0.2 + e.scores.content * 0.1;
               return (
                 <li key={e.id} className="grid gap-1 rounded-2xl border border-black/10 p-3 text-sm">
                   <div className="flex items-baseline justify-between gap-3">
@@ -147,7 +149,7 @@ export function ScoreEditor(props: Props) {
                     <span className="admin-mono">{score(avg)}</span>
                   </div>
                   <p className="admin-mono text-xs text-black/55">
-                    D {e.scores.design} · U {e.scores.usability} · C {e.scores.creativity} · Code {e.scores.code}
+                    D {e.scores.design} · U {e.scores.usability} · C {e.scores.creativity} · Content {e.scores.content}
                   </p>
                   {e.comment && <p className="whitespace-pre-line text-xs text-black/70">{e.comment}</p>}
                   <button

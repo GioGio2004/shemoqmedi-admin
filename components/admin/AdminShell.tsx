@@ -44,7 +44,7 @@ const NAV = [
   { href: "/review", label: "Review", count: ReviewCount },
   { href: "/nominees", label: "Nominees", count: null },
   { href: "/featured", label: "Featured", count: null },
-  { href: "/sotd", label: "Site of the Day", count: null },
+  { href: "/awards", label: "Awards", count: null },
   { href: "/listings/new", label: "Add site", count: null },
   { href: "/creators", label: "Creators", count: null },
   { href: "/jury", label: "Jury", count: null },

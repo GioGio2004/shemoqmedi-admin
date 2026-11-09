@@ -1,31 +1,49 @@
 // Pure scoring rules (no database access), shared by every function that
 // touches scores and covered by tests/scoring.test.ts.
 //
-//   editorialAverage = mean of the 4 jury pillars
-//   communityAverage = mean over all community votes of each vote's 4 pillars
-//   finalScore       = editorialAverage                      (no community votes)
-//                    = 0.6 * editorial + 0.4 * community      (otherwise)
-//                    = communityAverage                      (no jury score yet)
-//   Awards when voting closes:
-//     BSC  if solo and finalScore >= 8.20
-//     SOTD if finalScore >= 8.50
-//     HM   if finalScore >= 7.50 and not SOTD
+//   A vote scores four pillars from 1 to 10. Its weighted score is
+//     Design 40% + Usability 30% + Creativity 20% + Content 10%.
+//   finalScore       = the jury's weighted score, averaged over every jury
+//                      vote, rounded to 2 decimals. Only the jury decides.
+//   communityAverage = the same weighting over community votes. Shown on the
+//                      site for interest; it never decides an award.
+//   Ties: more jury votes, then a higher Design score, then the earlier submission.
+//
+// Stored scores written before the Content pillar have `code` instead of
+// `content`; readPillars() treats the two as the same pillar until the
+// migration (convex/migrations.ts) has moved every row.
 
-import type { AwardSlug, CreatorTier, PillarKey } from "./taxonomy";
+import type { PillarKey } from "./taxonomy";
 
 export type Pillars = Record<PillarKey, number>;
 
-export const PILLAR_KEYS: PillarKey[] = ["design", "usability", "creativity", "code"];
+/** A pillar score as stored: older rows have `code` where newer have `content`. */
+export type StoredPillars = {
+  design: number;
+  usability: number;
+  creativity: number;
+  content?: number;
+  code?: number;
+};
 
-export const JURY_WEIGHT = 0.6;
-export const COMMUNITY_WEIGHT = 0.4;
+export const PILLAR_KEYS: PillarKey[] = ["design", "usability", "creativity", "content"];
 
-export const THRESHOLDS = { BSC: 8.2, SOTD: 8.5, HM: 7.5 } as const;
+export const WEIGHTS: Pillars = { design: 0.4, usability: 0.3, creativity: 0.2, content: 0.1 };
 
-export const ZERO_PILLARS: Pillars = { design: 0, usability: 0, creativity: 0, code: 0 };
+export const ZERO_PILLARS: Pillars = { design: 0, usability: 0, creativity: 0, content: 0 };
 
 export function round2(value: number) {
-  return Number(value.toFixed(2));
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/** Any stored pillar object (old `code` or new `content`) as the current shape. */
+export function readPillars(stored: StoredPillars): Pillars {
+  return {
+    design: stored.design,
+    usability: stored.usability,
+    creativity: stored.creativity,
+    content: stored.content ?? stored.code ?? 0,
+  };
 }
 
 /** A valid pillar score: 1.0–10.0, rounded to one decimal. Throws otherwise. */
@@ -41,12 +59,40 @@ export function normalizePillars(scores: Pillars): Pillars {
     design: clampPillar(scores.design, "Design"),
     usability: clampPillar(scores.usability, "Usability"),
     creativity: clampPillar(scores.creativity, "Creativity"),
-    code: clampPillar(scores.code, "Code"),
+    content: clampPillar(scores.content, "Content"),
   };
 }
 
-export function mean(scores: Pillars): number {
-  return (scores.design + scores.usability + scores.creativity + scores.code) / 4;
+/** Design 40% + Usability 30% + Creativity 20% + Content 10% (not rounded). */
+export function weighted(scores: Pillars): number {
+  return (
+    scores.design * WEIGHTS.design +
+    scores.usability * WEIGHTS.usability +
+    scores.creativity * WEIGHTS.creativity +
+    scores.content * WEIGHTS.content
+  );
+}
+
+/** Per-pillar average of a set of votes (null without votes). */
+export function averagePillars(votes: Pillars[]): Pillars | null {
+  if (votes.length === 0) return null;
+  const sum = votes.reduce(addPillars, ZERO_PILLARS);
+  const n = votes.length;
+  return {
+    design: round2(sum.design / n),
+    usability: round2(sum.usability / n),
+    creativity: round2(sum.creativity / n),
+    content: round2(sum.content / n),
+  };
+}
+
+/**
+ * The final score of a set of jury votes: each vote's weighted score,
+ * averaged, rounded to 2 decimals. Null without votes.
+ */
+export function finalScore(votes: Pillars[]): number | null {
+  if (votes.length === 0) return null;
+  return round2(votes.reduce((s, v) => s + weighted(v), 0) / votes.length);
 }
 
 /** Per-pillar community averages from running totals. */
@@ -56,7 +102,7 @@ export function communityPillars(totals: Pillars, count: number): Pillars | null
     design: totals.design / count,
     usability: totals.usability / count,
     creativity: totals.creativity / count,
-    code: totals.code / count,
+    content: totals.content / count,
   };
 }
 
@@ -65,7 +111,7 @@ export function addPillars(a: Pillars, b: Pillars): Pillars {
     design: a.design + b.design,
     usability: a.usability + b.usability,
     creativity: a.creativity + b.creativity,
-    code: a.code + b.code,
+    content: a.content + b.content,
   };
 }
 
@@ -75,33 +121,38 @@ export type ScoreSummary = {
   finalScore: number | null;
 };
 
-export function summarize(
-  editorial: Pillars | null | undefined,
-  totals: Pillars,
-  count: number,
-): ScoreSummary {
-  const editorialAverage = editorial ? mean(editorial) : null;
+/**
+ * The stored score fields. `editorial` is the per-pillar jury average (or an
+ * admin's manual jury score); the final score is its weighted score. Weighting
+ * is linear, so this equals averaging every juror's weighted score.
+ */
+export function summarize(editorial: Pillars | null | undefined, totals: Pillars, count: number): ScoreSummary {
+  const jury = editorial ? round2(weighted(editorial)) : null;
   const community = communityPillars(totals, count);
-  const communityAverage = community ? mean(community) : null;
-
-  let finalScore: number | null = null;
-  if (editorialAverage !== null && communityAverage === null) finalScore = editorialAverage;
-  else if (editorialAverage !== null && communityAverage !== null) {
-    finalScore = editorialAverage * JURY_WEIGHT + communityAverage * COMMUNITY_WEIGHT;
-  } else if (communityAverage !== null) finalScore = communityAverage;
-
   return {
-    editorialAverage: editorialAverage === null ? null : round2(editorialAverage),
-    communityAverage: communityAverage === null ? null : round2(communityAverage),
-    finalScore: finalScore === null ? null : round2(finalScore),
+    editorialAverage: jury,
+    communityAverage: community ? round2(weighted(community)) : null,
+    finalScore: jury,
   };
 }
 
-export function decideAwards(tier: CreatorTier, finalScore: number | null): AwardSlug[] {
-  if (finalScore === null) return [];
-  const awards: AwardSlug[] = [];
-  if (tier === "solo" && finalScore >= THRESHOLDS.BSC) awards.push("BSC");
-  if (finalScore >= THRESHOLDS.SOTD) awards.push("SOTD");
-  else if (finalScore >= THRESHOLDS.HM) awards.push("HM");
-  return awards;
+/** What the tie-break looks at. */
+export type Ranked = {
+  finalScore: number;
+  votes: number; // jury votes
+  design: number; // average jury Design score
+  submittedAt: number;
+};
+
+/**
+ * Sort order for candidates: higher final score first; ties go to more jury
+ * votes, then a higher Design score, then the earlier submission.
+ */
+export function compareRanked(a: Ranked, b: Ranked): number {
+  return (
+    b.finalScore - a.finalScore ||
+    b.votes - a.votes ||
+    b.design - a.design ||
+    a.submittedAt - b.submittedAt
+  );
 }

@@ -1,13 +1,16 @@
 import { hasJuryEvaluations } from "./jury";
 import { v } from "convex/values";
 import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
-import { creatorTier, listingStatus, pillars, region } from "./schema";
-import { DAY_MS, LIMITS, VOTING_DAYS, isTechnology } from "./lib/taxonomy";
-import { normalizePillars } from "./lib/scoring";
-import { utcDay } from "./lib/sotd";
+import { award, creatorTier, listingStatus, pillars, region } from "./schema";
+import { LIMITS, isTechnology } from "./lib/taxonomy";
+import { normalizePillars, readPillars } from "./lib/scoring";
+import { batchVotingEnds, weekOf } from "./lib/time";
+import { getConfig } from "./lib/config";
+import { checkDomain, domainKey } from "./lib/domains";
+import { closeVoting } from "./lib/awards";
 import {
   EMPTY_SCORES,
   PUBLIC_STATUSES,
@@ -18,7 +21,6 @@ import {
   cleanText,
   deleteListing,
   fail,
-  finalizeListing,
   findOrCreateCreator,
   isDoFollow,
   isPublicStatus,
@@ -138,6 +140,8 @@ export const submit = mutation({
     coverId: vMediaId,
     galleryIds: v.optional(v.array(vMediaId)),
     videoId: v.optional(vMediaId),
+    // Slug of the earlier listing when this is a significant redesign of a site already in the showcase.
+    redesignOf: v.optional(v.string()),
   },
   returns: v.object({ slug: v.string() }),
   handler: async (ctx, args) => {
@@ -176,13 +180,23 @@ export const submit = mutation({
       );
     }
 
-    const duplicate = await ctx.db
-      .query("listings")
-      .withIndex("by_url", (q) => q.eq("url", url))
-      .collect();
-    if (duplicate.some((l) => l.status !== "rejected")) {
-      fail("This website has already been submitted.");
-    }
+    // One active listing per website; a site already in the showcase only
+    // comes back as a significant redesign (admin-reviewed like every
+    // submission, and at least config.resubmitMonths after its last award).
+    const previous = args.redesignOf
+      ? await ctx.db
+          .query("listings")
+          .withIndex("by_slug", (q) => q.eq("slug", args.redesignOf!))
+          .first()
+      : null;
+    if (args.redesignOf && !previous) fail("The earlier listing for this redesign was not found.");
+    const config = await getConfig(ctx);
+    const domain = await checkDomain(ctx, url, {
+      redesignOf: previous?._id,
+      resubmitMonths: config.resubmitMonths,
+      now: Date.now(),
+    });
+    if (!domain.ok) fail(domain.reason);
 
     const creatorId = await findOrCreateCreator(ctx, {
       name: creditName,
@@ -197,6 +211,8 @@ export const submit = mutation({
     await ctx.db.insert("listings", {
       ownerId: user._id,
       isStartup: args.isStartup || undefined,
+      domainKey: domainKey(url),
+      redesignOf: domain.redesignOf,
       creatorId,
       source: "submission",
       submissionTier: "standard",
@@ -231,7 +247,7 @@ const ownListing = v.object({
   url: v.string(),
   status: listingStatus,
   reviewNote: v.union(v.string(), v.null()),
-  awards: v.array(v.union(v.literal("SOTD"), v.literal("BSC"), v.literal("HM"))),
+  awards: v.array(award),
   finalScore: v.union(v.number(), v.null()),
   votingEndsAt: v.union(v.number(), v.null()),
   createdAt: v.number(),
@@ -317,14 +333,18 @@ const reviewListing = v.object({
   publishedAt: v.union(v.number(), v.null()),
   votingEndsAt: v.union(v.number(), v.null()),
   awardedAt: v.union(v.number(), v.null()),
-  /** Site of the Day ("YYYY-MM-DD", UTC); later than today: scheduled, "SOTD" not in awards yet. */
-  sotdDay: v.union(v.string(), v.null()),
+  /** In the Site of the Day queue (voting closed with an eligible score of the SOTD minimum or more). */
+  sotdQueued: v.boolean(),
+  juryVotes: v.number(),
+  byTeam: v.boolean(),
+  batchWeek: v.union(v.string(), v.null()),
+  redesignOf: v.union(v.object({ slug: v.string(), title: v.string() }), v.null()),
   editorialScores: v.union(pillars, v.null()),
   communityVotesCount: v.number(),
   editorialAverage: v.union(v.number(), v.null()),
   communityAverage: v.union(v.number(), v.null()),
   finalScore: v.union(v.number(), v.null()),
-  awards: v.array(v.union(v.literal("SOTD"), v.literal("BSC"), v.literal("HM"))),
+  awards: v.array(award),
   isClaimed: v.boolean(),
   isStartup: v.boolean(),
   /** Effective follow state of the outbound links, and the admin's explicit setting (null: automatic). */
@@ -373,8 +393,15 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
     publishedAt: listing.publishedAt ?? null,
     votingEndsAt: listing.votingEndsAt ?? null,
     awardedAt: listing.awardedAt ?? null,
-    sotdDay: listing.sotdDay ?? null,
-    editorialScores: listing.editorialScores ?? null,
+    sotdQueued: listing.sotdQueuedAt !== undefined,
+    juryVotes: listing.juryVotes ?? 0,
+    byTeam: listing.byTeam ?? false,
+    batchWeek: listing.batchWeek ?? null,
+    redesignOf: await (async () => {
+      const prev = listing.redesignOf ? await ctx.db.get(listing.redesignOf) : null;
+      return prev ? { slug: prev.slug, title: prev.title } : null;
+    })(),
+    editorialScores: listing.editorialScores ? readPillars(listing.editorialScores) : null,
     communityVotesCount: listing.communityVotesCount,
     editorialAverage: listing.editorialAverage ?? null,
     communityAverage: listing.communityAverage ?? null,
@@ -478,7 +505,10 @@ export const setEditorialScores = mutation({
   },
 });
 
-/** Approve: the site goes public and its 7-day voting window starts now. */
+/**
+ * Approve: the site goes public and joins this week's batch (Monday to
+ * Sunday, Tbilisi). The jury scores the batch until the end of next week.
+ */
 export const approve = mutation({
   args: { id: v.id("listings") },
   returns: v.null(),
@@ -496,11 +526,10 @@ export const approve = mutation({
       reviewedBy: admin._id,
       reviewedAt: now,
       publishedAt: now,
-      votingEndsAt: now + VOTING_DAYS * DAY_MS,
-      votingExtendedAt: undefined, // a new window gets its own jury extension
-      awards: [],
-      awardedAt: undefined,
-      sotdDay: undefined,
+      batchWeek: weekOf(now),
+      votingEndsAt: batchVotingEnds(weekOf(now)),
+      votingExtendedAt: undefined,
+      sotdQueuedAt: undefined,
       updatedAt: now,
     });
     await scheduleIndexNow(ctx, [...(await listingPaths(ctx, listing)), "/"]);
@@ -520,8 +549,7 @@ export const reject = mutation({
     const now = Date.now();
     await ctx.db.patch(id, {
       status: "rejected",
-      // A Site of the Day not reached yet frees its day for the next winner.
-      ...(listing.sotdDay !== undefined && listing.sotdDay > utcDay(now) ? { sotdDay: undefined } : {}),
+      sotdQueuedAt: undefined, // an unpublished site leaves the Site of the Day queue
       reviewNote,
       reviewedBy: admin._id,
       reviewedAt: now,
@@ -535,7 +563,11 @@ export const reject = mutation({
   },
 });
 
-/** Close a voting window early and assign awards (also used for testing). */
+/**
+ * Close a site's voting early (also used for testing): final score, then
+ * Honorable Mention / Best Solo Creation and the Site of the Day queue, by
+ * the same rules as the weekly close.
+ */
 export const closeVotingNow = mutation({
   args: { id: v.id("listings") },
   returns: v.null(),
@@ -544,8 +576,12 @@ export const closeVotingNow = mutation({
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
     if (listing.status !== "in_voting") fail("This site is not in voting.");
-    const awards = await finalizeListing(ctx, listing);
-    await scheduleIndexNow(ctx, [...(await listingPaths(ctx, listing)), ...awardPaths(awards ?? [])]);
+    try {
+      await closeVoting(ctx, listing, await getConfig(ctx), Date.now());
+    } catch (err) {
+      fail((err as Error).message);
+    }
+    await scheduleIndexNow(ctx, await listingPaths(ctx, listing));
     return null;
   },
 });
@@ -673,41 +709,5 @@ export const makeGalleryCover = mutation({
 // Scheduled
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Cron: close every voting window that has ended, and assign awards. */
-export const closeExpiredVoting = internalMutation({
-  args: {},
-  returns: v.number(),
-  handler: async (ctx) => {
-    const now = Date.now();
-    const expired = await ctx.db
-      .query("listings")
-      .withIndex("by_status_votingEndsAt", (q) =>
-        q.eq("status", "in_voting").lte("votingEndsAt", now),
-      )
-      .take(100);
-    const paths: string[] = [];
-    for (const listing of expired) {
-      // Fewer than LIMITS.juryMinEvaluations jury evaluations: one more week,
-      // so every site gets up to 14 days for its jury. Then it closes anyway.
-      if (!listing.votingExtendedAt && listing.votingEndsAt) {
-        const evaluations = await ctx.db
-          .query("juryEvaluations")
-          .withIndex("by_listing", (q) => q.eq("listingId", listing._id))
-          .take(LIMITS.juryMinEvaluations);
-        if (evaluations.length < LIMITS.juryMinEvaluations) {
-          await ctx.db.patch(listing._id, {
-            votingEndsAt: Math.max(listing.votingEndsAt, now) + LIMITS.votingExtensionDays * DAY_MS,
-            votingExtendedAt: now,
-            updatedAt: now,
-          });
-          paths.push(...(await listingPaths(ctx, listing)));
-          continue;
-        }
-      }
-      const awards = await finalizeListing(ctx, listing);
-      paths.push(...(await listingPaths(ctx, listing)), ...awardPaths(awards ?? []));
-    }
-    await scheduleIndexNow(ctx, paths); // one ping for the whole batch
-    return expired.length;
-  },
-});
+// Voting closes in awards.tick (convex/awards.ts), which also announces the
+// Site of the Day and runs the monthly and yearly rounds.

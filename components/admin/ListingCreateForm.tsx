@@ -34,8 +34,8 @@ type Pillars = Record<PillarKey, number>;
 
 const STATUS_OPTIONS: { value: CreateStatus; label: string; note: string }[] = [
   { value: "pending", label: "Review queue (pending)", note: "Hidden from the site until you approve it." },
-  { value: "in_voting", label: "Live voting", note: "Public now, open for community votes until the end date." },
-  { value: "awarded", label: "Awarded", note: "Voting closed, shown with its awards." },
+  { value: "in_voting", label: "Live voting", note: "Public now in this week's batch; the jury scores it until the end date." },
+  { value: "awarded", label: "Awarded", note: "Voting closed, with awards you give now (logged with your reason)." },
   { value: "archived", label: "Closed (archived)", note: "Voting closed, no award." },
 ];
 
@@ -54,7 +54,7 @@ function fromLocalInput(value: string): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-const EMPTY_PILLARS: Record<PillarKey, string> = { design: "", usability: "", creativity: "", code: "" };
+const EMPTY_PILLARS: Record<PillarKey, string> = { design: "", usability: "", creativity: "", content: "" };
 
 type MediaState = { file: File | null; error: string | null };
 const NO_MEDIA: MediaState = { file: null, error: null };
@@ -101,6 +101,7 @@ export function ListingCreateForm() {
   const [votingEnds, setVotingEnds] = useState(() => toLocalInput(Date.now() + VOTING_DAYS * DAY_MS));
   const [votingEnded, setVotingEnded] = useState(() => toLocalInput(Date.now()));
   const [awards, setAwards] = useState<AwardSlug[]>([]);
+  const [awardReason, setAwardReason] = useState("");
 
   const [withScores, setWithScores] = useState(false);
   const [pillarDraft, setPillarDraft] = useState(EMPTY_PILLARS);
@@ -152,6 +153,7 @@ export function ListingCreateForm() {
       if (ends <= Date.now()) return "The voting end date must be in the future.";
     }
     if (status === "awarded" && awards.length === 0) return "Pick at least one award for an awarded site.";
+    if (status === "awarded" && !awardReason.trim()) return "Say why these awards are given (it goes in the award log).";
     if ((status === "awarded" || status === "archived") && votingEnded.trim()) {
       const ended = fromLocalInput(votingEnded);
       if (ended === null) return "The voting ended date is not valid.";
@@ -208,6 +210,7 @@ export function ListingCreateForm() {
         votingEndsAt,
         editorialScores,
         awards: status === "awarded" ? awards : undefined,
+        awardReason: status === "awarded" ? awardReason.trim() : undefined,
         isClaimed,
         isStartup,
         jurorId: jurorId ? (jurorId as Id<"jurors">) : undefined,
@@ -526,6 +529,15 @@ export function ListingCreateForm() {
                       </label>
                     ))}
                   </div>
+                  <label className="mt-4 grid gap-2">
+                    <span className="admin-eyebrow">Why (required, logged)</span>
+                    <input
+                      value={awardReason}
+                      onChange={(e) => setAwardReason(e.target.value)}
+                      placeholder="e.g. Won Site of the Day before the platform launched"
+                      className="admin-input"
+                    />
+                  </label>
                 </fieldset>
               )}
 

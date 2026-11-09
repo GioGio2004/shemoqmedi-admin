@@ -104,17 +104,21 @@ export const CREATOR_TIERS = [
   { slug: "agency", name: "Agency / team", badge: "Agency" },
 ] as const;
 
+/** Highest first. Tiers: SOTY > SOTM > SOTD > HM; BSC is a side award for solo makers. */
 export const AWARDS = [
+  { slug: "SOTY", name: "Site of the Year", short: "SOTY" },
+  { slug: "SOTM", name: "Site of the Month", short: "SOTM" },
   { slug: "SOTD", name: "Site of the Day", short: "SOTD" },
   { slug: "BSC", name: "Best Solo Creation", short: "BSC" },
   { slug: "HM", name: "Honorable Mention", short: "HM" },
 ] as const;
 
+/** Jury pillars and their weight in the final score. */
 export const PILLARS = [
-  { key: "design", name: "Design" },
-  { key: "usability", name: "Usability" },
-  { key: "creativity", name: "Creativity" },
-  { key: "code", name: "Code" },
+  { key: "design", name: "Design", weight: 0.4 },
+  { key: "usability", name: "Usability", weight: 0.3 },
+  { key: "creativity", name: "Creativity", weight: 0.2 },
+  { key: "content", name: "Content", weight: 0.1 },
 ] as const;
 
 /** Jury panels. Keep in sync with schema.ts juryCategory. */
@@ -154,12 +158,8 @@ export const LIMITS = {
   technologies: 6,
   /** Categories per listing (the first is the primary one). */
   categories: 3,
-  /**
-   * Jury evaluations a site should get. With fewer when its 7-day window ends,
-   * voting is extended once by LIMITS.votingExtensionDays (14 days in all).
-   */
-  juryMinEvaluations: 5,
-  votingExtensionDays: 7,
+  /** Legacy fallback for the admin's jury target; the real minimum is config.minVotes (lib/config.ts). */
+  juryMinEvaluations: 3,
   /** Entries in a juror's Experience and Work sections. */
   juryExperience: 8,
   juryWork: 8,

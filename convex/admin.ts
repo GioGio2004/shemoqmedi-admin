@@ -5,12 +5,15 @@
 import { v } from "convex/values";
 import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
 import { internalMutation, mutation, query } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 import { requireAdmin } from "./authHelpers";
 import { award, creatorTier, listingStatus, pillars, region } from "./schema";
 import { DAY_MS, LIMITS, VOTING_DAYS, isTechnology } from "./lib/taxonomy";
-import { normalizePillars } from "./lib/scoring";
-import { utcDay, winnerFields } from "./lib/sotd";
+import { normalizePillars, type Pillars } from "./lib/scoring";
+import { batchVotingEnds, tbilisiDay, tbilisiMonth, tbilisiYear, weekOf } from "./lib/time";
+import { checkDomain, domainKey, listingsOnDomain } from "./lib/domains";
+import { getConfig } from "./lib/config";
+import { grantAward } from "./lib/awards";
 import {
   EMPTY_SCORES,
   assertMedia,
@@ -42,7 +45,7 @@ function checkTechnologies(technologies: string[]) {
   return unique;
 }
 
-function checkPillars(scores: Doc<"listings">["editorialScores"]) {
+function checkPillars(scores: Pillars | undefined) {
   if (!scores) return undefined;
   try {
     return normalizePillars(scores);
@@ -51,18 +54,15 @@ function checkPillars(scores: Doc<"listings">["editorialScores"]) {
   }
 }
 
-async function assertUniqueUrl(
-  ctx: Parameters<typeof deleteListing>[0],
-  url: string,
-  except?: Id<"listings">,
-) {
-  const rows = await ctx.db
-    .query("listings")
-    .withIndex("by_url", (q) => q.eq("url", url))
-    .collect();
-  if (rows.some((r) => r._id !== except && r.status !== "rejected")) {
-    fail("Another listing already uses this website URL.");
-  }
+/**
+ * A listing's new URL may not point at a website another listing has,
+ * unless the two are the same site's redesign chain.
+ */
+async function assertDomainFree(ctx: Parameters<typeof deleteListing>[0], url: string, self: Doc<"listings">) {
+  const others = (await listingsOnDomain(ctx, domainKey(url))).filter(
+    (r) => r._id !== self._id && r.status !== "rejected" && r._id !== self.redesignOf && r.redesignOf !== self._id,
+  );
+  if (others.length) fail(`Another listing (“${others[0].title}”) already uses this website.`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -91,9 +91,13 @@ export const createListing = mutation({
       v.literal("awarded"),
       v.literal("archived"),
     ),
-    votingEndsAt: v.optional(v.number()), // in_voting: when voting closes (default now + 7 days)
+    votingEndsAt: v.optional(v.number()), // in_voting: when voting closes (default: end of next week, its batch's judging week)
     editorialScores: v.optional(pillars),
-    awards: v.optional(v.array(award)), // awarded: at least one
+    // awarded: at least one. Logged as a manual award, so it needs awardReason.
+    awards: v.optional(v.array(award)),
+    awardReason: v.optional(v.string()),
+    // A significant redesign of this earlier listing (same website).
+    redesignOf: v.optional(v.id("listings")),
     isClaimed: v.boolean(),
     isStartup: v.optional(v.boolean()),
     // Pre-created for this juror: their claim link claims this listing too.
@@ -113,11 +117,20 @@ export const createListing = mutation({
     const editorialScores = checkPillars(args.editorialScores);
     const awards = [...new Set(args.awards ?? [])];
     if (args.status === "awarded" && awards.length === 0) fail("Pick at least one award for an awarded site.");
+    if (args.status === "awarded" && !args.awardReason?.trim()) {
+      fail("Give a reason for the awards (it goes in the award log).");
+    }
 
     await assertMedia(ctx, args.coverId, "Cover screenshot", "image");
     const galleryIds = await checkGallery(ctx, args.galleryIds);
     if (args.videoId) await assertMedia(ctx, args.videoId, "Preview video", "video");
-    await assertUniqueUrl(ctx, url);
+    const config = await getConfig(ctx);
+    const domain = await checkDomain(ctx, url, {
+      redesignOf: args.redesignOf,
+      resubmitMonths: config.resubmitMonths,
+      now: Date.now(),
+    });
+    if (!domain.ok) fail(domain.reason);
     if (args.jurorId && !(await ctx.db.get(args.jurorId))) fail("That juror no longer exists.");
 
     const creatorId = await findOrCreateCreator(ctx, {
@@ -131,17 +144,13 @@ export const createListing = mutation({
     let publishedAt: number | undefined;
     let votingEndsAt: number | undefined;
     if (args.status === "in_voting") {
-      votingEndsAt = args.votingEndsAt ?? now + VOTING_DAYS * DAY_MS;
+      votingEndsAt = args.votingEndsAt ?? batchVotingEnds(weekOf(now));
       if (votingEndsAt <= now) fail("The voting end date must be in the future.");
-      publishedAt = Math.min(now, votingEndsAt - VOTING_DAYS * DAY_MS);
+      publishedAt = now;
     } else if (args.status === "awarded" || args.status === "archived") {
       votingEndsAt = Math.min(args.votingEndsAt ?? now, now);
       publishedAt = votingEndsAt - VOTING_DAYS * DAY_MS;
     }
-
-    // Site of the Day picked by hand: the first free day, like any other winner.
-    const sotd =
-      args.status === "awarded" && awards.includes("SOTD") ? await winnerFields(ctx, null, awards, now) : null;
 
     const slug = await uniqueSlug(ctx, "listings", slugify(title));
     const id = await ctx.db.insert("listings", {
@@ -163,7 +172,11 @@ export const createListing = mutation({
       coverId: args.coverId,
       galleryIds,
       videoId: args.videoId,
-      status: args.status,
+      // Awarded: created closed, then each award is given through the award rules.
+      status: args.status === "awarded" ? "archived" : args.status,
+      batchWeek: args.status === "in_voting" ? weekOf(now) : undefined,
+      domainKey: domainKey(url),
+      redesignOf: domain.redesignOf,
       reviewedBy: args.status === "pending" ? undefined : admin._id,
       reviewedAt: args.status === "pending" ? undefined : now,
       publishedAt,
@@ -171,9 +184,7 @@ export const createListing = mutation({
       ...EMPTY_SCORES,
       editorialScores,
       ...scoreFields(editorialScores, EMPTY_SCORES.communityTotals, 0),
-      awards: args.status === "awarded" ? (sotd?.awards ?? awards) : [],
-      awardedAt: args.status === "awarded" ? votingEndsAt : undefined,
-      sotdDay: sotd?.sotdDay,
+      awards: [],
       isClaimed: args.isClaimed,
       isStartup: args.isStartup || undefined,
       jurorId: args.jurorId,
@@ -184,8 +195,26 @@ export const createListing = mutation({
       await scheduleIndexNow(ctx, [
         ...(await listingPaths(ctx, { slug, creatorId })),
         "/",
-        ...awardPaths(args.status === "awarded" ? (sotd?.awards ?? awards) : []),
       ]);
+    }
+    if (args.status === "awarded") {
+      const created = (await ctx.db.get(id))!;
+      for (const tier of awards) {
+        try {
+          await grantAward(ctx, {
+            listingId: id,
+            tier,
+            period: tier === "SOTM" ? tbilisiMonth(now) : tier === "SOTY" ? tbilisiYear(now) : tbilisiDay(now),
+            score: created.finalScore ?? null,
+            now,
+            source: "manual",
+            actorId: admin._id,
+            reason: args.awardReason,
+          });
+        } catch (err) {
+          fail((err as Error).message);
+        }
+      }
     }
     return { id, slug };
   },
@@ -226,7 +255,8 @@ export const updateListing = mutation({
     }
     if (args.url !== undefined) {
       patch.url = normalizeUrl(args.url);
-      if (patch.url !== listing.url) await assertUniqueUrl(ctx, patch.url, id);
+      if (patch.url !== listing.url) await assertDomainFree(ctx, patch.url, listing);
+      patch.domainKey = domainKey(patch.url);
     }
     if (args.slug !== undefined) {
       const wanted = slugify(args.slug, "");
@@ -290,61 +320,44 @@ export const updateListing = mutation({
 });
 
 /**
- * Lifecycle override: move a listing to any status and set its voting window
- * and awards by hand. Scores are kept; the final score is recomputed.
- * "SOTD" among the awards keeps the site's Site of the Day day, or gives it
- * the first free one; leaving it out frees the day.
+ * Lifecycle override: move a listing to another status and set its voting
+ * window by hand. Scores are kept. Awards are not set here: they are given
+ * and revoked on the Awards page (awards.grant / awards.revoke), where each
+ * change needs a reason and is logged. A site with active awards can only be
+ * unpublished (rejected) until they are revoked.
  */
 export const setLifecycle = mutation({
   args: {
     id: v.id("listings"),
     status: listingStatus,
     votingEndsAt: v.optional(v.number()),
-    awards: v.optional(v.array(award)),
     note: v.optional(v.string()), // reason shown to the owner when rejected
   },
   returns: v.null(),
-  handler: async (ctx, { id, status, votingEndsAt, awards, note }) => {
+  handler: async (ctx, { id, status, votingEndsAt, note }) => {
     const admin = await requireAdmin(ctx);
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
     const now = Date.now();
+    if (status === "awarded") fail("Give awards on the Awards page: each one needs a reason and is logged.");
+    if (listing.awards.length > 0 && status !== "rejected") {
+      fail(`Revoke this site's awards (${listing.awards.join(", ")}) on the Awards page first.`);
+    }
     const scores = scoreFields(listing.editorialScores, listing.communityTotals, listing.communityVotesCount);
     const base = { status, reviewedBy: admin._id, reviewedAt: now, updatedAt: now, ...scores };
 
     switch (status) {
       case "in_voting": {
-        const ends = votingEndsAt ?? now + VOTING_DAYS * DAY_MS;
+        const keepWindow = listing.status === "in_voting" && listing.publishedAt !== undefined;
+        const ends = votingEndsAt ?? (keepWindow ? listing.votingEndsAt! : batchVotingEnds(weekOf(now)));
         if (ends <= now) fail("The voting end date must be in the future.");
-        const keepStart = listing.status === "in_voting" && listing.publishedAt !== undefined;
         await ctx.db.patch(id, {
           ...base,
           votingEndsAt: ends,
-          publishedAt: keepStart ? listing.publishedAt : Math.min(now, ends - VOTING_DAYS * DAY_MS),
-          // Reopening starts a new window, which gets its own jury extension;
-          // moving the end of a running window keeps the flag.
-          ...(keepStart ? {} : { votingExtendedAt: undefined }),
-          awards: [],
-          awardedAt: undefined,
-          sotdDay: undefined,
-          reviewNote: undefined,
-        });
-        break;
-      }
-      case "awarded": {
-        // A scheduled Site of the Day has no "SOTD" in awards yet but keeps it.
-        const current = listing.sotdDay ? [...listing.awards, "SOTD" as const] : listing.awards;
-        const picked = [...new Set(awards ?? current)];
-        if (picked.length === 0) fail("Pick at least one award.");
-        const sotd = picked.includes("SOTD") ? await winnerFields(ctx, listing, picked, now) : null;
-        const ends = Math.min(listing.votingEndsAt ?? now, now);
-        await ctx.db.patch(id, {
-          ...base,
-          awards: sotd?.awards ?? picked,
-          sotdDay: sotd?.sotdDay,
-          votingEndsAt: ends,
-          publishedAt: listing.publishedAt ?? ends - VOTING_DAYS * DAY_MS,
-          awardedAt: listing.awardedAt ?? now,
+          publishedAt: keepWindow ? listing.publishedAt : now,
+          batchWeek: keepWindow ? listing.batchWeek : weekOf(now),
+          votingExtendedAt: undefined,
+          sotdQueuedAt: undefined,
           reviewNote: undefined,
         });
         break;
@@ -353,9 +366,6 @@ export const setLifecycle = mutation({
         const ends = Math.min(listing.votingEndsAt ?? now, now);
         await ctx.db.patch(id, {
           ...base,
-          awards: [],
-          awardedAt: undefined,
-          sotdDay: undefined,
           votingEndsAt: ends,
           publishedAt: listing.publishedAt ?? ends - VOTING_DAYS * DAY_MS,
           reviewNote: undefined,
@@ -364,31 +374,22 @@ export const setLifecycle = mutation({
       }
       case "rejected": {
         const reviewNote = cleanText(note ?? "", "Reason", LIMITS.reviewNote);
-        // Awards are kept for a later re-publish; a day not reached yet is freed.
-        const freeDay = listing.sotdDay !== undefined && listing.sotdDay > utcDay(now);
-        await ctx.db.patch(id, { ...base, reviewNote, ...(freeDay ? { sotdDay: undefined } : {}) });
+        // Awards stay on record (and come back if it is re-published); the queue place does not.
+        await ctx.db.patch(id, { ...base, reviewNote, sotdQueuedAt: undefined });
         break;
       }
       case "pending": {
-        await ctx.db.patch(id, {
-          ...base,
-          reviewNote: undefined,
-          awards: [],
-          awardedAt: undefined,
-          sotdDay: undefined,
-        });
+        await ctx.db.patch(id, { ...base, reviewNote: undefined, sotdQueuedAt: undefined });
         break;
       }
     }
 
     const wasPublic = isPublicStatus(listing.status);
     if (wasPublic || isPublicStatus(status)) {
-      const after = await ctx.db.get(id);
       await scheduleIndexNow(ctx, [
         ...(await listingPaths(ctx, listing)),
         wasPublic ? null : "/", // newly published
-        // Award pages it joined or left.
-        ...awardPaths([...listing.awards, ...(after?.awards ?? [])]),
+        ...awardPaths(listing.awards),
       ]);
     }
     return null;

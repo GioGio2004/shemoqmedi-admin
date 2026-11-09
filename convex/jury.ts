@@ -15,8 +15,10 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { getUserByExternalId } from "./users";
 import { juryCategory, juryExperience, juryWork, pillars } from "./schema";
-import { LIMITS } from "./lib/taxonomy";
-import { normalizePillars, round2, type Pillars } from "./lib/scoring";
+import { LIMITS, isCategory } from "./lib/taxonomy";
+import { averagePillars, finalScore, normalizePillars, readPillars, round2, weighted, type Pillars } from "./lib/scoring";
+import { conflictReason } from "./lib/conflicts";
+import { getConfig } from "./lib/config";
 import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
 import {
   assertMedia,
@@ -80,7 +82,7 @@ export async function jurorOf(ctx: QueryCtx, userId: Id<"users">) {
 }
 
 /** The signed-in user and their active, claimed juror row, or null (no throw). */
-async function currentJuror(ctx: QueryCtx) {
+export async function currentJuror(ctx: QueryCtx) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) return null;
   const user = await getUserByExternalId(ctx, identity.subject);
@@ -89,7 +91,7 @@ async function currentJuror(ctx: QueryCtx) {
   return juror && isPublicJuror(juror) ? { user, juror } : null;
 }
 
-async function requireJuror(ctx: QueryCtx) {
+export async function requireJuror(ctx: QueryCtx) {
   const user = await requireUser(ctx);
   const juror = await jurorOf(ctx, user._id);
   if (!juror || !isPublicJuror(juror)) fail("Only jury members can do this.");
@@ -169,6 +171,7 @@ const selfProfileArgs = {
   bio: v.optional(v.string()),
   experience: v.optional(v.array(juryExperience)), // [] clears; absent keeps
   work: v.optional(v.array(juryWork)), // [] clears; absent keeps
+  interests: v.optional(v.array(v.string())), // CATEGORIES slugs for the digest; [] clears; absent keeps
 };
 
 function cleanSelfProfile(args: {
@@ -180,8 +183,11 @@ function cleanSelfProfile(args: {
   bio?: string;
   experience?: ExperienceRows;
   work?: WorkRows;
+  interests?: string[];
 }) {
+  if (args.interests && !args.interests.every(isCategory)) fail("Unknown category.");
   return {
+    ...(args.interests !== undefined ? { interests: [...new Set(args.interests)].slice(0, 40) } : {}),
     ...(args.experience !== undefined ? { experience: cleanExperience(args.experience) } : {}),
     ...(args.work !== undefined ? { work: cleanWork(args.work) } : {}),
     name: cleanText(args.name, "Name", LIMITS.creditName),
@@ -194,30 +200,27 @@ function cleanSelfProfile(args: {
 }
 
 /**
- * Set a listing's jury score to the per-pillar average of its evaluations
- * (or clear it when none are left) and recompute the final score.
+ * Set a listing's jury score from its evaluations: per-pillar averages, and a
+ * final score that is every juror's weighted score averaged (rounded to 2
+ * decimals). Cleared when none are left.
  */
 export async function recomputeJuryScore(ctx: MutationCtx, listingId: Id<"listings">) {
   const listing = await ctx.db.get(listingId);
   if (!listing) return;
-  const evaluations = await ctx.db
-    .query("juryEvaluations")
-    .withIndex("by_listing", (q) => q.eq("listingId", listingId))
-    .collect();
-  let editorial: Pillars | undefined;
-  if (evaluations.length > 0) {
-    const n = evaluations.length;
-    const sum = (k: keyof Pillars) => evaluations.reduce((s, e) => s + e.scores[k], 0);
-    editorial = {
-      design: round2(sum("design") / n),
-      usability: round2(sum("usability") / n),
-      creativity: round2(sum("creativity") / n),
-      code: round2(sum("code") / n),
-    };
-  }
+  const votes = (
+    await ctx.db
+      .query("juryEvaluations")
+      .withIndex("by_listing", (q) => q.eq("listingId", listingId))
+      .collect()
+  ).map((e) => readPillars(e.scores));
+  const editorial = averagePillars(votes) ?? undefined;
+  const final = finalScore(votes) ?? undefined;
   await ctx.db.patch(listingId, {
     editorialScores: editorial,
     ...scoreFields(editorial, listing.communityTotals, listing.communityVotesCount),
+    editorialAverage: final,
+    finalScore: final,
+    juryVotes: votes.length,
     updatedAt: Date.now(),
   });
 }
@@ -231,14 +234,8 @@ async function blockReason(ctx: QueryCtx, listing: Doc<"listings">, juror: Doc<"
   if (listing.status !== "in_voting" || !listing.votingEndsAt || Date.now() >= listing.votingEndsAt) {
     return "Voting is closed for this site.";
   }
-  const own = "You can't evaluate your own site.";
-  if (listing.jurorId === juror._id) return own;
-  if (juror.userId && listing.ownerId === juror.userId) return own;
-  if (juror.userId && listing.creatorId) {
-    const creator = await ctx.db.get(listing.creatorId);
-    if (creator?.claimedBy === juror.userId) return own;
-  }
-  return null;
+  if (listing.byTeam) return "Sites by the Shemoqmedi team are not judged.";
+  return await conflictReason(ctx, listing, juror);
 }
 
 async function listingBySlug(ctx: QueryCtx, slug: string) {
@@ -355,10 +352,10 @@ export const getBySlug = query({
     for (const e of evaluations) {
       const listing = await ctx.db.get(e.listingId);
       if (!listing || !isPublicStatus(listing.status)) continue;
-      const s = e.scores;
+      const s = readPillars(e.scores);
       reviews.push({
         listing: { slug: listing.slug, title: listing.title, coverUrl: await mediaUrl(ctx, listing.coverId) },
-        average: round2((s.design + s.usability + s.creativity + s.code) / 4),
+        average: round2(weighted(s)),
         comment: e.comment,
         updatedAt: e.updatedAt,
       });
@@ -395,11 +392,11 @@ export const reviewsForListing = query({
     for (const e of evaluations) {
       const juror = await ctx.db.get(e.jurorId);
       if (!juror || !isClaimedJuror(juror)) continue;
-      const s = e.scores;
+      const s = readPillars(e.scores);
       out.push({
         juror: await toJurorPublic(ctx, juror),
         scores: s,
-        average: round2((s.design + s.usability + s.creativity + s.code) / 4),
+        average: round2(weighted(s)),
         comment: e.comment,
         createdAt: e.createdAt,
         updatedAt: e.updatedAt,
@@ -416,11 +413,18 @@ export const reviewsForListing = query({
 /** The signed-in user's jury profile, or null if they are not on the jury. */
 export const me = query({
   args: {},
-  returns: v.union(v.object({ ...jurorPublic.fields, hasPresetPhoto: v.boolean() }), v.null()),
+  returns: v.union(
+    v.object({ ...jurorPublic.fields, hasPresetPhoto: v.boolean(), interests: v.array(v.string()) }),
+    v.null(),
+  ),
   handler: async (ctx) => {
     const current = await currentJuror(ctx);
     if (!current) return null;
-    return { ...(await toJurorPublic(ctx, current.juror)), hasPresetPhoto: !!current.juror.avatarId };
+    return {
+      ...(await toJurorPublic(ctx, current.juror)),
+      hasPresetPhoto: !!current.juror.avatarId,
+      interests: current.juror.interests ?? [],
+    };
   },
 });
 
@@ -467,7 +471,7 @@ export const myEvaluation = query({
       .unique();
     return {
       blocked: await blockReason(ctx, listing, current.juror),
-      evaluation: saved ? { scores: saved.scores, comment: saved.comment, updatedAt: saved.updatedAt } : null,
+      evaluation: saved ? { scores: readPillars(saved.scores), comment: saved.comment, updatedAt: saved.updatedAt } : null,
       votingEndsAt: listing.votingEndsAt ?? null,
     };
   },
@@ -807,7 +811,7 @@ export const nomineesOverview = query({
         const evaluations = [];
         for (const e of rows) {
           const juror = await ctx.db.get(e.jurorId);
-          const s = e.scores;
+          const s = readPillars(e.scores);
           evaluations.push({
             id: e._id,
             juror: {
@@ -817,7 +821,7 @@ export const nomineesOverview = query({
               imageUrl: juror ? await jurorPhoto(ctx, juror) : null,
             },
             scores: s,
-            average: round2((s.design + s.usability + s.creativity + s.code) / 4),
+            average: round2(weighted(s)),
             comment: e.comment,
             updatedAt: e.updatedAt,
           });
@@ -833,7 +837,7 @@ export const nomineesOverview = query({
           votingEndsAt: l.votingEndsAt ?? null,
           votingExtended: l.votingExtendedAt !== undefined,
           isStartup: l.isStartup ?? false,
-          editorialScores: l.editorialScores ?? null,
+          editorialScores: l.editorialScores ? readPillars(l.editorialScores) : null,
           editorialAverage: l.editorialAverage ?? null,
           communityAverage: l.communityAverage ?? null,
           communityVotesCount: l.communityVotesCount,
@@ -842,7 +846,8 @@ export const nomineesOverview = query({
         };
       }),
     );
-    return { juryTarget: LIMITS.juryMinEvaluations, activeJurors, nominees };
+    // Jury votes a site needs to be eligible for awards (award settings).
+    return { juryTarget: (await getConfig(ctx)).minVotes, activeJurors, nominees };
   },
 });
 
@@ -868,7 +873,7 @@ export const evaluationsForListing = query({
       rows.map(async (e) => ({
         id: e._id,
         jurorName: (await ctx.db.get(e.jurorId))?.name ?? "Former juror",
-        scores: e.scores,
+        scores: readPillars(e.scores),
         comment: e.comment,
         updatedAt: e.updatedAt,
       })),

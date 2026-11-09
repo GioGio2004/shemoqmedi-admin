@@ -14,7 +14,9 @@ import {
   uniqueSlug,
 } from "./lib/listingHelpers";
 import { FLAGSHIP } from "./seed";
-import { winnerFields } from "./lib/sotd";
+import { grantAward } from "./lib/awards";
+import { domainKey } from "./lib/domains";
+import { tbilisiDay, tbilisiMonth, tbilisiYear, weekOf } from "./lib/time";
 import { uploadToImageKitFromServer } from "./lib/imagekitServer";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -146,6 +148,7 @@ const importInput = v.object({
   editorialScore: v.optional(v.number()), // same value on all 4 pillars
   awards: v.optional(v.array(award)),
   isClaimed: v.boolean(),
+  byTeam: v.optional(v.boolean()), // Shemoqmedi team site: never awarded
 });
 
 type ImportInput = typeof importInput.type;
@@ -261,7 +264,7 @@ export const seedFlagship = action({
       const input: ImportInput = {
         ...preset,
         technologies: [...preset.technologies],
-        awards: "awards" in preset ? [...preset.awards] : undefined,
+        awards: "awards" in preset && Array.isArray(preset.awards) ? [...(preset.awards as ImportInput["awards"] & object)] : undefined,
       };
       results.push(await importOne(ctx, input, "seed"));
     }
@@ -321,10 +324,8 @@ export const insertImported = internalMutation({
 
     const score = args.editorialScore;
     const editorialScores =
-      score === undefined ? undefined : { design: score, usability: score, creativity: score, code: score };
-
-    const picked = args.status === "awarded" ? (args.awards ?? []) : [];
-    const sotd = picked.includes("SOTD") ? await winnerFields(ctx, null, picked, now) : null;
+      score === undefined ? undefined : { design: score, usability: score, creativity: score, content: score };
+    const picked = args.status === "awarded" ? [...new Set(args.awards ?? [])] : [];
 
     const slug = await uniqueSlug(ctx, "listings", slugify(title));
     const id = await ctx.db.insert("listings", {
@@ -342,19 +343,32 @@ export const insertImported = internalMutation({
       creditName: args.creditName,
       creditUrl,
       coverId: args.coverId,
-      status: args.status,
+      // Awarded: created closed; each award then goes through the award rules (logged).
+      status: args.status === "awarded" ? "archived" : args.status,
+      batchWeek: args.status === "in_voting" ? weekOf(now) : undefined,
+      domainKey: domainKey(args.url),
+      byTeam: args.byTeam || undefined,
       publishedAt,
       votingEndsAt,
       ...EMPTY_SCORES,
       editorialScores,
       ...scoreFields(editorialScores, EMPTY_SCORES.communityTotals, 0),
-      awards: sotd?.awards ?? picked,
-      awardedAt: args.status === "awarded" ? votingEndsAt : undefined,
-      sotdDay: sotd?.sotdDay,
+      awards: [],
       isClaimed: args.isClaimed,
       createdAt: now,
       updatedAt: now,
     });
+    for (const tier of args.byTeam ? [] : picked) {
+      await grantAward(ctx, {
+        listingId: id,
+        tier,
+        period: tier === "SOTM" ? tbilisiMonth(now) : tier === "SOTY" ? tbilisiYear(now) : tbilisiDay(now),
+        score: score ?? null,
+        now,
+        source: "manual",
+        reason: `Imported with this award (${args.source}).`,
+      });
+    }
     return { id, slug, skipped: false };
   },
 });

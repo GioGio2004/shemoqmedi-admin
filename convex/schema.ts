@@ -17,14 +17,52 @@ export const listingStatus = v.union(
 
 export const creatorTier = v.union(v.literal("solo"), v.literal("agency"));
 export const region = v.union(v.literal("georgia"), v.literal("global"));
-export const award = v.union(v.literal("SOTD"), v.literal("BSC"), v.literal("HM"));
+/**
+ * Award tiers, lowest to highest: HM, SOTD, SOTM, SOTY. BSC (Best Solo
+ * Creation) is a side award for solo makers, outside the hierarchy.
+ */
+export const award = v.union(
+  v.literal("HM"),
+  v.literal("SOTD"),
+  v.literal("SOTM"),
+  v.literal("SOTY"),
+  v.literal("BSC"),
+);
 
+/** Pillar scores sent by clients and returned by queries. */
 export const pillars = v.object({
   design: v.number(),
   usability: v.number(),
   creativity: v.number(),
-  code: v.number(),
+  content: v.number(),
 });
+
+/**
+ * Pillar scores as stored. Rows written before the Content pillar have
+ * `code`; migrations.backfillAwardsData moves it to `content`. Read them with
+ * readPillars() (lib/scoring.ts). Once every deployment has run the
+ * migration, `code` can be dropped and `content` made required.
+ */
+export const storedPillars = v.object({
+  design: v.number(),
+  usability: v.number(),
+  creativity: v.number(),
+  content: v.optional(v.number()),
+  code: v.optional(v.number()),
+});
+
+/** Every award decision and admin action, for the audit log. */
+export const auditKind = v.union(
+  v.literal("batch_closed"), // a listing's voting closed: score, eligibility, awards, queue
+  v.literal("granted"), // an award was given (automatic or by an admin)
+  v.literal("revoked"), // an admin revoked an award
+  v.literal("empty_day"), // no Site of the Day: the queue was empty
+  v.literal("round_opened"),
+  v.literal("round_decided"),
+  v.literal("team_site"), // an admin marked or unmarked a Shemoqmedi team site
+  v.literal("queue_removed"), // an admin took a site out of the SOTD queue
+  v.literal("settings"), // award settings changed
+);
 
 /** A screenshot or video: Convex storage file or ImageKit `media` row (see lib/media.ts). */
 const mediaId = v.union(v.id("_storage"), v.id("media"));
@@ -151,17 +189,31 @@ export default defineSchema({
     votingExtendedAt: v.optional(v.number()),
 
     // Scores. Community totals are running sums so reads stay O(1).
-    editorialScores: v.optional(pillars),
-    communityTotals: pillars,
+    editorialScores: v.optional(storedPillars),
+    communityTotals: storedPillars,
     communityVotesCount: v.number(),
     editorialAverage: v.optional(v.number()),
     communityAverage: v.optional(v.number()),
     finalScore: v.optional(v.number()),
+    // Active award tiers, kept in sync with the `awards` table (lib/awards.ts
+    // syncListingAwards). The table is the record; this is for fast reads.
     awards: v.array(award),
     awardedAt: v.optional(v.number()),
-    // Site of the Day: this site's one day ("YYYY-MM-DD", UTC). A future day
-    // means scheduled: "SOTD" joins awards when the day comes (lib/sotd.ts).
-    sotdDay: v.optional(v.string()),
+    // Jury votes counted in editorialScores (eligibility needs config.minVotes).
+    juryVotes: v.optional(v.number()),
+    // Weekly batch (the Monday it was approved, Tbilisi): judged the week after.
+    batchWeek: v.optional(v.string()),
+    // In the Site of the Day queue since this time (set when voting closes
+    // with an eligible score of config.sotdMin or more). Cleared when it wins
+    // or an admin takes it out.
+    sotdQueuedAt: v.optional(v.number()),
+    // Built by the Shemoqmedi team: shown as such and never eligible for awards.
+    byTeam: v.optional(v.boolean()),
+    // "example.com/path": protocol, www and trailing slash stripped. One
+    // active listing per domain key (lib/domains.ts).
+    domainKey: v.optional(v.string()),
+    // A significant redesign resubmitted as a new entry: the earlier listing.
+    redesignOf: v.optional(v.id("listings")),
 
     // Unclaimed = admin-created and not yet owned (ownerId empty). Claiming
     // (claimLinks.claim, or an approved claim request) sets ownerId.
@@ -193,13 +245,15 @@ export default defineSchema({
     .index("by_claimTokenUsed", ["claimTokenUsed"])
     .index("by_juror", ["jurorId"])
     .index("by_status_votingEndsAt", ["status", "votingEndsAt"])
-    .index("by_sotdDay", ["sotdDay"]),
+    .index("by_domainKey", ["domainKey"])
+    .index("by_sotdQueue", ["sotdQueuedAt"])
+    .index("by_redesignOf", ["redesignOf"]),
 
   // One community vote per user per listing, during the voting window.
   votes: defineTable({
     listingId: v.id("listings"),
     userId: v.id("users"),
-    scores: pillars,
+    scores: storedPillars,
     createdAt: v.number(),
   })
     .index("by_listing_user", ["listingId", "userId"])
@@ -229,6 +283,9 @@ export default defineSchema({
     avatarId: v.optional(mediaId), // admin-uploaded (ImageKit)
     email: v.optional(v.string()), // private: for emailing the claim link
     isFounding: v.optional(v.boolean()), // "Founding Jury" badge
+    // CATEGORIES slugs the juror wants in their digest of new submissions.
+    interests: v.optional(v.array(v.string())),
+    lastDigestAt: v.optional(v.number()),
     claimToken: v.optional(v.string()),
     claimTokenUsed: v.optional(v.string()),
     claimedAt: v.optional(v.number()),
@@ -267,7 +324,7 @@ export default defineSchema({
   juryEvaluations: defineTable({
     listingId: v.id("listings"),
     jurorId: v.id("jurors"),
-    scores: pillars,
+    scores: storedPillars,
     comment: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -275,6 +332,131 @@ export default defineSchema({
     .index("by_listing", ["listingId"])
     .index("by_juror", ["jurorId"])
     .index("by_listing_juror", ["listingId", "jurorId"]),
+
+  // One row per award given. The public award page is /awards/<slug>; the
+  // badge image is served per award, so a badge exists only for a real award.
+  awards: defineTable({
+    listingId: v.id("listings"),
+    tier: award,
+    // What it was won for: SOTD a day "2026-11-12", SOTM a month "2026-11",
+    // SOTY a year "2026", HM/BSC the batch week "2026-11-02" (or a day when
+    // granted by hand).
+    period: v.string(),
+    date: v.string(), // the Tbilisi day it was announced, "2026-11-12"
+    score: v.union(v.number(), v.null()), // final score it was won with
+    slug: v.string(), // "floema-sotd-2026-11-12"
+    status: v.union(v.literal("active"), v.literal("revoked")),
+    source: v.union(v.literal("auto"), v.literal("manual")),
+    grantedBy: v.optional(v.id("users")),
+    reason: v.optional(v.string()), // required for manual grants
+    revokedAt: v.optional(v.number()),
+    revokedBy: v.optional(v.id("users")),
+    revokeReason: v.optional(v.string()),
+    notifiedAt: v.optional(v.number()), // winner email sent
+    createdAt: v.number(),
+  })
+    .index("by_listing", ["listingId", "createdAt"])
+    .index("by_tier_period", ["tier", "period"])
+    .index("by_tier_date", ["tier", "date"])
+    .index("by_slug", ["slug"])
+    .index("by_created", ["createdAt"]),
+
+  // Every award decision: inputs, scores and the outcome. Never edited.
+  awardAudit: defineTable({
+    kind: auditKind,
+    tier: v.optional(award),
+    period: v.optional(v.string()),
+    listingId: v.optional(v.id("listings")),
+    awardId: v.optional(v.id("awards")),
+    roundId: v.optional(v.id("rounds")),
+    actorId: v.optional(v.id("users")), // admin; absent for scheduled jobs
+    reason: v.optional(v.string()),
+    // Scores, candidates, thresholds, etc. at decision time.
+    details: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_created", ["createdAt"])
+    .index("by_kind_period", ["kind", "period"])
+    .index("by_listing", ["listingId", "createdAt"]),
+
+  // Site of the Month / Year jury rounds. Candidates are fixed when it opens.
+  rounds: defineTable({
+    kind: v.union(v.literal("SOTM"), v.literal("SOTY")),
+    period: v.string(), // "2026-11" or "2026"
+    candidates: v.array(v.id("listings")),
+    opensAt: v.number(),
+    closesAt: v.number(), // votes accepted until then
+    announceAt: v.number(),
+    status: v.union(v.literal("open"), v.literal("announced")),
+    winnerId: v.optional(v.id("listings")),
+    createdAt: v.number(),
+  })
+    .index("by_kind_period", ["kind", "period"])
+    .index("by_status", ["status", "announceAt"]),
+
+  // A juror's score for one candidate in a round (same pillars and weights).
+  roundVotes: defineTable({
+    roundId: v.id("rounds"),
+    listingId: v.id("listings"),
+    jurorId: v.id("jurors"),
+    scores: pillars,
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_round", ["roundId"])
+    .index("by_round_listing", ["roundId", "listingId"])
+    .index("by_round_juror_listing", ["roundId", "jurorId", "listingId"])
+    .index("by_listing_juror", ["listingId", "jurorId"]),
+
+  // Conflict of interest: the juror built the site or it belongs to their
+  // company. Declared by the juror or set by an admin; blocks their votes on it.
+  conflicts: defineTable({
+    jurorId: v.id("jurors"),
+    listingId: v.id("listings"),
+    reason: v.string(),
+    declaredBy: v.union(v.literal("juror"), v.literal("admin")),
+    createdAt: v.number(),
+  })
+    .index("by_juror_listing", ["jurorId", "listingId"])
+    .index("by_listing", ["listingId"]),
+
+  // Admin-editable settings (lib/config.ts). One row per key.
+  settings: defineTable({
+    key: v.literal("awards"),
+    awards: v.optional(
+      v.object({
+        minVotes: v.optional(v.number()),
+        honorableMentionMin: v.optional(v.number()),
+        sotdMin: v.optional(v.number()),
+        bscMin: v.optional(v.number()),
+        announceTime: v.optional(v.string()),
+        monthlyRoundDays: v.optional(v.number()),
+        yearlyRoundDays: v.optional(v.number()),
+        yearlyAnnounceDate: v.optional(v.string()),
+        resubmitMonths: v.optional(v.number()),
+        digestTime: v.optional(v.string()),
+      }),
+    ),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
+
+  // Award announcements for the social posting job (convex/social.ts).
+  socialPosts: defineTable({
+    awardId: v.id("awards"),
+    status: v.union(v.literal("pending"), v.literal("sent"), v.literal("failed"), v.literal("skipped")),
+    payload: v.object({
+      text: v.string(),
+      url: v.string(),
+      screenshotUrl: v.union(v.string(), v.null()),
+      studioName: v.string(),
+      studioTag: v.union(v.string(), v.null()),
+    }),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    sentAt: v.optional(v.number()),
+  })
+    .index("by_award", ["awardId"])
+    .index("by_status", ["status", "createdAt"]),
 
   // "This is mine" requests for unclaimed listings and creator profiles.
   claims: defineTable({

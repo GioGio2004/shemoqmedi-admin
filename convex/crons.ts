@@ -3,10 +3,12 @@ import { internal } from "./_generated/api";
 
 const crons = cronJobs();
 
-// Close 7-day voting windows that have ended and assign awards.
-crons.interval("close expired voting", { minutes: 15 }, internal.listings.closeExpiredVoting, {});
+// Award calendar (convex/awards.ts): close ended weekly batches, announce the
+// day's Site of the Day at the announce time, open and announce the monthly
+// and yearly rounds. Every step is idempotent, so a frequent tick is safe.
+crons.interval("awards tick", { minutes: 15 }, internal.awards.tick, {});
 
-// Publish each day's Site of the Day just after 00:00 UTC (and any day missed).
-crons.interval("publish site of the day", { minutes: 15 }, internal.sotd.publishDue, {});
+// Jurors' digest of new submissions in their interest categories.
+crons.interval("jury digest", { minutes: 30 }, internal.digest.run, {});
 
 export default crons;

@@ -4,7 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireUser } from "./authHelpers";
 import { getUserByExternalId } from "./users";
 import { pillars } from "./schema";
-import { addPillars, normalizePillars } from "./lib/scoring";
+import { addPillars, normalizePillars, readPillars } from "./lib/scoring";
 import { fail, isPublicStatus, scoreFields } from "./lib/listingHelpers";
 
 /**
@@ -17,7 +17,7 @@ import { fail, isPublicStatus, scoreFields } from "./lib/listingHelpers";
 
 const OWN_SITE = "You can't vote on your own site.";
 export const NO_BADGE =
-  "Voting is open to creators with at least one Shemoqmedi badge. Get one of your sites listed first.";
+  "Community voting is open to creators with a site of their own listed here. Get one of your sites listed first.";
 
 /** True when the user made, owns or was pre-assigned this listing. */
 async function isOwnSite(ctx: QueryCtx, listing: Doc<"listings">, userId: Id<"users">) {
@@ -112,7 +112,7 @@ export const cast = mutation({
       scores: vote,
       createdAt: Date.now(),
     });
-    const totals = addPillars(listing.communityTotals, vote);
+    const totals = addPillars(readPillars(listing.communityTotals), vote);
     const count = listing.communityVotesCount + 1;
     await ctx.db.patch(listing._id, {
       communityTotals: totals,
@@ -172,6 +172,6 @@ export const mine = query({
       .query("votes")
       .withIndex("by_listing_user", (q) => q.eq("listingId", listing._id).eq("userId", user._id))
       .first();
-    return vote ? { scores: vote.scores, createdAt: vote.createdAt } : null;
+    return vote ? { scores: readPillars(vote.scores), createdAt: vote.createdAt } : null;
   },
 });

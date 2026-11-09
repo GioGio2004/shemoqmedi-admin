@@ -5,19 +5,18 @@ import { useState } from "react";
 import { useMutation } from "convex/react";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
-import { AWARDS, DAY_MS, LIMITS, VOTING_DAYS } from "@/convex/lib/taxonomy";
+import { DAY_MS, LIMITS, VOTING_DAYS } from "@/convex/lib/taxonomy";
 import Link from "next/link";
 import { formatDate, formatDay, storefrontSiteUrl } from "@/lib/storefront";
 import { AwardBadges, STATUS_LABEL, StatusBadge } from "./ReviewQueue";
-import { type AwardSlug, type ListingStatus } from "./format";
+import { type ListingStatus } from "./format";
 
 type Listing = NonNullable<FunctionReturnType<typeof api.listings.reviewDetail>>;
 type LifecycleArgs = FunctionArgs<typeof api.admin.setLifecycle>;
 
 const TARGETS: { status: ListingStatus; label: string; hint: string }[] = [
   { status: "pending", label: "Pending", hint: "Hidden from the site and back in the review queue." },
-  { status: "in_voting", label: "Live voting", hint: "Public, with a voting window that closes at the time below." },
-  { status: "awarded", label: "Awarded", hint: "Voting closed with the awards you pick below." },
+  { status: "in_voting", label: "Live voting", hint: "Public in this week's batch; the jury scores it until the time below (default: end of next week)." },
   { status: "archived", label: "Closed", hint: "Voting closed without an award. The page stays public." },
   { status: "rejected", label: "Rejected", hint: "Hidden from the site. The owner sees the reason." },
 ];
@@ -54,11 +53,8 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
   const closeVoting = useMutation(api.listings.closeVotingNow);
 
   const status = listing.status;
-  const [target, setTarget] = useState<ListingStatus>(status);
+  const [target, setTarget] = useState<ListingStatus>(status === "awarded" ? "archived" : status);
   const [endsAt, setEndsAt] = useState(() => defaultVotingEnd(listing.votingEndsAt));
-  // A scheduled Site of the Day has no "SOTD" in awards until its day, but has won it.
-  const scheduled = listing.sotdDay !== null && !listing.awards.includes("SOTD");
-  const [awards, setAwards] = useState<AwardSlug[]>(scheduled ? [...listing.awards, "SOTD"] : listing.awards);
   const [note, setNote] = useState(listing.reviewNote ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +68,6 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
   const nothingToSave = same && (target === "pending" || target === "archived");
   const invalid =
     (target === "in_voting" && fromLocalInput(endsAt) === null) ||
-    (target === "awarded" && awards.length === 0) ||
     (target === "rejected" && !note.trim());
 
   async function run(action: () => Promise<unknown>) {
@@ -99,13 +94,7 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
   }
 
   function onApprove() {
-    // listings.approve keeps any old awards (e.g. awarded -> pending -> approve);
-    // admin.setLifecycle to live voting does the same 7-day start and clears them.
-    if (listing.awards.length > 0) {
-      void run(() => setLifecycle({ id: listing.id, status: "in_voting" }));
-    } else {
-      void run(() => approve({ id: listing.id }));
-    }
+    void run(() => approve({ id: listing.id }));
   }
 
   function onApply() {
@@ -119,16 +108,7 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
       }
       args.votingEndsAt = ms;
     }
-    if (target === "awarded") args.awards = awards;
     if (target === "rejected") args.note = note.trim();
-    const current = scheduled ? [...listing.awards, "SOTD"] : listing.awards;
-    if (
-      current.length > 0 &&
-      (target === "in_voting" || target === "archived") &&
-      !confirm(`This removes the current awards (${current.join(", ")}). Continue?`)
-    ) {
-      return;
-    }
     void run(() => setLifecycle(args));
   }
 
@@ -166,14 +146,33 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
             {listing.awards.length ? <AwardBadges awards={listing.awards} /> : <span className="admin-mono">—</span>}
           </dd>
         </div>
-        {listing.sotdDay && (
+        <div className="flex items-baseline justify-between gap-4">
+          <dt className="text-black/55">Jury votes</dt>
+          <dd className="admin-mono text-right">{listing.juryVotes}</dd>
+        </div>
+        {listing.batchWeek && (
+          <div className="flex items-baseline justify-between gap-4">
+            <dt className="text-black/55">Batch</dt>
+            <dd className="admin-mono text-right">Week of {formatDay(listing.batchWeek)}</dd>
+          </div>
+        )}
+        {listing.sotdQueued && (
           <div className="flex items-baseline justify-between gap-4">
             <dt className="text-black/55">Site of the Day</dt>
             <dd className="text-right">
-              <Link href="/sotd" className="admin-mono hover:underline">
-                {formatDay(listing.sotdDay)}
+              <Link href="/awards" className="admin-mono hover:underline">
+                In the queue
               </Link>
-              {scheduled && <span className="block text-xs text-black/55">Scheduled</span>}
+            </dd>
+          </div>
+        )}
+        {listing.redesignOf && (
+          <div className="flex items-baseline justify-between gap-4">
+            <dt className="text-black/55">Redesign of</dt>
+            <dd className="text-right">
+              <a href={storefrontSiteUrl(listing.redesignOf.slug)} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                {listing.redesignOf.title}
+              </a>
             </dd>
           </div>
         )}
@@ -231,7 +230,8 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
         <div>
           <p className="admin-eyebrow">Set status by hand</p>
           <p className="mt-2 text-xs leading-relaxed text-black/55">
-            Manual awards override the automatic rules used when voting closes.
+            Awards are given and revoked on the <Link href="/awards" className="underline underline-offset-4">Awards page</Link>,
+            with a reason that is logged. A site with awards can only be unpublished until they are revoked.
           </p>
         </div>
 
@@ -284,33 +284,6 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
                 </button>
               </div>
               <p className="text-xs text-black/55">Your local time. Must be in the future.</p>
-            </div>
-          )}
-
-          {target === "awarded" && (
-            <div className="grid gap-3">
-              {AWARDS.map((a) => (
-                <label key={a.slug} className="admin-check">
-                  <input
-                    type="checkbox"
-                    checked={awards.includes(a.slug)}
-                    onChange={(e) =>
-                      setAwards((list) =>
-                        e.target.checked ? [...list, a.slug] : list.filter((x) => x !== a.slug),
-                      )
-                    }
-                  />
-                  <span>
-                    <span className="admin-mono">{a.short}</span> {a.name}
-                  </span>
-                </label>
-              ))}
-              {awards.length === 0 && <p className="text-xs text-black/55">Pick at least one award.</p>}
-              {awards.includes("SOTD") && !listing.sotdDay && (
-                <p className="text-xs text-black/55">
-                  Site of the Day takes the next free day. Change it on the Site of the Day page.
-                </p>
-              )}
             </div>
           )}
 

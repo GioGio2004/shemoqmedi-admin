@@ -227,7 +227,7 @@ function NomineeCard({ nominee, target, now }: { nominee: Nominee; target: numbe
 export function Nominees() {
   const overview = useQuery(api.jury.nomineesOverview, {});
   const now = useNow();
-  const target = overview?.juryTarget ?? LIMITS.juryMinEvaluations;
+  const target = overview?.juryTarget ?? LIMITS.juryMinEvaluations; // award setting: jury votes needed
   const nominees = overview?.nominees ?? [];
   const belowTarget = nominees.filter((n) => n.evaluations.length < target).length;
 
