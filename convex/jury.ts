@@ -43,7 +43,7 @@ export function isPublicJuror(juror: Doc<"jurors">) {
   return juror.active && isClaimedJuror(juror);
 }
 
-/** Keeps line breaks (up to one blank line) but tidies spaces. */
+/** Optional comment: keeps line breaks (up to one blank line) but tidies spaces. "" when left empty. */
 function cleanComment(raw: string) {
   const text = raw
     .replace(/\r\n?/g, "\n")
@@ -51,9 +51,6 @@ function cleanComment(raw: string) {
     .replace(/ *\n */g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  if (text.length < LIMITS.juryCommentMin) {
-    fail(`Write at least ${LIMITS.juryCommentMin} characters about the site.`);
-  }
   if (text.length > LIMITS.juryComment) fail(`Keep the comment to ${LIMITS.juryComment} characters.`);
   return text;
 }

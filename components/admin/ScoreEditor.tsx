@@ -149,7 +149,7 @@ export function ScoreEditor(props: Props) {
                   <p className="admin-mono text-xs text-black/55">
                     D {e.scores.design} · U {e.scores.usability} · C {e.scores.creativity} · Code {e.scores.code}
                   </p>
-                  <p className="whitespace-pre-line text-xs text-black/70">{e.comment}</p>
+                  {e.comment && <p className="whitespace-pre-line text-xs text-black/70">{e.comment}</p>}
                   <button
                     type="button"
                     className="justify-self-start text-xs underline underline-offset-4"

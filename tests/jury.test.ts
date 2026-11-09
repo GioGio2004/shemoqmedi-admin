@@ -292,7 +292,9 @@ describe("jury evaluations", () => {
     await expect(env.stranger.mutation(api.jury.evaluate, { slug, scores: p(8), comment: COMMENT })).rejects.toThrow(
       /jury members/,
     );
-    await expect(env.ana.mutation(api.jury.evaluate, { slug, scores: p(8), comment: "Nice." })).rejects.toThrow(/at least/);
+    // The comment is optional: scores alone are a full evaluation.
+    await env.ana.mutation(api.jury.evaluate, { slug, scores: p(8), comment: "  " });
+    expect((await env.ana.query(api.jury.myEvaluation, { slug }))!.evaluation).toMatchObject({ comment: "" });
     await env.ana.mutation(api.jury.evaluate, { slug, scores: p(9), comment: COMMENT });
     await env.beka.mutation(api.jury.evaluate, { slug, scores: p(7), comment: COMMENT });
     await env.beka.mutation(api.jury.evaluate, { slug, scores: p(8), comment: COMMENT }); // update replaces
