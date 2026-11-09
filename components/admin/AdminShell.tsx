@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { UserButton } from "@clerk/nextjs";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -9,7 +10,13 @@ import { STOREFRONT_URL } from "@/lib/storefront";
 import { Wordmark } from "./Wordmark";
 import { useAdmin } from "./useAdmin";
 
-function CountBubble({ value, label }: { value: number | undefined; label: string }) {
+function CountBubble({
+  value,
+  label,
+}: {
+  value: number | undefined;
+  label: string;
+}) {
   if (!value) return null;
   return (
     <span className="admin-count">
@@ -50,6 +57,88 @@ function isCurrent(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/** The "all sections" button at the end of the nav, and its popup. */
+function AllSections({
+  pathname,
+  showCounts,
+}: {
+  pathname: string;
+  showCounts: boolean;
+}) {
+  // Open on the page it was opened on: navigating elsewhere closes it.
+  const [openOn, setOpenOn] = useState<string | null>(null);
+  const open = openOn === pathname;
+  const setOpen = (v: boolean) => setOpenOn(v ? pathname : null);
+  const wrap = useRef<HTMLDivElement>(null);
+
+  // Close on Escape or a click anywhere outside.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpenOn(null);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpenOn(null);
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrap} className="admin-all">
+      <button
+        type="button"
+        className="admin-all-button"
+        aria-expanded={open}
+        aria-controls="admin-all-sections"
+        aria-label="All sections"
+        onClick={() => setOpen(!open)}
+      >
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 16 16"
+          width="16"
+          height="16"
+          fill="currentColor"
+        >
+          {[2, 8, 14].flatMap((y) =>
+            [2, 8, 14].map((x) => (
+              <circle key={`${x}${y}`} cx={x} cy={y} r="1.6" />
+            )),
+          )}
+        </svg>
+      </button>
+      {open && (
+        <div
+          id="admin-all-sections"
+          className="admin-all-panel"
+          role="dialog"
+          aria-label="All sections"
+        >
+          {NAV.map((item) => {
+            const Count = item.count;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={
+                  isCurrent(pathname, item.href) ? "page" : undefined
+                }
+                onClick={() => setOpen(false)}
+              >
+                {item.label}
+                {Count && showCounts && <Count />}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminHeader() {
   const pathname = usePathname();
   const admin = useAdmin();
@@ -60,30 +149,35 @@ function AdminHeader() {
         <Wordmark />
         <span className="admin-brand-label">Admin</span>
       </Link>
-      {/* Ten items: tighter padding than the base style, and the bar scrolls
-          sideways instead of wrapping when the window is narrow. */}
-      <nav
-        className="admin-navigation"
-        aria-label="Admin navigation"
-        style={{ minWidth: 0, overflowX: "auto" }}
-      >
-        {NAV.map((item) => {
-          const Count = item.count;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              aria-current={isCurrent(pathname, item.href) ? "page" : undefined}
-              style={{ paddingInline: 14, flexShrink: 0, whiteSpace: "nowrap" }}
-            >
-              {item.label}
-              {Count && admin.kind === "admin" && <Count />}
-            </Link>
-          );
-        })}
-      </nav>
+      {/* Eleven items: the bar scrolls sideways (no scrollbar) when the window
+          is narrow, and the button at its end lists every section at once. */}
+      <div className="admin-nav-wrap">
+        <nav className="admin-navigation" aria-label="Admin navigation">
+          {NAV.map((item) => {
+            const Count = item.count;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={
+                  isCurrent(pathname, item.href) ? "page" : undefined
+                }
+              >
+                {item.label}
+                {Count && admin.kind === "admin" && <Count />}
+              </Link>
+            );
+          })}
+        </nav>
+        <AllSections pathname={pathname} showCounts={admin.kind === "admin"} />
+      </div>
       <div className="admin-header-actions">
-        <a href={STOREFRONT_URL} className="admin-storefront-link" target="_blank" rel="noopener noreferrer">
+        <a
+          href={STOREFRONT_URL}
+          className="admin-storefront-link"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
           Storefront <span aria-hidden="true">↗</span>
         </a>
         <UserButton />
@@ -112,13 +206,18 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function AccessNotice({ state }: { state: Exclude<ReturnType<typeof useAdmin>, { kind: "admin" | "loading" }> }) {
+function AccessNotice({
+  state,
+}: {
+  state: Exclude<ReturnType<typeof useAdmin>, { kind: "admin" | "loading" }>;
+}) {
   if (state.kind === "no-session") {
     return (
       <div className="admin-empty">
         <h2>Session not accepted.</h2>
-        You&apos;re signed in to Clerk, but Convex did not accept the session. Check the Clerk JWT
-        template &quot;convex&quot; and CLERK_FRONTEND_API_URL on the Convex deployment.
+        You&apos;re signed in to Clerk, but Convex did not accept the session.
+        Check the Clerk JWT template &quot;convex&quot; and
+        CLERK_FRONTEND_API_URL on the Convex deployment.
       </div>
     );
   }
@@ -126,15 +225,16 @@ function AccessNotice({ state }: { state: Exclude<ReturnType<typeof useAdmin>, {
     return (
       <div className="admin-empty">
         <h2>Almost there.</h2>
-        Your account hasn&apos;t reached the database yet. The Clerk webhook creates it a few
-        seconds after sign-up. Refresh in a moment.
+        Your account hasn&apos;t reached the database yet. The Clerk webhook
+        creates it a few seconds after sign-up. Refresh in a moment.
       </div>
     );
   }
   return (
     <div className="admin-empty">
       <h2>No access.</h2>
-      This area is for platform admins. To grant access, run this in the shemoqmedi-admin folder:
+      This area is for platform admins. To grant access, run this in the
+      shemoqmedi-admin folder:
       <code>{`npx convex run users:setRole '{"email":"${state.email}","role":"admin"}'`}</code>
     </div>
   );

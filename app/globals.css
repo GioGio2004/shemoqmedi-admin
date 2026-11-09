@@ -90,7 +90,18 @@
 .admin-wordmark { display: flex; flex-direction: column; line-height: 1; font-size: 18px; font-weight: 700; letter-spacing: -.055em; text-transform: uppercase; }
 .admin-wordmark > span:last-child { margin-top: 5px; font-size: 9px; font-weight: 600; letter-spacing: .27em; }
 .admin-brand-label { padding-left: 20px; border-left: 1px solid var(--line); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted-ink); }
-.admin-navigation { display: flex; gap: 4px; padding: 5px; border-radius: 999px; background: var(--surface-raised); }
+.admin-nav-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.admin-navigation { display: flex; gap: 4px; min-width: 0; padding: 5px; overflow-x: auto; scrollbar-width: none; border-radius: 999px; background: var(--surface-raised); }
+.admin-navigation::-webkit-scrollbar { display: none; }
+.admin-nav-wrap .admin-navigation a { flex-shrink: 0; white-space: nowrap; padding-inline: 14px; }
+.admin-all { position: relative; flex-shrink: 0; }
+.admin-all-button { display: grid; place-items: center; width: 54px; height: 54px; border-radius: 999px; background: var(--surface-raised); color: var(--foreground); transition: background-color .2s; }
+.admin-all-button:hover, .admin-all-button[aria-expanded="true"] { background: var(--foreground); color: var(--background); }
+.admin-all-panel { position: absolute; top: calc(100% + 14px); right: 0; z-index: 40; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; width: min(540px, calc(100vw - 40px)); padding: 10px; border: 1px solid var(--line); border-radius: 28px; background: var(--background); box-shadow: 0 24px 60px rgb(0 0 0 / .12); }
+.admin-all-panel a { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 12px 18px; border-radius: 20px; font-size: 13px; font-weight: 500; color: var(--muted-ink); }
+.admin-all-panel a:hover { color: var(--foreground); background: var(--surface-raised); }
+.admin-all-panel a[aria-current="page"] { background: var(--foreground); color: var(--background); }
+.admin-all-panel a[aria-current="page"] .admin-count > span { color: var(--foreground); }
 .admin-navigation a { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 20px; min-height: 44px; border-radius: 999px; color: var(--muted-ink); font-size: 12px; font-weight: 500; }
 .admin-navigation a[aria-current="page"] { background: var(--foreground); color: var(--background); }
 .admin-navigation a:not([aria-current]):hover { color: var(--foreground); background: var(--line); }
@@ -102,7 +113,9 @@
 .admin-storefront-link > span { font-size: 19px; }
 @media (max-width: 900px) {
   .admin-header { flex-wrap: wrap; min-height: 0; border-radius: 0 0 28px 28px; }
-  .admin-navigation { order: 3; width: 100%; overflow-x: auto; }
+  .admin-nav-wrap { order: 3; width: 100%; }
+  .admin-navigation { flex: 1; }
+  .admin-all-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-storefront-link { display: none; }
 }
 
