@@ -5,6 +5,7 @@ import { award, creatorTier, listingStatus, pillars, region } from "../schema";
 import { deleteMedia, mediaInfo, mediaUrl, type MediaId } from "./media";
 import { CATEGORIES, LIMITS, isCategory, type CategorySlug, type CreatorTier, type RegionSlug } from "./taxonomy";
 import { ZERO_PILLARS, decideAwards, summarize, type Pillars } from "./scoring";
+import { winnerFields } from "./sotd";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Validation
@@ -207,7 +208,9 @@ export function scoreFields(
 
 /**
  * Locks voting and assigns awards. Safe to call more than once. Returns the
- * awards given (possibly none), or null when the listing was not in voting.
+ * awards given now (possibly none), or null when the listing was not in voting.
+ * A Site of the Day winner gets the first free day (lib/sotd.ts); "SOTD" is
+ * in the returned awards only when that day is today.
  */
 export async function finalizeListing(
   ctx: MutationCtx,
@@ -215,13 +218,17 @@ export async function finalizeListing(
 ): Promise<Doc<"listings">["awards"] | null> {
   if (listing.status !== "in_voting") return null;
   const fields = scoreFields(listing.editorialScores, listing.communityTotals, listing.communityVotesCount);
-  const awards = decideAwards(listing.creatorTier, fields.finalScore ?? null);
+  const decided = decideAwards(listing.creatorTier, fields.finalScore ?? null);
   const now = Date.now();
+  const sotd = decided.includes("SOTD") ? await winnerFields(ctx, listing, decided, now) : null;
+  const awards = sotd?.awards ?? decided;
+  const won = decided.length > 0;
   await ctx.db.patch(listing._id, {
     ...fields,
     awards,
-    status: awards.length > 0 ? "awarded" : "archived",
-    awardedAt: awards.length > 0 ? now : undefined,
+    sotdDay: sotd?.sotdDay,
+    status: won ? "awarded" : "archived",
+    awardedAt: won ? now : undefined,
     updatedAt: now,
   });
   return awards;
@@ -293,6 +300,8 @@ export const publicListing = v.object({
   /** Voting was extended a week to give the jury time (fewer than 5 jury evaluations after 7 days). */
   votingExtended: v.boolean(),
   awardedAt: v.union(v.number(), v.null()),
+  /** Site of the Day ("YYYY-MM-DD", UTC). Later than today: scheduled, "SOTD" is not in awards yet. */
+  sotdDay: v.union(v.string(), v.null()),
   isClaimed: v.boolean(),
   isStartup: v.boolean(),
   isDoFollow: v.boolean(), // false: outbound links get rel="nofollow"
@@ -357,6 +366,7 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
     votingEndsAt: listing.votingEndsAt ?? publishedAt,
     votingExtended: listing.votingExtendedAt !== undefined,
     awardedAt: listing.awardedAt ?? null,
+    sotdDay: listing.sotdDay ?? null,
     isClaimed: listing.isClaimed,
     isStartup: listing.isStartup ?? false,
     isDoFollow: isDoFollow(listing),

@@ -7,6 +7,7 @@ import { requireAdmin, requireUser } from "./authHelpers";
 import { creatorTier, listingStatus, pillars, region } from "./schema";
 import { DAY_MS, LIMITS, VOTING_DAYS, isTechnology } from "./lib/taxonomy";
 import { normalizePillars } from "./lib/scoring";
+import { utcDay } from "./lib/sotd";
 import {
   EMPTY_SCORES,
   PUBLIC_STATUSES,
@@ -316,6 +317,8 @@ const reviewListing = v.object({
   publishedAt: v.union(v.number(), v.null()),
   votingEndsAt: v.union(v.number(), v.null()),
   awardedAt: v.union(v.number(), v.null()),
+  /** Site of the Day ("YYYY-MM-DD", UTC); later than today: scheduled, "SOTD" not in awards yet. */
+  sotdDay: v.union(v.string(), v.null()),
   editorialScores: v.union(pillars, v.null()),
   communityVotesCount: v.number(),
   editorialAverage: v.union(v.number(), v.null()),
@@ -370,6 +373,7 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
     publishedAt: listing.publishedAt ?? null,
     votingEndsAt: listing.votingEndsAt ?? null,
     awardedAt: listing.awardedAt ?? null,
+    sotdDay: listing.sotdDay ?? null,
     editorialScores: listing.editorialScores ?? null,
     communityVotesCount: listing.communityVotesCount,
     editorialAverage: listing.editorialAverage ?? null,
@@ -496,6 +500,7 @@ export const approve = mutation({
       votingExtendedAt: undefined, // a new window gets its own jury extension
       awards: [],
       awardedAt: undefined,
+      sotdDay: undefined,
       updatedAt: now,
     });
     await scheduleIndexNow(ctx, [...(await listingPaths(ctx, listing)), "/"]);
@@ -515,6 +520,8 @@ export const reject = mutation({
     const now = Date.now();
     await ctx.db.patch(id, {
       status: "rejected",
+      // A Site of the Day not reached yet frees its day for the next winner.
+      ...(listing.sotdDay !== undefined && listing.sotdDay > utcDay(now) ? { sotdDay: undefined } : {}),
       reviewNote,
       reviewedBy: admin._id,
       reviewedAt: now,

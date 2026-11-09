@@ -111,7 +111,7 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
 
         <aside className="grid min-w-0 content-start gap-6 lg:sticky lg:top-[132px] lg:max-h-[calc(100dvh-156px)] lg:self-start lg:overflow-y-auto lg:overscroll-contain">
           <LifecyclePanel
-            key={[listing.id, status, listing.votingEndsAt, listing.awards.join(","), listing.reviewNote].join("|")}
+            key={[listing.id, status, listing.votingEndsAt, listing.awards.join(","), listing.sotdDay, listing.reviewNote].join("|")}
             listing={listing}
           />
 

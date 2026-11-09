@@ -200,14 +200,14 @@ describe("IndexNow", () => {
     expect((await pings(env))[3]).toEqual([
       "/sites/floema-furniture",
       "/creators/burocratik",
-      "/collections/sotd",
+      "/site-of-the-day",
     ]);
 
     await env.admin.mutation(api.listings.remove, { id });
     expect((await pings(env))[4]).toEqual([
       "/sites/floema-furniture",
       "/creators/burocratik",
-      "/collections/sotd",
+      "/site-of-the-day",
     ]);
     expect(await pings(env)).toHaveLength(5);
   });

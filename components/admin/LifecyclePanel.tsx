@@ -6,7 +6,8 @@ import { useMutation } from "convex/react";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
 import { AWARDS, DAY_MS, LIMITS, VOTING_DAYS } from "@/convex/lib/taxonomy";
-import { formatDate, storefrontSiteUrl } from "@/lib/storefront";
+import Link from "next/link";
+import { formatDate, formatDay, storefrontSiteUrl } from "@/lib/storefront";
 import { AwardBadges, STATUS_LABEL, StatusBadge } from "./ReviewQueue";
 import { type AwardSlug, type ListingStatus } from "./format";
 
@@ -55,7 +56,9 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
   const status = listing.status;
   const [target, setTarget] = useState<ListingStatus>(status);
   const [endsAt, setEndsAt] = useState(() => defaultVotingEnd(listing.votingEndsAt));
-  const [awards, setAwards] = useState<AwardSlug[]>(listing.awards);
+  // A scheduled Site of the Day has no "SOTD" in awards until its day, but has won it.
+  const scheduled = listing.sotdDay !== null && !listing.awards.includes("SOTD");
+  const [awards, setAwards] = useState<AwardSlug[]>(scheduled ? [...listing.awards, "SOTD"] : listing.awards);
   const [note, setNote] = useState(listing.reviewNote ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,10 +121,11 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
     }
     if (target === "awarded") args.awards = awards;
     if (target === "rejected") args.note = note.trim();
+    const current = scheduled ? [...listing.awards, "SOTD"] : listing.awards;
     if (
-      listing.awards.length > 0 &&
+      current.length > 0 &&
       (target === "in_voting" || target === "archived") &&
-      !confirm(`This removes the current awards (${listing.awards.join(", ")}). Continue?`)
+      !confirm(`This removes the current awards (${current.join(", ")}). Continue?`)
     ) {
       return;
     }
@@ -162,6 +166,17 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
             {listing.awards.length ? <AwardBadges awards={listing.awards} /> : <span className="admin-mono">—</span>}
           </dd>
         </div>
+        {listing.sotdDay && (
+          <div className="flex items-baseline justify-between gap-4">
+            <dt className="text-black/55">Site of the Day</dt>
+            <dd className="text-right">
+              <Link href="/sotd" className="admin-mono hover:underline">
+                {formatDay(listing.sotdDay)}
+              </Link>
+              {scheduled && <span className="block text-xs text-black/55">Scheduled</span>}
+            </dd>
+          </div>
+        )}
         {status === "rejected" && listing.reviewNote && (
           <div className="grid gap-1">
             <dt className="text-black/55">Reason</dt>
@@ -291,6 +306,11 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
                 </label>
               ))}
               {awards.length === 0 && <p className="text-xs text-black/55">Pick at least one award.</p>}
+              {awards.includes("SOTD") && !listing.sotdDay && (
+                <p className="text-xs text-black/55">
+                  Site of the Day takes the next free day. Change it on the Site of the Day page.
+                </p>
+              )}
             </div>
           )}
 

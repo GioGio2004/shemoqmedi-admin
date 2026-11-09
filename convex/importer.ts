@@ -14,6 +14,7 @@ import {
   uniqueSlug,
 } from "./lib/listingHelpers";
 import { FLAGSHIP } from "./seed";
+import { winnerFields } from "./lib/sotd";
 import { uploadToImageKitFromServer } from "./lib/imagekitServer";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -322,6 +323,9 @@ export const insertImported = internalMutation({
     const editorialScores =
       score === undefined ? undefined : { design: score, usability: score, creativity: score, code: score };
 
+    const picked = args.status === "awarded" ? (args.awards ?? []) : [];
+    const sotd = picked.includes("SOTD") ? await winnerFields(ctx, null, picked, now) : null;
+
     const slug = await uniqueSlug(ctx, "listings", slugify(title));
     const id = await ctx.db.insert("listings", {
       creatorId,
@@ -344,8 +348,9 @@ export const insertImported = internalMutation({
       ...EMPTY_SCORES,
       editorialScores,
       ...scoreFields(editorialScores, EMPTY_SCORES.communityTotals, 0),
-      awards: args.status === "awarded" ? (args.awards ?? []) : [],
+      awards: sotd?.awards ?? picked,
       awardedAt: args.status === "awarded" ? votingEndsAt : undefined,
+      sotdDay: sotd?.sotdDay,
       isClaimed: args.isClaimed,
       createdAt: now,
       updatedAt: now,

@@ -10,6 +10,7 @@ import { requireAdmin } from "./authHelpers";
 import { award, creatorTier, listingStatus, pillars, region } from "./schema";
 import { DAY_MS, LIMITS, VOTING_DAYS, isTechnology } from "./lib/taxonomy";
 import { normalizePillars } from "./lib/scoring";
+import { utcDay, winnerFields } from "./lib/sotd";
 import {
   EMPTY_SCORES,
   assertMedia,
@@ -138,6 +139,10 @@ export const createListing = mutation({
       publishedAt = votingEndsAt - VOTING_DAYS * DAY_MS;
     }
 
+    // Site of the Day picked by hand: the first free day, like any other winner.
+    const sotd =
+      args.status === "awarded" && awards.includes("SOTD") ? await winnerFields(ctx, null, awards, now) : null;
+
     const slug = await uniqueSlug(ctx, "listings", slugify(title));
     const id = await ctx.db.insert("listings", {
       creatorId,
@@ -166,8 +171,9 @@ export const createListing = mutation({
       ...EMPTY_SCORES,
       editorialScores,
       ...scoreFields(editorialScores, EMPTY_SCORES.communityTotals, 0),
-      awards: args.status === "awarded" ? awards : [],
+      awards: args.status === "awarded" ? (sotd?.awards ?? awards) : [],
       awardedAt: args.status === "awarded" ? votingEndsAt : undefined,
+      sotdDay: sotd?.sotdDay,
       isClaimed: args.isClaimed,
       isStartup: args.isStartup || undefined,
       jurorId: args.jurorId,
@@ -178,7 +184,7 @@ export const createListing = mutation({
       await scheduleIndexNow(ctx, [
         ...(await listingPaths(ctx, { slug, creatorId })),
         "/",
-        ...awardPaths(args.status === "awarded" ? awards : []),
+        ...awardPaths(args.status === "awarded" ? (sotd?.awards ?? awards) : []),
       ]);
     }
     return { id, slug };
@@ -286,6 +292,8 @@ export const updateListing = mutation({
 /**
  * Lifecycle override: move a listing to any status and set its voting window
  * and awards by hand. Scores are kept; the final score is recomputed.
+ * "SOTD" among the awards keeps the site's Site of the Day day, or gives it
+ * the first free one; leaving it out frees the day.
  */
 export const setLifecycle = mutation({
   args: {
@@ -318,17 +326,22 @@ export const setLifecycle = mutation({
           ...(keepStart ? {} : { votingExtendedAt: undefined }),
           awards: [],
           awardedAt: undefined,
+          sotdDay: undefined,
           reviewNote: undefined,
         });
         break;
       }
       case "awarded": {
-        const picked = [...new Set(awards ?? listing.awards)];
+        // A scheduled Site of the Day has no "SOTD" in awards yet but keeps it.
+        const current = listing.sotdDay ? [...listing.awards, "SOTD" as const] : listing.awards;
+        const picked = [...new Set(awards ?? current)];
         if (picked.length === 0) fail("Pick at least one award.");
+        const sotd = picked.includes("SOTD") ? await winnerFields(ctx, listing, picked, now) : null;
         const ends = Math.min(listing.votingEndsAt ?? now, now);
         await ctx.db.patch(id, {
           ...base,
-          awards: picked,
+          awards: sotd?.awards ?? picked,
+          sotdDay: sotd?.sotdDay,
           votingEndsAt: ends,
           publishedAt: listing.publishedAt ?? ends - VOTING_DAYS * DAY_MS,
           awardedAt: listing.awardedAt ?? now,
@@ -342,6 +355,7 @@ export const setLifecycle = mutation({
           ...base,
           awards: [],
           awardedAt: undefined,
+          sotdDay: undefined,
           votingEndsAt: ends,
           publishedAt: listing.publishedAt ?? ends - VOTING_DAYS * DAY_MS,
           reviewNote: undefined,
@@ -350,11 +364,19 @@ export const setLifecycle = mutation({
       }
       case "rejected": {
         const reviewNote = cleanText(note ?? "", "Reason", LIMITS.reviewNote);
-        await ctx.db.patch(id, { ...base, reviewNote });
+        // Awards are kept for a later re-publish; a day not reached yet is freed.
+        const freeDay = listing.sotdDay !== undefined && listing.sotdDay > utcDay(now);
+        await ctx.db.patch(id, { ...base, reviewNote, ...(freeDay ? { sotdDay: undefined } : {}) });
         break;
       }
       case "pending": {
-        await ctx.db.patch(id, { ...base, reviewNote: undefined, awards: [], awardedAt: undefined });
+        await ctx.db.patch(id, {
+          ...base,
+          reviewNote: undefined,
+          awards: [],
+          awardedAt: undefined,
+          sotdDay: undefined,
+        });
         break;
       }
     }

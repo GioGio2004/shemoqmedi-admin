@@ -159,6 +159,9 @@ export default defineSchema({
     finalScore: v.optional(v.number()),
     awards: v.array(award),
     awardedAt: v.optional(v.number()),
+    // Site of the Day: this site's one day ("YYYY-MM-DD", UTC). A future day
+    // means scheduled: "SOTD" joins awards when the day comes (lib/sotd.ts).
+    sotdDay: v.optional(v.string()),
 
     // Unclaimed = admin-created and not yet owned (ownerId empty). Claiming
     // (claimLinks.claim, or an approved claim request) sets ownerId.
@@ -189,7 +192,8 @@ export default defineSchema({
     .index("by_claimToken", ["claimToken"])
     .index("by_claimTokenUsed", ["claimTokenUsed"])
     .index("by_juror", ["jurorId"])
-    .index("by_status_votingEndsAt", ["status", "votingEndsAt"]),
+    .index("by_status_votingEndsAt", ["status", "votingEndsAt"])
+    .index("by_sotdDay", ["sotdDay"]),
 
   // One community vote per user per listing, during the voting window.
   votes: defineTable({

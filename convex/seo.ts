@@ -44,10 +44,13 @@ export function siteUrl() {
 export const sitePath = (slug: string) => `/sites/${slug}`;
 export const creatorPath = (slug: string) => `/creators/${slug}`;
 
-/** The award collection pages (/collections/sotd, /bsc, /hm). */
+/** The award pages: /site-of-the-day, /collections/bsc and /collections/hm. */
 export function awardPaths(awards: readonly string[]) {
-  return awards.map((a) => `/collections/${a.toLowerCase()}`);
+  return awards.map((a) => (a === "SOTD" ? SOTD_PATH : `/collections/${a.toLowerCase()}`));
 }
+
+/** The dated Site of the Day archive (/collections/sotd redirects here). */
+export const SOTD_PATH = "/site-of-the-day";
 
 /** /sites/<slug> and, when the listing has one, its creator page. */
 export async function listingPaths(
