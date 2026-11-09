@@ -26,8 +26,11 @@ import { isPublicStatus } from "./lib/listingHelpers";
 import { readPillars, compareRanked, finalScore } from "./lib/scoring";
 import { DEFAULT_CONFIG, checkConfig, getConfig, type AwardConfig } from "./lib/config";
 import {
+  FIRST_100,
+  FIRST_100_REASON,
   TIER_NAMES,
   audit,
+  first100Members,
   closeVoting,
   grantAward,
   ineligibility,
@@ -431,6 +434,13 @@ export const listPublic = query({
   },
 });
 
+/** The First 100 giveaway counter, for the site's badges page. */
+export const first100Count = query({
+  args: {},
+  returns: v.object({ given: v.number(), limit: v.number() }),
+  handler: async (ctx) => ({ given: (await first100Members(ctx)).length, limit: FIRST_100 }),
+});
+
 /** Every active award slug, for the sitemap and static params. */
 export const publicSlugs = query({
   args: {},
@@ -621,6 +631,88 @@ export const overview = query({
   },
 });
 
+/**
+ * Admin: the First 100 giveaway tracker. How many of the hundred honorary
+ * badges are given and left, who has which number, and the public sites
+ * that could get one.
+ */
+export const first100 = query({
+  args: {},
+  returns: v.object({
+    limit: v.number(),
+    given: v.number(),
+    left: v.number(),
+    members: v.array(
+      v.object({
+        awardId: v.id("awards"),
+        number: v.string(),
+        slug: v.string(),
+        date: v.string(),
+        claimed: v.boolean(),
+        listing: v.union(entry, v.null()),
+      }),
+    ),
+    candidates: v.array(entry),
+  }),
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const awards = await first100Members(ctx);
+    const members = await Promise.all(
+      awards.map(async (a) => {
+        const l = await ctx.db.get(a.listingId);
+        return {
+          awardId: a._id,
+          number: a.period,
+          slug: a.slug,
+          date: a.date,
+          claimed: l?.isClaimed ?? false,
+          listing: l ? await toEntry(ctx, l) : null,
+        };
+      }),
+    );
+    const has = new Set(awards.map((a) => a.listingId));
+    const open = (await ctx.db.query("listings").take(2000))
+      .filter((l) => isPublicStatus(l.status) && !l.byTeam && !has.has(l._id))
+      .sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0));
+    const candidates = await Promise.all(open.slice(0, 300).map((l) => toEntry(ctx, l)));
+    return { limit: FIRST_100, given: awards.length, left: FIRST_100 - awards.length, members, candidates };
+  },
+});
+
+/** Admin: just the First 100 counter (dashboard). */
+export const first100Tally = query({
+  args: {},
+  returns: v.object({ given: v.number(), left: v.number(), limit: v.number() }),
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const given = (await first100Members(ctx)).length;
+    return { given, left: FIRST_100 - given, limit: FIRST_100 };
+  },
+});
+
+/** Admin: give a site the next First 100 badge (logged; fails when all hundred are given). */
+export const giveFirst100 = mutation({
+  args: { listingId: v.id("listings"), note: v.optional(v.string()) },
+  returns: v.object({ number: v.string(), left: v.number() }),
+  handler: async (ctx, { listingId, note }) => {
+    const admin = await requireAdmin(ctx);
+    const awardId = await rule(() =>
+      grantAward(ctx, {
+        listingId,
+        tier: "F100",
+        period: "",
+        score: null,
+        now: Date.now(),
+        source: "manual",
+        actorId: admin._id,
+        reason: note?.trim() || FIRST_100_REASON,
+      }),
+    );
+    const award = (await ctx.db.get(awardId))!;
+    return { number: award.period, left: FIRST_100 - (await first100Members(ctx)).length };
+  },
+});
+
 /** Admin: the audit log, newest first. */
 export const auditLog = query({
   args: { limit: v.optional(v.number()) },
@@ -669,8 +761,9 @@ export const grant = mutation({
     const now = Date.now();
     const listing = await ctx.db.get(args.listingId);
     if (!listing) fail("Listing not found.");
-    const period = args.period?.trim() || defaultPeriod(args.tier, now);
-    checkPeriod(args.tier, period);
+    // The First 100 badge numbers itself (grantAward picks the next free number).
+    const period = args.tier === "F100" ? "" : args.period?.trim() || defaultPeriod(args.tier, now);
+    if (args.tier !== "F100") checkPeriod(args.tier, period);
     return await rule(() =>
       grantAward(ctx, {
         listingId: args.listingId,

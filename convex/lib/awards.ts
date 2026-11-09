@@ -27,7 +27,34 @@ export type Tier = Doc<"awards">["tier"];
 type AuditKind = Doc<"awardAudit">["kind"];
 
 /** Tiers a site can hold once, ever; also one winner per period. */
-export const UNIQUE_TIERS: Tier[] = ["SOTD", "SOTM", "SOTY"];
+export const UNIQUE_TIERS: Tier[] = ["SOTD", "SOTM", "SOTY", "F100"];
+
+/**
+ * The First 100 giveaway: an honorary badge an admin gives to the first
+ * hundred sites. Each gets the lowest free member number ("001" to "100"),
+ * which is its award period, so the count can never pass the limit. A
+ * revoked badge frees its number.
+ */
+export const FIRST_100 = 100;
+export const FIRST_100_REASON = "First 100 honorary badge.";
+
+const memberNumber = (n: number) => String(n).padStart(3, "0");
+
+/** Active First 100 awards, by member number. */
+export async function first100Members(ctx: QueryCtx) {
+  const rows = await ctx.db
+    .query("awards")
+    .withIndex("by_tier_period", (q) => q.eq("tier", "F100"))
+    .collect();
+  return rows.filter((a) => a.status === "active").sort((a, b) => a.period.localeCompare(b.period));
+}
+
+/** The next free member number, or null when all hundred are given. */
+export async function nextFirst100Number(ctx: QueryCtx): Promise<string | null> {
+  const taken = new Set((await first100Members(ctx)).map((a) => a.period));
+  for (let n = 1; n <= FIRST_100; n++) if (!taken.has(memberNumber(n))) return memberNumber(n);
+  return null;
+}
 
 export const TIER_NAMES: Record<Tier, string> = Object.fromEntries(AWARDS.map((a) => [a.slug, a.name])) as Record<
   Tier,
@@ -123,10 +150,17 @@ export async function grantAward(ctx: MutationCtx, input: GrantInput): Promise<I
   const listing = await ctx.db.get(input.listingId);
   if (!listing) throw new Error("Listing not found.");
   if (listing.byTeam) throw new Error(TEAM_SITE);
-  if (listing.status !== "awarded" && listing.status !== "archived") {
+  const honorary = input.tier === "F100";
+  if (honorary) {
+    // Honorary, not scored: any site with a public page, also while in voting.
+    if (!isPublicStatus(listing.status)) throw new Error("Only a public site can get the First 100 badge.");
+    const number = await nextFirst100Number(ctx);
+    if (!number) throw new Error(`All ${FIRST_100} First 100 badges have been given.`);
+    input = { ...input, period: number, score: null };
+  } else if (listing.status !== "awarded" && listing.status !== "archived") {
     throw new Error("Only a public site whose voting has closed can get an award.");
   }
-  const reason = input.reason?.trim();
+  const reason = input.reason?.trim() || (honorary ? FIRST_100_REASON : undefined);
   if (input.source === "manual" && !reason) throw new Error("Give a reason for a manual award.");
 
   const name = TIER_NAMES[input.tier];
@@ -146,7 +180,13 @@ export async function grantAward(ctx: MutationCtx, input: GrantInput): Promise<I
       a.tier === input.tier &&
       (UNIQUE_TIERS.includes(input.tier) || a.period === input.period),
   );
-  if (already) throw new Error(`“${listing.title}” already won ${name} (${already.date}). A site wins it once.`);
+  if (already) {
+    throw new Error(
+      honorary
+        ? `“${listing.title}” already has the First 100 badge (No. ${already.period}).`
+        : `“${listing.title}” already won ${name} (${already.date}). A site wins it once.`,
+    );
+  }
 
   const date = tbilisiDay(input.now);
   const id = await ctx.db.insert("awards", {
@@ -257,6 +297,8 @@ export async function closeVoting(ctx: MutationCtx, listing: Doc<"listings">, co
     await grantAward(ctx, { listingId: closed._id, tier: "BSC", period, score: final, now, source: "auto" });
     given.push("BSC");
   }
+  // Awards it already holds (the honorary First 100) keep it "awarded".
+  await syncListingAwards(ctx, closed._id);
   await audit(ctx, {
     kind: "batch_closed",
     period,

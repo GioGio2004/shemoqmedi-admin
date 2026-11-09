@@ -27,13 +27,20 @@ export function formatDay(day: string) {
   return `${d} ${MONTHS[m - 1]} ${y}`;
 }
 
-/** Embed code for a badge: links to the award page (followed, no nofollow). */
-export function embedCode(slug: string, label: string, theme: "light" | "dark" = "light") {
+/**
+ * Embed code for a badge: the image links to the award page (a followed
+ * link, no nofollow). "tag" is the horizontal strip (its width follows its
+ * text, so only the height is set); "seal" the round one. Both in the
+ * award's own colours. The site's /account/badges page builds the same code
+ * with more options (shemoqmedi/lib/badgeInfo.ts embedCode).
+ */
+export function embedCode(slug: string, label: string, shape: "tag" | "seal" = "tag") {
   const base = siteUrl();
-  return (
-    `<a href="${base}/awards/${slug}" target="_blank" rel="noopener" title="${label} on Shemoqmedi">` +
-    `<img src="${base}/badge/${slug}?theme=${theme}" alt="${label} — Shemoqmedi" width="200" height="64"></a>`
-  );
+  const img =
+    shape === "seal"
+      ? `<img src="${base}/badge/${slug}?shape=seal" alt="${label} — Shemoqmedi" width="128" height="128" loading="lazy" style="display:block">`
+      : `<img src="${base}/badge/${slug}" alt="${label} — Shemoqmedi" height="56" loading="lazy" style="display:block">`;
+  return `<a href="${base}/awards/${slug}" target="_blank" rel="noopener" title="${label} on Shemoqmedi">${img}</a>`;
 }
 
 /** "@handle" from an X or Instagram profile link, else null. */
@@ -120,42 +127,47 @@ export const awardAnnounced = internalAction({
     if (!data) return null;
     const award = data.award as Doc<"awards">;
     const name = TIER_NAMES[award.tier];
-    const label = `${name} · ${formatDay(award.date)}`;
+    const honorary = award.tier === "F100";
+    const label = honorary ? `First 100 · Honorary No. ${award.period}` : `${name} · ${formatDay(award.date)}`;
+    // "won Site of the Day" / "is one of the First 100".
+    const verb = honorary ? "is one of the" : "won";
     const pageUrl = `${siteUrl()}/awards/${award.slug}`;
 
     if (data.owner && !award.notifiedAt) {
-      const light = embedCode(award.slug, label, "light");
-      const dark = embedCode(award.slug, label, "dark");
+      const tag = embedCode(award.slug, label, "tag");
+      const seal = embedCode(award.slug, label, "seal");
+      const badgesUrl = `${siteUrl()}/account/badges`;
       const first = String(data.owner.name).split(" ")[0] || "there";
       const error = await sendEmail({
         to: [data.owner.email],
-        subject: `${data.listing.title} won ${name} on Shemoqmedi`,
+        subject: `${data.listing.title} ${verb} ${name} on Shemoqmedi`,
         text: [
           `Hi ${first},`,
           "",
-          `${data.listing.title} won ${label} on Shemoqmedi.`,
+          `${data.listing.title} ${verb} ${label} on Shemoqmedi.`,
           `Its award page: ${pageUrl}`,
           "",
-          "Add the badge to your site (light):",
-          light,
+          "Add the badge to your site (the tag, for a footer):",
+          tag,
           "",
-          "Dark version:",
-          dark,
+          "The round seal:",
+          seal,
+          "",
+          `Light and dark versions, sizes and a pinned-corner option: ${badgesUrl}`,
           "",
           "Shemoqmedi",
         ].join("\n"),
         html: emailHtml(
           [
             `Hi ${escapeHtml(first)},`,
-            `<strong>${escapeHtml(data.listing.title)}</strong> won <strong>${escapeHtml(label)}</strong> on Shemoqmedi. Congratulations.`,
+            `<strong>${escapeHtml(data.listing.title)}</strong> ${verb} <strong>${escapeHtml(label)}</strong> on Shemoqmedi. ${honorary ? "Thank you for being here early." : "Congratulations."}`,
           ],
           { label: "See the award", href: pageUrl },
-          `<p><img src="${siteUrl()}/badge/${award.slug}?theme=light" alt="${escapeHtml(label)}" width="200" height="64"></p>
-<p>Add the badge to your site:</p>
-<pre style="white-space:pre-wrap;font-size:12px;background:#f4f4f4;padding:12px;border-radius:8px">${escapeHtml(light)}</pre>
-<p>Dark version:</p>
-<pre style="white-space:pre-wrap;font-size:12px;background:#f4f4f4;padding:12px;border-radius:8px">${escapeHtml(dark)}</pre>
-<p style="font-size:12px;color:#555">You can also copy it any time from your account: ${siteUrl()}/account/badges</p>`,
+          `<p>Add the badge to your site. The tag, for a footer:</p>
+<pre style="white-space:pre-wrap;font-size:12px;background:#f4f4f4;padding:12px;border-radius:8px">${escapeHtml(tag)}</pre>
+<p>The round seal:</p>
+<pre style="white-space:pre-wrap;font-size:12px;background:#f4f4f4;padding:12px;border-radius:8px">${escapeHtml(seal)}</pre>
+<p style="font-size:12px;color:#555">See both, pick light or dark, a size or a pinned corner, and copy the code any time: <a href="${badgesUrl}">${badgesUrl}</a></p>`,
         ),
       });
       if (error) console.warn(`Winner email for ${award.slug} not sent: ${error}`);
@@ -163,7 +175,9 @@ export const awardAnnounced = internalAction({
     }
 
     // Social post for every announced award (the payload says which tier, so
-    // the automation can skip some if the feed gets busy).
+    // the automation can skip some if the feed gets busy). Not for the
+    // honorary First 100: a hundred giveaway posts would flood the feed.
+    if (honorary) return null;
     const postId = await ctx.runMutation(internal.notify.queueSocialPost, {
       awardId,
       payload: {

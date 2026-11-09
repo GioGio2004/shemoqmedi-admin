@@ -19,7 +19,9 @@ export const creatorTier = v.union(v.literal("solo"), v.literal("agency"));
 export const region = v.union(v.literal("georgia"), v.literal("global"));
 /**
  * Award tiers, lowest to highest: HM, SOTD, SOTM, SOTY. BSC (Best Solo
- * Creation) is a side award for solo makers, outside the hierarchy.
+ * Creation) is a side award for solo makers, outside the hierarchy. F100
+ * ("First 100") is the honorary badge an admin gives to the first hundred
+ * sites; its award `period` is the member number, "001" to "100".
  */
 export const award = v.union(
   v.literal("HM"),
@@ -27,6 +29,7 @@ export const award = v.union(
   v.literal("SOTM"),
   v.literal("SOTY"),
   v.literal("BSC"),
+  v.literal("F100"),
 );
 
 /** Pillar scores sent by clients and returned by queries. */

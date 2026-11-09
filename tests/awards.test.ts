@@ -619,3 +619,98 @@ describe("juror digest", () => {
     expect(await env.owner.query(api.digest.generalQueue, {})).toBeNull();
   });
 });
+
+describe("First 100 giveaway", () => {
+  it("numbers each badge, counts what is given and left, and works while a site is in voting", async () => {
+    const env = await setup();
+    const a = await site(env);
+    const b = await site(env);
+    expect(await env.admin.query(api.awards.first100Tally, {})).toEqual({ given: 0, left: 100, limit: 100 });
+
+    expect(await env.admin.mutation(api.awards.giveFirst100, { listingId: a.id })).toEqual({ number: "001", left: 99 });
+    expect(await env.admin.mutation(api.awards.giveFirst100, { listingId: b.id })).toEqual({ number: "002", left: 98 });
+    expect((await listing(env, a.id))!).toMatchObject({ status: "in_voting", awards: ["F100"] });
+
+    const tracker = await env.admin.query(api.awards.first100, {});
+    expect(tracker).toMatchObject({ limit: 100, given: 2, left: 98 });
+    expect(tracker.members.map((m) => [m.number, m.listing?.slug])).toEqual([
+      ["001", a.slug],
+      ["002", b.slug],
+    ]);
+    expect(tracker.candidates.map((c) => c.slug)).not.toContain(a.slug);
+    expect(await env.t.query(api.awards.first100Count, {})).toEqual({ given: 2, limit: 100 });
+
+    // It has a badge and an award page like any award, and is logged.
+    const [award] = await awardsOf(env, a.id);
+    expect(award).toMatchObject({ tier: "F100", period: "001", slug: `${a.slug}-f100-001`, source: "manual" });
+    expect(await env.t.query(api.awards.getBySlug, { slug: award.slug })).toMatchObject({ tier: "F100", period: "001" });
+    expect((await auditOf(env, "granted")).filter((e) => e.tier === "F100")).toHaveLength(2);
+  });
+
+  it("a site gets it once; a revoked badge frees its number", async () => {
+    const env = await setup();
+    const a = await site(env);
+    const b = await site(env);
+    const c = await site(env);
+    await env.admin.mutation(api.awards.giveFirst100, { listingId: a.id });
+    await env.admin.mutation(api.awards.giveFirst100, { listingId: b.id });
+    await expect(env.admin.mutation(api.awards.giveFirst100, { listingId: a.id })).rejects.toThrow(/already has the First 100/);
+
+    const [award] = await awardsOf(env, a.id);
+    await env.admin.mutation(api.awards.revoke, { awardId: award._id, reason: "Site went offline" });
+    expect(await env.admin.query(api.awards.first100Tally, {})).toMatchObject({ given: 1, left: 99 });
+    // The freed No. 001 goes to the next site.
+    expect(await env.admin.mutation(api.awards.giveFirst100, { listingId: c.id })).toEqual({ number: "001", left: 98 });
+  });
+
+  it("stops at one hundred", async () => {
+    const env = await setup();
+    const last = await site(env);
+    const extra = await site(env);
+    // 99 badges already given.
+    await env.t.run(async (ctx) => {
+      for (let n = 1; n <= 99; n++) {
+        await ctx.db.insert("awards", {
+          listingId: last.id,
+          tier: "F100",
+          period: String(n).padStart(3, "0"),
+          date: "2026-11-02",
+          score: null,
+          slug: `filler-f100-${n}`,
+          status: "active",
+          source: "manual",
+          createdAt: Date.now(),
+        });
+      }
+      // The fillers point at `last` only to satisfy the reference; clear them from its history check.
+      for (const row of await ctx.db.query("awards").collect()) {
+        if (row.slug.startsWith("filler-")) await ctx.db.patch(row._id, { listingId: extra.id });
+      }
+    });
+    expect(await env.admin.mutation(api.awards.giveFirst100, { listingId: last.id })).toEqual({ number: "100", left: 0 });
+    const third = await site(env);
+    await expect(env.admin.mutation(api.awards.giveFirst100, { listingId: third.id })).rejects.toThrow(/All 100/);
+    expect(await env.admin.query(api.awards.first100Tally, {})).toEqual({ given: 100, left: 0, limit: 100 });
+  });
+
+  it("is honorary: not for team sites or hidden sites, admins only, and it survives the voting close", async () => {
+    const env = await setup();
+    const team = await site(env);
+    await env.admin.mutation(api.awards.setTeamSite, { listingId: team.id, byTeam: true });
+    await expect(env.admin.mutation(api.awards.giveFirst100, { listingId: team.id })).rejects.toThrow(/team/);
+    const hidden = await site(env, { status: "pending" });
+    await expect(env.admin.mutation(api.awards.giveFirst100, { listingId: hidden.id })).rejects.toThrow(/public/);
+    const s = await site(env);
+    await expect(env.owner.mutation(api.awards.giveFirst100, { listingId: s.id })).rejects.toThrow(/admin/);
+    await expect(env.owner.query(api.awards.first100, {})).rejects.toThrow(/admin/);
+
+    await env.admin.mutation(api.awards.giveFirst100, { listingId: s.id });
+    // An admin can still move its voting window; closing without jury votes keeps the badge.
+    await env.admin.mutation(api.admin.setLifecycle, { id: s.id, status: "in_voting", votingEndsAt: Date.now() + 86_400_000 });
+    set(AFTER_JUDGING);
+    await tick(env);
+    expect((await listing(env, s.id))!).toMatchObject({ status: "awarded", awards: ["F100"] });
+    // The owner sees it among their badges.
+    expect((await env.owner.query(api.awards.mine, {})).map((x) => x.tier)).toEqual(["F100"]);
+  });
+});

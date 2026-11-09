@@ -13,12 +13,13 @@ type Award = FunctionReturnType<typeof api.awards.forListing>[number];
 // (/badge/<award slug>) and page (/awards/<award slug>). This panel gives the
 // admin the code for each of a site's awards and a ready email for its
 // owner (who also gets it automatically when the award is announced). The
-// snippet matches the storefront (shemoqmedi/lib/badgeSvg.ts embedCode):
-// keep the two identical. Link text stays the brand name only.
+// snippet matches the storefront's default (shemoqmedi/lib/badgeInfo.ts
+// embedCode). Link text stays the brand name only.
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function badgeDate(a: Award) {
+  if (a.tier === "F100") return `No. ${a.period}`;
   if (a.tier === "SOTY") return a.period;
   if (a.tier === "SOTM") {
     const [y, m] = a.period.split("-").map(Number);
@@ -28,30 +29,31 @@ function badgeDate(a: Award) {
   return `${d} ${MONTHS[m - 1]} ${y}`;
 }
 
-const label = (a: Award) => `${a.name} · ${badgeDate(a)}`;
+const label = (a: Award) => (a.tier === "F100" ? `First 100 · Honorary ${badgeDate(a)}` : `${a.name} · ${badgeDate(a)}`);
 
-function snippet(a: Award, theme: "light" | "dark" = "light") {
+/** The tag in the award's own colours; its width follows its text, so only the height is set. */
+function snippet(a: Award) {
   return (
     `<a href="${STOREFRONT_URL}/awards/${a.slug}" target="_blank" rel="noopener" title="${label(a)} on Shemoqmedi">` +
-    `<img src="${STOREFRONT_URL}/badge/${a.slug}?theme=${theme}" alt="${label(a)} — Shemoqmedi" width="220" height="64"></a>`
+    `<img src="${STOREFRONT_URL}/badge/${a.slug}" alt="${label(a)} — Shemoqmedi" height="56" loading="lazy" style="display:block"></a>`
   );
 }
 
 function email(listing: Listing, a: Award) {
   const name = listing.submitter?.name.split(" ")[0] || listing.creditName;
   return [
-    `Subject: ${listing.title} won ${a.name} on Shemoqmedi`,
+    `Subject: ${listing.title} ${a.tier === "F100" ? "is one of the" : "won"} ${a.name} on Shemoqmedi`,
     "",
     `Hi ${name},`,
     "",
-    `${listing.title} won ${label(a)} on Shemoqmedi, the website awards platform. Its award page is here:`,
+    `${listing.title} ${a.tier === "F100" ? "is one of the first hundred sites" : `won ${label(a)}`} on Shemoqmedi, the website awards platform${a.tier === "F100" ? `: ${label(a)}` : ""}. Its award page is here:`,
     `${STOREFRONT_URL}/awards/${a.slug}`,
     "",
     "If you'd like to show it, here is the badge for your site. It links back to the award:",
     "",
     snippet(a),
     "",
-    `A dark version, and every badge your site has won, are on your account once you claim the site: ${STOREFRONT_URL}/account/badges`,
+    `The round seal, light and dark versions and every badge your site has won are on your account once you claim the site: ${STOREFRONT_URL}/account/badges`,
     "",
     "If your studio keeps an awards or press page, we'd be glad to be listed there too.",
     "",
@@ -101,7 +103,10 @@ export function BadgeKit({ listing }: { listing: Listing }) {
           </button>
         ))}
       </div>
-      <img src={`${STOREFRONT_URL}/badge/${award.slug}?theme=light`} alt={label(award)} width={220} height={64} />
+      <div className="flex flex-wrap items-center gap-5">
+        <img src={`${STOREFRONT_URL}/badge/${award.slug}?shape=seal`} alt="" width={96} height={96} />
+        <img src={`${STOREFRONT_URL}/badge/${award.slug}`} alt={label(award)} height={56} className="h-14 w-auto" />
+      </div>
       <p className="text-sm text-black/70">
         The owner gets this by email when the award is announced; resend it if needed.
         {listing.submitter ? (

@@ -40,6 +40,7 @@ function WorkspaceCard({ card }: { card: Card }) {
 export function Overview() {
   const counts = useQuery(api.listings.reviewCounts, {});
   const claims = useQuery(api.claims.pendingCount, {});
+  const first100 = useQuery(api.awards.first100Tally, {});
   const n = (value: number | undefined) => (value === undefined ? "·" : value);
 
   const cards: Card[] = [
@@ -55,22 +56,29 @@ export function Overview() {
       href: "/review?status=pending",
       eyebrow: "Review queue",
       title: `${n(counts?.pending)} waiting`,
-      body: "Submissions that need a decision, oldest first. Approving opens a 7-day voting window.",
+      body: "Submissions that need a decision, oldest first. Approving puts a site in this week's batch.",
       cta: "Open the queue",
     },
     {
       href: "/review?status=in_voting",
       eyebrow: "Live voting",
       title: `${n(counts?.in_voting)} live`,
-      body: "Public sites collecting jury and community scores. Windows close automatically.",
+      body: "Public sites the jury is scoring. Each weekly batch closes at the end of the following week.",
       cta: "See live voting",
     },
     {
       href: "/review?status=awarded",
       eyebrow: "Awarded",
       title: `${n(counts?.awarded)} awarded`,
-      body: `Closed with SOTD, BSC or HM. ${n(counts?.archived)} closed without an award, ${n(counts?.rejected)} rejected.`,
+      body: `Closed with an award. ${n(counts?.archived)} closed without one, ${n(counts?.rejected)} rejected.`,
       cta: "See awarded sites",
+    },
+    {
+      href: "/awards?tab=first100",
+      eyebrow: "First 100 giveaway",
+      title: `${n(first100?.given)} / ${first100?.limit ?? 100} given`,
+      body: `The honorary badge for the first hundred sites. ${n(first100?.left)} left to give.`,
+      cta: "Open the tracker",
     },
     {
       href: "/creators",
@@ -103,8 +111,8 @@ export function Overview() {
           <h1>Control room.</h1>
         </div>
         <p className="workspace-intro">
-          Add sites by hand, or approve submissions. Live sites vote for 7 days (14 if fewer than 5
-          jurors have scored them), then close with their final score and awards.
+          Add sites by hand, or approve submissions. Each week&apos;s sites are scored by the jury the week after,
+          then close with their final score and awards.
         </p>
       </div>
 

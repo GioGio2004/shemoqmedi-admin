@@ -13,7 +13,7 @@ const publicCreator = v.object({
   links: v.array(v.string()), // profile links (Dribbble, LinkedIn, ...)
   bio: v.union(v.string(), v.null()),
   isClaimed: v.boolean(),
-  awards: v.object({ SOTY: v.number(), SOTM: v.number(), SOTD: v.number(), BSC: v.number(), HM: v.number() }),
+  awards: v.object({ SOTY: v.number(), SOTM: v.number(), SOTD: v.number(), BSC: v.number(), HM: v.number(), F100: v.number() }),
   nominations: v.number(),
 });
 
@@ -38,7 +38,7 @@ export const getBySlug = query({
       (row) => row !== null,
     );
     listings.sort((a, b) => b.publishedAt - a.publishedAt);
-    const awards = { SOTY: 0, SOTM: 0, SOTD: 0, BSC: 0, HM: 0 };
+    const awards = { SOTY: 0, SOTM: 0, SOTD: 0, BSC: 0, HM: 0, F100: 0 };
     for (const l of listings) for (const a of l.awards) awards[a] += 1;
     // A creator page is only public once they have something public.
     if (listings.length === 0) return null;

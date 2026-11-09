@@ -8,6 +8,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { AWARDS } from "@/convex/lib/taxonomy";
 import { STOREFRONT_URL, formatDate, formatDay, storefrontSiteUrl } from "@/lib/storefront";
 import { showAlert, showError } from "./Alerts";
+import { First100 } from "./First100";
 import type { AwardSlug } from "./format";
 
 type Overview = FunctionReturnType<typeof api.awards.overview>;
@@ -53,9 +54,12 @@ function askReason(question: string) {
  * awards, the monthly/yearly rounds, settings and the audit log. Every
  * manual change needs a reason and lands in the audit log.
  */
-export function AwardsManager() {
+type Tab = "awards" | "first100" | "rounds" | "settings" | "log";
+
+export function AwardsManager({ initialTab = "awards" }: { initialTab?: Tab }) {
   const data = useQuery(api.awards.overview, {});
-  const [tab, setTab] = useState<"awards" | "rounds" | "settings" | "log">("awards");
+  const [tab, setTab] = useState<Tab>(initialTab);
+  const tally = useQuery(api.awards.first100Tally, {});
 
   return (
     <>
@@ -78,6 +82,7 @@ export function AwardsManager() {
         {(
           [
             ["awards", "Queue & awards"],
+            ["first100", tally ? `First 100 · ${tally.given}/${tally.limit}` : "First 100"],
             ["rounds", "Month & year rounds"],
             ["settings", "Settings"],
             ["log", "Audit log"],
@@ -93,6 +98,8 @@ export function AwardsManager() {
         <p className="admin-eyebrow">Loading…</p>
       ) : tab === "awards" ? (
         <QueueAndAwards data={data} />
+      ) : tab === "first100" ? (
+        <First100 />
       ) : tab === "rounds" ? (
         <Rounds data={data} />
       ) : tab === "settings" ? (
@@ -330,7 +337,7 @@ function GrantForm() {
             }}
             aria-label="Award"
           >
-            {AWARDS.map((a) => (
+            {AWARDS.filter((a) => a.slug !== "F100").map((a) => (
               <option key={a.slug} value={a.slug}>
                 {a.name}
               </option>

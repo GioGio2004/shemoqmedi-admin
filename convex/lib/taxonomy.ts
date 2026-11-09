@@ -111,6 +111,8 @@ export const AWARDS = [
   { slug: "SOTD", name: "Site of the Day", short: "SOTD" },
   { slug: "BSC", name: "Best Solo Creation", short: "BSC" },
   { slug: "HM", name: "Honorable Mention", short: "HM" },
+  // Honorary: given by hand to the first hundred sites (lib/awards.ts FIRST_100).
+  { slug: "F100", name: "First 100", short: "F100" },
 ] as const;
 
 /** Jury pillars and their weight in the final score. */

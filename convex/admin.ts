@@ -13,7 +13,7 @@ import { normalizePillars, type Pillars } from "./lib/scoring";
 import { batchVotingEnds, tbilisiDay, tbilisiMonth, tbilisiYear, weekOf } from "./lib/time";
 import { checkDomain, domainKey, listingsOnDomain } from "./lib/domains";
 import { getConfig } from "./lib/config";
-import { grantAward } from "./lib/awards";
+import { grantAward, syncListingAwards } from "./lib/awards";
 import {
   EMPTY_SCORES,
   assertMedia,
@@ -340,8 +340,10 @@ export const setLifecycle = mutation({
     if (!listing) fail("Listing not found.");
     const now = Date.now();
     if (status === "awarded") fail("Give awards on the Awards page: each one needs a reason and is logged.");
-    if (listing.awards.length > 0 && status !== "rejected") {
-      fail(`Revoke this site's awards (${listing.awards.join(", ")}) on the Awards page first.`);
+    // The honorary First 100 badge is not a result: it stays whatever the status.
+    const won = listing.awards.filter((a) => a !== "F100");
+    if (won.length > 0 && status !== "rejected") {
+      fail(`Revoke this site's awards (${won.join(", ")}) on the Awards page first.`);
     }
     const scores = scoreFields(listing.editorialScores, listing.communityTotals, listing.communityVotesCount);
     const base = { status, reviewedBy: admin._id, reviewedAt: now, updatedAt: now, ...scores };
@@ -383,6 +385,9 @@ export const setLifecycle = mutation({
         break;
       }
     }
+
+    // A closed site that holds a badge (the honorary First 100) reads as awarded.
+    await syncListingAwards(ctx, id);
 
     const wasPublic = isPublicStatus(listing.status);
     if (wasPublic || isPublicStatus(status)) {
