@@ -37,6 +37,7 @@ import type * as lib_taxonomy from "../lib/taxonomy.js";
 import type * as lib_time from "../lib/time.js";
 import type * as lib_tokens from "../lib/tokens.js";
 import type * as lib_utils from "../lib/utils.js";
+import type * as lib_voiceover from "../lib/voiceover.js";
 import type * as listings from "../listings.js";
 import type * as mcp from "../mcp.js";
 import type * as media from "../media.js";
@@ -47,6 +48,7 @@ import type * as seed from "../seed.js";
 import type * as seo from "../seo.js";
 import type * as social from "../social.js";
 import type * as users from "../users.js";
+import type * as voiceover from "../voiceover.js";
 import type * as votes from "../votes.js";
 
 import type {
@@ -85,6 +87,7 @@ declare const fullApi: ApiFromModules<{
   "lib/time": typeof lib_time;
   "lib/tokens": typeof lib_tokens;
   "lib/utils": typeof lib_utils;
+  "lib/voiceover": typeof lib_voiceover;
   listings: typeof listings;
   mcp: typeof mcp;
   media: typeof media;
@@ -95,6 +98,7 @@ declare const fullApi: ApiFromModules<{
   seo: typeof seo;
   social: typeof social;
   users: typeof users;
+  voiceover: typeof voiceover;
   votes: typeof votes;
 }>;
 

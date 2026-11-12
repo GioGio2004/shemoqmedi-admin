@@ -26,8 +26,14 @@ export function r2Configured() {
   );
 }
 
-/** Object keys we create: listings/<slug>/<name>.mp4|webm (lowercase, dashes, underscores). */
-export const R2_KEY = /^listings\/[a-z0-9-]{1,60}\/[a-z0-9_-]{1,120}\.(mp4|webm)$/;
+/** Listing preview videos (browser uploads): listings/<slug>/<name>.mp4|webm. */
+export const R2_LISTING_KEY = /^listings\/[a-z0-9-]{1,60}\/[a-z0-9_-]{1,120}\.(mp4|webm)$/;
+
+/** Social desk files (voiceover narration and reels, server-side only): social/<slug>/<name>.mp3|mp4. */
+export const R2_SOCIAL_KEY = /^social\/[a-z0-9-]{1,60}\/[a-z0-9_-]{1,120}\.(mp3|mp4)$/;
+
+/** Every object key we create (lowercase, dashes, underscores). */
+export const R2_KEY = new RegExp(`${R2_LISTING_KEY.source}|${R2_SOCIAL_KEY.source}`);
 
 function encodeKey(key: string) {
   return key.split("/").map(encodeURIComponent).join("/");
@@ -52,7 +58,7 @@ function objectUrl(key: string) {
   return `https://${env("R2_ACCOUNT_ID")}.r2.cloudflarestorage.com/${env("R2_BUCKET")}/${encodeKey(key)}`;
 }
 
-/** A presigned PUT URL for one direct browser → R2 upload. */
+/** A presigned PUT URL for one direct upload to R2 (browser, or the render worker). */
 export async function presignPut(key: string, expiresInSeconds = 15 * 60) {
   const url = new URL(objectUrl(key));
   url.searchParams.set("X-Amz-Expires", String(expiresInSeconds));
