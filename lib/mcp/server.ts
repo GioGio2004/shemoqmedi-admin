@@ -7,6 +7,7 @@ import { api } from "@/convex/_generated/api";
 import { THREADS_MAX, threadsLength } from "@/convex/lib/socialApi";
 import type { Id } from "@/convex/_generated/dataModel";
 import { publicOrigin, serviceCredential, verifyOAuthToken } from "./oauth";
+import { FORMAT_ENUM, PALETTE_DESCRIPTION, TEMPLATE_ENUM, paletteCatalog, templateCatalog } from "./catalog";
 
 /**
  * The Shemoqmedi social desk connector: Giorgi's own Claude (the Claude app on
@@ -87,7 +88,9 @@ Your daily loop when Giorgi asks "what's waiting?":
 2. Make the graphics. Always attach graphics, not only screenshots. For award and new-listing posts render the storytelling carousel (render_carousel with the listing's slug) and use its slides for Instagram, Facebook and LinkedIn (media items with networks ["instagram","facebook","linkedin"]); add the carousel's first (hook) slide once more with networks ["threads"] for Threads. For calls, roundups and announcements render one graphic (render_graphic) in ig_portrait or square: Instagram only takes images between 4:5 and 1.91:1, so story, reel_cover and link graphics get padded with white for Instagram (keep those for other networks via the media item's networks). A preview video can go first instead when Giorgi wants a reel (voiceovers: list_voices, create_voiceover, then he builds the reel on the admin Voiceover page).
 3. Write captions for the networks that fit: instagram, facebook, threads, linkedin. Save captions and media with update_post.
 4. Show him every caption in full and the rendered image URLs it will use, then ask. Only call approve_post after he says yes to that exact post. If he asks for changes, edit and show again.
-5. Approving publishes: at once, or at the post's publish time (publishAt), to every network that has a caption and a connected account. Check list_channels when unsure what is connected. Afterwards get_post shows each network's result and link; a failed network can be sent again with retry_post (networks already sent are never sent twice).
+5. Approving publishes: at once, or at the post's publish time (publishAt), to every network that has a caption and a connected account. publish_post does it in one step (now, or at a time Giorgi gives); unschedule_post takes a scheduled post back to waiting. Check list_channels when unsure what is connected. Afterwards get_post shows each network's result and link; a failed network can be sent again with retry_post (networks already sent are never sent twice).
+
+Stories: a post with placement "story" is exactly one 9:16 image (render_graphic in the story format) or video (find_reel finds a listing's latest reel). It goes to Instagram and the Facebook Page as a story; Threads and LinkedIn have no stories and are skipped. Stories show no text, so a short caption for instagram and/or facebook only picks where it goes. list_templates, list_palettes and list_media help pick and reuse graphics.
 
 Voice and rules:
 - English only. Short, specific and warm; say what is good about the site in concrete terms (motion, typography, the idea). No hype words ("stunning", "game-changer", "mind-blowing"), no emoji walls (one or two at most), no engagement bait.
@@ -141,7 +144,11 @@ const media = z
   .describe(
     "The post's images/videos in order (carousel order). Replaces the current list. The first item decides each network's post: a video makes a video post (Instagram reel), images make a photo/carousel post.",
   );
-const palette = z.string().describe('Palette id: house, egypt, night, paper, saperavi, moss, or "auto" (tinted from the screenshot)');
+const palette = z.string().describe(PALETTE_DESCRIPTION);
+const placement = z
+  .enum(["feed", "story"])
+  .describe('"story": one 9:16 image or video, posted as an Instagram and Facebook story (Threads and LinkedIn are skipped). Default feed.');
+const when = z.string().describe("ISO date-time, Tbilisi time when no offset, e.g. 2026-11-14T18:00");
 const glass = z.enum(["frost", "liquid", "tint"]).optional().describe("Glass style (default frost)");
 const audience = z
   .enum(["users", "studios", "jurors", "all"])
@@ -288,6 +295,7 @@ const handler = createMcpHandler(
           media: media.optional(),
           publishAt: z.string().nullable().optional(),
           note: z.string().max(500).optional(),
+          placement: placement.optional(),
         }),
       },
       async (args, ctx) =>
@@ -299,6 +307,7 @@ const handler = createMcpHandler(
             media: args.media,
             scheduledFor: parseWhen(args.publishAt),
             note: args.note,
+            placement: args.placement,
           }),
         ),
     );
@@ -308,13 +317,14 @@ const handler = createMcpHandler(
       {
         title: "Create post",
         description:
-          "Start a post Giorgi asked for: an announcement, a custom post, or another kind. With listingSlug the post gets that site's facts and screenshots. Extra facts are merged in.",
+          "Start a post Giorgi asked for: an announcement, a custom post, or another kind. With listingSlug the post gets that site's facts and (for a feed post) its screenshots. Extra facts are merged in. placement \"story\" makes a story (attach exactly one 9:16 image or video).",
         inputSchema: z.object({
           kind: z.enum(["announcement", "custom", "new_listing", "award", "call_submissions", "call_jury", "roundup"]),
           listingSlug: slug.optional(),
           facts: z.record(z.string(), z.unknown()).optional(),
           captions: captions.optional(),
           media: media.optional(),
+          placement: placement.optional(),
         }),
       },
       async (args, ctx) => run(() => convex.mutation(api.mcp.createPost, { ...auth(ctx), ...args })),
@@ -329,6 +339,30 @@ const handler = createMcpHandler(
         inputSchema: z.object({ id: postId }),
       },
       async (args, ctx) => run(() => convex.mutation(api.mcp.approvePost, { ...auth(ctx), id: args.id as Id<"socialPosts"> })),
+    );
+
+    server.registerTool(
+      "publish_post",
+      {
+        title: "Publish post",
+        description:
+          "Approve and publish a waiting post in one step: now, or at `at` (a future time; a past or missing one means now). A scheduled post is rescheduled. Same rules and effects as approve_post: only after Giorgi said yes to its final captions and images. A failed post is sent again with retry_post instead.",
+        inputSchema: z.object({ id: postId, at: when.optional() }),
+      },
+      async (args, ctx) =>
+        run(() =>
+          convex.mutation(api.mcp.publishPost, { ...auth(ctx), id: args.id as Id<"socialPosts">, at: parseWhen(args.at) ?? undefined }),
+        ),
+    );
+
+    server.registerTool(
+      "unschedule_post",
+      {
+        title: "Unschedule post",
+        description: "Take a scheduled post back to waiting: its publish is cancelled; its publish time is kept. Not while it is being published.",
+        inputSchema: z.object({ id: postId }),
+      },
+      async (args, ctx) => run(() => convex.mutation(api.mcp.unschedulePost, { ...auth(ctx), id: args.id as Id<"socialPosts"> })),
     );
 
     server.registerTool(
@@ -356,14 +390,62 @@ const handler = createMcpHandler(
     // Graphics and voiceovers
 
     server.registerTool(
+      "list_templates",
+      {
+        title: "List templates",
+        description:
+          "The graphic templates (their text fields, image slots and defaults) and formats (size, and how Instagram uses each: feed, padded with white for the feed, or story) that render_graphic accepts.",
+        inputSchema: z.object({}),
+      },
+      async () => text(templateCatalog()),
+    );
+
+    server.registerTool(
+      "list_palettes",
+      {
+        title: "List palettes",
+        description: "The colour palettes for render_graphic and render_carousel: id, name, and the base / surface / accent colours (60/30/10).",
+        inputSchema: z.object({}),
+      },
+      async () => text(paletteCatalog()),
+    );
+
+    server.registerTool(
+      "list_media",
+      {
+        title: "List media",
+        description:
+          "Uploaded files newest first, with URLs, sizes and dimensions, to reuse instead of rendering again. role: graphic (rendered graphics), carousel (carousel slides), reel (finished reels), screenshot / preview (listing media). folder narrows to a path, e.g. social/graphics.",
+        inputSchema: z.object({
+          kind: z.enum(["image", "video"]).optional(),
+          role: z.enum(["graphic", "carousel", "reel", "screenshot", "preview", "other"]).optional(),
+          folder: z.string().max(200).optional(),
+          limit: z.number().int().min(1).max(100).optional(),
+        }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.listMedia, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "find_reel",
+      {
+        title: "Find reel",
+        description:
+          "The latest finished reel (MP4 with voiceover, built on the Voiceover page) of a listing, with its URL and size, or null. Attach it to a post as a video (an Instagram reel, or a story when it is 9:16 and the post's placement is story).",
+        inputSchema: z.object({ listingSlug: slug }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.findReel, { ...auth(ctx), listingSlug: args.listingSlug })),
+    );
+
+    server.registerTool(
       "render_graphic",
       {
         title: "Render graphic",
         description:
-          "Render one post graphic (JPEG, uploaded to ImageKit) and return its public URL, to attach with update_post (kind image, role graphic). Templates: award, new_listing, call_submissions, call_jury, announcement, jury_quote, screenshot. Formats: ig_portrait (1080x1350), square, story, reel_cover, link. For Instagram use ig_portrait or square (it takes 4:5 to 1.91:1; story, reel_cover and link are padded with white there). fields are the template's texts, e.g. { tier: \"SOTD\", title, studio, date, awardSlug, url } for award; imageUrls the template's images in order (award: [screenshot, badge], others: [screenshot]).",
+          "Render one post graphic (JPEG, uploaded to ImageKit) and return its public URL, to attach with update_post (kind image, role graphic). list_templates shows every template's fields and every format. For an Instagram feed post use ig_portrait or square (it takes 4:5 to 1.91:1; story, reel_cover and link are padded with white there); for a story post use story. fields are the template's texts, e.g. { tier: \"SOTD\", title, studio, date, awardSlug, url } for award; imageUrls the template's images in order (award: [screenshot, badge], others: [screenshot]).",
         inputSchema: z.object({
-          template: z.enum(["award", "new_listing", "call_submissions", "call_jury", "announcement", "jury_quote", "screenshot"]),
-          format: z.enum(["ig_portrait", "square", "story", "reel_cover", "link"]),
+          template: z.enum(TEMPLATE_ENUM),
+          format: z.enum(FORMAT_ENUM),
           palette,
           fields: z.record(z.string(), z.string()).optional(),
           imageUrls: z.array(z.string().url()).max(4).optional(),

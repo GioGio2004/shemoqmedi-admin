@@ -62,6 +62,13 @@ export const socialMediaItem = v.object({
   networks: v.optional(v.array(socialNetwork)),
 });
 
+/**
+ * Where a post appears: the feed (absent = feed) or as a story. A story is
+ * exactly one 9:16 image or video and goes to Instagram and the Facebook Page
+ * only (Threads and LinkedIn have no stories API; they are skipped).
+ */
+export const socialPlacement = v.union(v.literal("feed"), v.literal("story"));
+
 /** How publishing a post went on one network. */
 export const publishResult = v.object({
   network: socialNetwork,
@@ -547,6 +554,7 @@ export default defineSchema({
       }),
     ),
     media: v.optional(v.array(socialMediaItem)),
+    placement: v.optional(socialPlacement), // absent = feed
     scheduledFor: v.optional(v.number()), // publish time; absent = as soon as approved
     // The scheduled publish.post job while the post is "scheduled".
     publishJobId: v.optional(v.id("_scheduled_functions")),

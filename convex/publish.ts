@@ -9,6 +9,9 @@
 //     finish  sent (every attempted network sent) | failed (any failed, with the
 //             error) | approved (nothing could be attempted: connect and retry)
 //
+// A story (placement "story") goes to Instagram and Facebook only: Threads
+// and LinkedIn are recorded as skipped with the reason.
+//
 // Networks already sent are never sent again, so a retry (social.retryPost)
 // only attempts the rest. Every scheduled run carries a run number
 // (socialPosts.publishRun): approving or retrying bumps it, so a run that was
@@ -24,11 +27,12 @@ import { v } from "convex/values";
 import { internalAction, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { socialNetwork } from "./schema";
+import { socialNetwork, socialPlacement } from "./schema";
 import { captionedNetworks, postMedia, readStatus, withSizes } from "./social";
 import { accountOf, ENV_VARS } from "./channels";
 import {
   NETWORK_NAME,
+  NO_STORIES,
   PlatformError,
   mediaFor,
   publishFacebook,
@@ -65,6 +69,7 @@ const draftValidator = v.object({
   title: v.union(v.string(), v.null()),
   description: v.union(v.string(), v.null()),
   thumbnail: v.union(v.string(), v.null()),
+  placement: v.optional(socialPlacement),
 });
 
 function str(value: unknown) {
@@ -117,6 +122,7 @@ export const begin = internalMutation({
     let results = post.results ?? [];
     const sent = new Set(results.filter((r) => r.status === "sent").map((r) => r.network));
     const media = postMedia(post);
+    const story = post.placement === "story";
     const jobs: Job[] = [];
     for (const network of captionedNetworks(post)) {
       if (sent.has(network)) continue;
@@ -124,9 +130,12 @@ export const begin = internalMutation({
       const own = mediaFor(media, network);
       const skip = (error: string) => (results = upsertResult(results, { network, status: "skipped", error, at: now }));
       const failNow = (error: string) => (results = upsertResult(results, { network, status: "failed", error, at: now }));
-      if (network === "facebook") {
+      const noStories = story ? NO_STORIES[network] : undefined;
+      if (noStories) skip(noStories);
+      else if (network === "facebook") {
         if (!meta?.ids.pageId) skip(notConnected(meta, ENV_VARS.meta, "a Facebook Page token"));
-        else jobs.push({ network, caption, media: own, token: meta.token, target: meta.ids.pageId });
+        // Sizes, so a story's 9:16 check sees them (socialApi.storyProblem).
+        else jobs.push({ network, caption, media: story ? await withSizes(ctx, own) : own, token: meta.token, target: meta.ids.pageId });
       } else if (network === "instagram") {
         if (!meta?.ids.igUserId) {
           skip(
@@ -148,7 +157,7 @@ export const begin = internalMutation({
       }
     }
     await ctx.db.patch(postId, { results, publishingUntil: now + PUBLISH_LEASE_MS, updatedAt: now });
-    return { jobs, draft: linkInfo(post.facts) };
+    return { jobs, draft: { ...linkInfo(post.facts), ...(story ? { placement: "story" as const } : {}) } };
   },
 });
 
@@ -197,7 +206,9 @@ export const finish = internalMutation({
       await ctx.db.patch(postId, { ...base, status: "sent", sentAt: now, error: undefined });
       return "sent";
     }
-    const names = skipped.map((r) => NETWORK_NAME[r.network]).join(", ") || "any network";
+    // Networks a story never goes to (Threads, LinkedIn) are not missing an account.
+    const unconnected = skipped.filter((r) => !(post.placement === "story" && NO_STORIES[r.network]));
+    const names = unconnected.map((r) => NETWORK_NAME[r.network]).join(", ") || "any network";
     await ctx.db.patch(postId, {
       ...base,
       status: "approved",

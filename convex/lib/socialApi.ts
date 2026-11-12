@@ -8,6 +8,10 @@
 //   LinkedIn (personal profile) api.linkedin.com/rest (Posts + Images APIs) with the
 //                               member token (w_member_social)
 //
+// Stories (socialPosts.placement "story"): Instagram STORIES containers and
+// Facebook Page photo_stories / video_stories (Pages API, Page Stories).
+// Threads and LinkedIn have no stories API; publish.begin skips them.
+//
 // Tokens travel only in Authorization headers, never in URLs, and are scrubbed
 // from every error message.
 //
@@ -31,6 +35,9 @@ export const NETWORK_NAME: Record<Network, string> = {
   linkedin: "LinkedIn",
 };
 
+/** Feed post (absent) or story (socialPosts.placement). */
+export type Placement = "feed" | "story";
+
 /** width/height are filled in from the media table when known (publish.begin), for Instagram's ratio check. */
 export type MediaItem = { kind: "image" | "video"; url: string; role?: string; networks?: Network[]; width?: number; height?: number };
 
@@ -42,6 +49,7 @@ export type Draft = {
   title: string | null; // for a LinkedIn article card
   description: string | null;
   thumbnail: string | null; // a screenshot for a LinkedIn article card
+  placement?: Placement; // absent = feed
 };
 
 export type Published = { remoteId: string; url?: string; note?: string };
@@ -196,6 +204,39 @@ export function instagramImageUrl(item: Pick<MediaItem, "url" | "width" | "heigh
   return parsed.toString();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Stories
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Why a story skips a network without a stories API (publish.begin records it as skipped). */
+export const NO_STORIES: Partial<Record<Network, string>> = {
+  threads: "Threads has no stories: a story goes to Instagram and Facebook only.",
+  linkedin: "LinkedIn has no stories: a story goes to Instagram and Facebook only.",
+};
+
+/** The networks that have a stories API (Instagram STORIES, Facebook Page photo/video stories). */
+export const STORY_NETWORKS: Network[] = ["instagram", "facebook"];
+
+/** Stories are 9:16 (1080x1920). A few pixels off (an encoder's rounding) still count. */
+export const STORY_RATIO = 9 / 16;
+const STORY_RATIO_TOLERANCE = 0.02;
+
+/**
+ * Why a story can't go out with these media, or null. A story is exactly one
+ * image or video at 9:16; a size we don't know (no media row) is left to Meta.
+ */
+export function storyProblem(media: Pick<MediaItem, "kind" | "url" | "width" | "height">[]) {
+  if (media.length !== 1) {
+    return `A story is exactly one image or video (this one has ${media.length}). Attach one 9:16 story graphic or reel.`;
+  }
+  const { width, height, url } = media[0];
+  if (!width || !height) return null;
+  if (Math.abs(width / height - STORY_RATIO) > STORY_RATIO_TOLERANCE) {
+    return `A story must be 9:16 (1080x1920), and ${url} is ${width}x${height}. Render it in the story format.`;
+  }
+  return null;
+}
+
 type Json = Record<string, unknown>;
 
 async function readJson(res: Response): Promise<Json> {
@@ -346,6 +387,7 @@ function droppedNote(dropped: number | undefined, what: string) {
 }
 
 export async function publishFacebook(draft: Draft, token: string, pageId: string, deadline = Infinity): Promise<Published> {
+  if (draft.placement === "story") return await publishFacebookStory(draft, token, pageId, deadline);
   const chosen = pick(draft.media);
   if (chosen.kind === "video") {
     const data = await graph("POST", `${GRAPH}/${pageId}/videos`, token, { file_url: chosen.video.url, description: draft.caption }, deadline);
@@ -377,6 +419,78 @@ export async function publishFacebook(draft: Draft, token: string, pageId: strin
   const data = await graph("POST", `${GRAPH}/${pageId}/feed`, token, params, deadline);
   const postId = idOf(data, "Facebook post");
   return { remoteId: postId, url: `https://www.facebook.com/${postId}` };
+}
+
+/** Meta's stories take no text: said once in the result, so nobody looks for the caption. */
+const STORY_NOTE = "Posted as a story (stories carry no caption).";
+
+const FB_UPLOAD_HOST = "rupload.facebook.com";
+const FB_VIDEO_WAIT = { everyMs: 10_000, tries: 30 }; // up to 5 minutes
+
+/**
+ * A Page story (Pages API, Page Stories): a photo is uploaded unpublished and
+ * then published with photo_stories; a video is started on video_stories,
+ * fetched by Meta from its public URL (rupload, file_url header), and finished
+ * once Meta has it. Both answer { success, post_id }.
+ */
+async function publishFacebookStory(draft: Draft, token: string, pageId: string, deadline: number): Promise<Published> {
+  const problem = storyProblem(draft.media);
+  if (problem) throw new PlatformError(problem);
+  const item = draft.media[0];
+  let done: Json;
+  if (item.kind === "image") {
+    const photo = await graph("POST", `${GRAPH}/${pageId}/photos`, token, { url: jpegUrl(item.url), published: "false" }, deadline);
+    done = await graph("POST", `${GRAPH}/${pageId}/photo_stories`, token, { photo_id: idOf(photo, "Facebook story photo") }, deadline);
+  } else {
+    const start = await graph("POST", `${GRAPH}/${pageId}/video_stories`, token, { upload_phase: "start" }, deadline);
+    const videoId = typeof start.video_id === "string" || typeof start.video_id === "number" ? String(start.video_id) : null;
+    if (!videoId || typeof start.upload_url !== "string") throw new PlatformError("Facebook did not return a story upload URL.");
+    await uploadHostedVideo(start.upload_url, item.url, token, deadline);
+    await waitForVideoUpload(videoId, token, deadline);
+    done = await graph("POST", `${GRAPH}/${pageId}/video_stories`, token, { video_id: videoId, upload_phase: "finish" }, deadline);
+  }
+  if (done.success === false) throw new PlatformError("Facebook refused the story.");
+  const postId = typeof done.post_id === "string" || typeof done.post_id === "number" ? String(done.post_id) : null;
+  if (!postId) throw new PlatformError("Facebook story: no post_id in the response.");
+  return { remoteId: postId, url: `https://www.facebook.com/${postId}`, note: STORY_NOTE };
+}
+
+/** Asks Meta to fetch a hosted video into an upload session (the token goes only to Meta's upload host). */
+async function uploadHostedVideo(uploadUrl: string, fileUrl: string, token: string, deadline: number) {
+  let host = "";
+  try {
+    host = new URL(uploadUrl).host;
+  } catch {
+    // reported below
+  }
+  if (host !== FB_UPLOAD_HOST) throw new PlatformError(`Facebook returned an unexpected upload host (${host || "none"}).`);
+  let res: Response;
+  try {
+    res = await fetch(uploadUrl, {
+      method: "POST",
+      headers: { Authorization: `OAuth ${token}`, file_url: fileUrl },
+      signal: requestSignal(deadline, "Facebook story upload"),
+    });
+  } catch (err) {
+    throw new PlatformError(scrub(`Could not reach ${FB_UPLOAD_HOST}: ${(err as Error).message}`, token));
+  }
+  const data = await readJson(res);
+  if (!res.ok || data.error || data.success === false) {
+    throw new PlatformError(scrub(`Facebook story upload: ${graphError(data, res.status)}`, token));
+  }
+}
+
+/** Waits until Meta has fetched the video (status.uploading_phase complete). */
+async function waitForVideoUpload(videoId: string, token: string, deadline: number) {
+  for (let i = 0; i < FB_VIDEO_WAIT.tries; i++) {
+    const data = await graph("GET", `${GRAPH}/${videoId}`, token, { fields: "status" }, deadline);
+    const status = (data.status ?? {}) as { video_status?: string; uploading_phase?: { status?: string } };
+    const phase = status.uploading_phase?.status;
+    if (phase === "error" || status.video_status === "error") throw new PlatformError("The Facebook story video could not be processed.");
+    if (phase === "complete") return;
+    if (i < FB_VIDEO_WAIT.tries - 1) await pauseWithin(FB_VIDEO_WAIT.everyMs, deadline, "The Facebook story video (still uploading)");
+  }
+  throw new PlatformError("The Facebook story video was still uploading after 5 minutes. Retry later.");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -425,7 +539,27 @@ async function permalink(base: string, id: string, token: string, deadline: numb
 const IG_IMAGE_WAIT = { everyMs: 3_000, tries: 20 };
 const IG_VIDEO_WAIT = { everyMs: 15_000, tries: 20 }; // up to 5 minutes
 
+/**
+ * An Instagram story: one container with media_type STORIES and image_url or
+ * video_url (no caption: stories have none), polled until FINISHED, then
+ * media_publish like any post.
+ */
+async function publishInstagramStory(draft: Draft, token: string, igUserId: string, deadline: number): Promise<Published> {
+  const problem = storyProblem(draft.media);
+  if (problem) throw new PlatformError(problem);
+  const item = draft.media[0];
+  const source: Record<string, string> = item.kind === "video" ? { video_url: item.url } : { image_url: jpegUrl(item.url) };
+  const data = await graph("POST", `${GRAPH}/${igUserId}/media`, token, { media_type: "STORIES", ...source }, deadline);
+  const creationId = idOf(data, "Instagram story");
+  const wait = item.kind === "video" ? IG_VIDEO_WAIT : IG_IMAGE_WAIT;
+  await waitForContainer(GRAPH, creationId, token, { field: "status_code", ...wait, label: "The Instagram story", deadline });
+  const published = await graph("POST", `${GRAPH}/${igUserId}/media_publish`, token, { creation_id: creationId }, deadline);
+  const id = idOf(published, "Instagram story");
+  return { remoteId: id, url: await permalink(GRAPH, id, token, deadline), note: STORY_NOTE };
+}
+
 export async function publishInstagram(draft: Draft, token: string, igUserId: string, deadline = Infinity): Promise<Published> {
+  if (draft.placement === "story") return await publishInstagramStory(draft, token, igUserId, deadline);
   const chosen = pick(draft.media);
   const media = `${GRAPH}/${igUserId}/media`;
   let creationId: string;
@@ -486,6 +620,8 @@ const THREADS_WAIT = { firstWaitMs: 30_000, everyMs: 10_000, tries: 27 };
 const THREADS_ITEM_WAIT = { everyMs: 5_000, tries: 54 };
 
 export async function publishThreads(draft: Draft, token: string, userId: string, deadline = Infinity): Promise<Published> {
+  // publish.begin skips stories here; this guards any other caller.
+  if (draft.placement === "story") throw new PlatformError(NO_STORIES.threads);
   const length = threadsLength(draft.caption);
   if (length > THREADS_MAX) {
     throw new PlatformError(`The Threads text is ${length} characters as Threads counts them (emoji count as 2-4); the limit is ${THREADS_MAX}.`);
@@ -627,6 +763,7 @@ async function linkedinImage(url: string, token: string, owner: string, deadline
 }
 
 export async function publishLinkedin(draft: Draft, token: string, personUrn: string, deadline = Infinity): Promise<Published> {
+  if (draft.placement === "story") throw new PlatformError(NO_STORIES.linkedin);
   const chosen = pick(draft.media);
   let note: string | undefined;
   let images = chosen.images;

@@ -2,9 +2,10 @@
 // lib/mcp/server.ts). Every function takes `token`, the short-lived service
 // credential the admin app mints after checking the caller's Clerk OAuth
 // token, and runs only for platform admins (lib/mcpAuth.ts). These are the
-// social desk's hands: read listings, awards and studios; write, approve and
-// retry posts; see the connected channels (never their tokens); render
-// graphics and voiceovers; email studios; broadcast to an audience.
+// social desk's hands: read listings, awards and studios; write, approve,
+// publish, schedule and retry posts (feed posts and stories); see the
+// connected channels (never their tokens); render graphics and voiceovers and
+// find past renders and reels; email studios; broadcast to an audience.
 
 import { v } from "convex/values";
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
@@ -15,20 +16,23 @@ import { fail } from "./lib/listingHelpers";
 import { mergeSocials, normalizeEmail } from "./lib/contacts";
 import { readPillars } from "./lib/scoring";
 import { TIER_NAMES } from "./lib/awards";
-import { socialPostKind } from "./schema";
+import { rowUrl } from "./lib/media";
+import { socialPlacement, socialPostKind } from "./schema";
 import {
   approvePost as approve,
   countPosts,
   captionsValidator,
+  createPost as create,
   editPost,
   listingFacts,
   listPosts,
   mediaValidator,
   postView,
-  queuePost,
+  publishPost as publish,
   readStatus,
   rejectPost as reject,
   retryPost as retry,
+  unschedulePost as unschedule,
   viewPost,
 } from "./social";
 import { channelView, type ChannelView } from "./channels";
@@ -345,6 +349,7 @@ export const updatePost = mutation({
     media: v.optional(mediaValidator),
     scheduledFor: v.optional(v.union(v.number(), v.null())),
     note: v.optional(v.string()),
+    placement: v.optional(socialPlacement),
   },
   returns: postView,
   handler: async (ctx, { token, id, ...edit }) => {
@@ -362,19 +367,13 @@ export const createPost = mutation({
     facts: v.optional(v.any()),
     captions: v.optional(captionsValidator),
     media: v.optional(mediaValidator),
+    placement: v.optional(socialPlacement),
   },
   returns: postView,
-  handler: async (ctx, { token, kind, listingSlug, facts, captions, media }) => {
+  handler: async (ctx, { token, listingSlug, ...input }) => {
     await requireTokenAdmin(ctx, token);
     const listing = listingSlug ? await listingBySlug(ctx, listingSlug) : null;
-    const base = listing ? await listingFacts(ctx, listing) : null;
-    const id = await queuePost(ctx, {
-      kind,
-      listingId: listing?._id,
-      facts: base ? { ...base, ...(facts ?? {}) } : (facts ?? {}),
-      media: media ?? (base ? base.screenshots.map((url) => ({ kind: "image" as const, url, role: "screenshot" })) : []),
-    });
-    if (captions) await editPost(ctx, id, { captions });
+    const id = await create(ctx, { ...input, listingId: listing?._id });
     return await viewPost(ctx, (await ctx.db.get(id))!);
   },
 });
@@ -385,6 +384,27 @@ export const approvePost = mutation({
   handler: async (ctx, { token, id }) => {
     const admin = await requireTokenAdmin(ctx, token);
     await approve(ctx, id, admin._id);
+    return await viewPost(ctx, (await ctx.db.get(id))!);
+  },
+});
+
+/** Approve and publish in one step: now, or at `at` (epoch ms) when that is in the future. */
+export const publishPost = mutation({
+  args: { token, id: v.id("socialPosts"), at: v.optional(v.number()) },
+  returns: postView,
+  handler: async (ctx, { token, id, at }) => {
+    const admin = await requireTokenAdmin(ctx, token);
+    await publish(ctx, id, admin._id, at);
+    return await viewPost(ctx, (await ctx.db.get(id))!);
+  },
+});
+
+export const unschedulePost = mutation({
+  args: { token, id: v.id("socialPosts") },
+  returns: postView,
+  handler: async (ctx, { token, id }) => {
+    await requireTokenAdmin(ctx, token);
+    await unschedule(ctx, id);
     return await viewPost(ctx, (await ctx.db.get(id))!);
   },
 });
@@ -471,6 +491,114 @@ export const renderCarousel = action({
       ? await ctx.runQuery(internal.mcp.listingIdBySlug, { slug: listingSlug })
       : undefined;
     return await ctx.runAction(internal.graphics.renderCarousel, { ...args, listingId });
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Media: past renders, reels, screenshots (the media table)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const MEDIA_ROLES = ["graphic", "carousel", "reel", "screenshot", "preview", "other"] as const;
+export type MediaRole = (typeof MEDIA_ROLES)[number];
+const mediaRole = v.union(...MEDIA_ROLES.map((r) => v.literal(r)));
+
+/**
+ * What a media row is, from where it was stored:
+ *   /social/graphics/…               graphic   (render_graphic, Studio renders)
+ *   /social/carousels/<label>-<id>/  carousel  (render_carousel slides)
+ *   /social/<slug>/<slug>-reel-….mp4 reel      (built on the Voiceover page, R2)
+ *   /listings/<slug>/…               screenshot (image) or preview (video)
+ */
+export function roleOf(row: Pick<Doc<"media">, "filePath" | "kind">): MediaRole {
+  const path = row.filePath;
+  if (path.startsWith("/social/graphics/")) return "graphic";
+  if (path.startsWith("/social/carousels/")) return "carousel";
+  if (/^\/social\/[a-z0-9-]+\/[a-z0-9_-]*-reel-[a-z0-9_-]+\.mp4$/.test(path) && row.kind === "video") return "reel";
+  if (path.startsWith("/listings/")) return row.kind === "video" ? "preview" : "screenshot";
+  return "other";
+}
+
+/** The folder of a file path ("/social/graphics/a.jpg" → "/social/graphics"). */
+export function folderOf(filePath: string) {
+  const cut = filePath.lastIndexOf("/");
+  return cut > 0 ? filePath.slice(0, cut) : "/";
+}
+
+const mediaEntry = v.object({
+  id: v.id("media"),
+  kind: v.union(v.literal("image"), v.literal("video")),
+  role: mediaRole,
+  url: v.string(),
+  folder: v.string(),
+  contentType: v.string(),
+  size: v.number(),
+  width: v.union(v.number(), v.null()),
+  height: v.union(v.number(), v.null()),
+  createdAt: v.number(),
+});
+
+function mediaEntryOf(row: Doc<"media">) {
+  return {
+    id: row._id,
+    kind: row.kind,
+    role: roleOf(row),
+    url: rowUrl(row),
+    folder: folderOf(row.filePath),
+    contentType: row.contentType,
+    size: row.size,
+    width: row.width ?? null,
+    height: row.height ?? null,
+    createdAt: row.createdAt,
+  };
+}
+
+/** How far back list_media looks (newest rows first); the media table has no kind or role index. */
+const MEDIA_SCAN = 2000;
+
+/** Uploaded files newest first, by kind, role and/or folder (prefix), with URLs and sizes. Never invalid ones. */
+export const listMedia = query({
+  args: {
+    token,
+    kind: v.optional(v.union(v.literal("image"), v.literal("video"))),
+    role: v.optional(mediaRole),
+    folder: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(mediaEntry),
+  handler: async (ctx, { token, kind, role, folder, limit }) => {
+    await requireTokenAdmin(ctx, token);
+    const n = Math.min(Math.max(Math.floor(limit ?? 20), 1), 100);
+    const clean = folder?.trim().replace(/^\/+|\/+$/g, "");
+    const prefix = clean ? `/${clean}` : null;
+    const rows = await ctx.db.query("media").order("desc").take(MEDIA_SCAN);
+    return rows
+      .filter(
+        (row) =>
+          !row.invalid &&
+          (!kind || row.kind === kind) &&
+          (!role || roleOf(row) === role) &&
+          (!prefix || row.filePath === prefix || row.filePath.startsWith(`${prefix}/`)),
+      )
+      .slice(0, n)
+      .map(mediaEntryOf);
+  },
+});
+
+/** The newest reel registered for a listing (R2 social/<slug>/…-reel-….mp4), or null. */
+export const findReel = query({
+  args: { token, listingSlug: v.string() },
+  returns: v.union(mediaEntry, v.null()),
+  handler: async (ctx, { token, listingSlug }) => {
+    await requireTokenAdmin(ctx, token);
+    const listing = await listingBySlug(ctx, listingSlug);
+    // R2 rows use the object key as fileId, so the listing's social folder is a range of by_fileId.
+    const from = `social/${listing.slug}/`;
+    const rows = await ctx.db
+      .query("media")
+      .withIndex("by_fileId", (q) => q.gte("fileId", from).lt("fileId", `social/${listing.slug}0`))
+      .take(500);
+    const reels = rows.filter((row) => !row.invalid && roleOf(row) === "reel").sort((a, b) => b.createdAt - a.createdAt);
+    return reels[0] ? mediaEntryOf(reels[0]) : null;
   },
 });
 

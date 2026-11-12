@@ -6,10 +6,13 @@
 // and admins add announcement/custom posts in chat. Each post carries `facts`
 // (plain data about the listing, studio and award) for Claude, who writes
 // the Facebook / Instagram / Threads / LinkedIn captions through the MCP
-// connector (mcp.ts). Nothing is published until an admin approves it:
-// approving schedules publish.post (now, or at scheduledFor), which posts to
-// every network with a caption and a connected account (channels.ts).
-// Approving a new-listing post also emails the studio (emails.featured).
+// connector (mcp.ts) or an admin writes them in the Studio (the Clerk-session
+// functions at the end of this file). Nothing is published until an admin
+// approves it: approving schedules publish.post (now, or at scheduledFor),
+// which posts to every network with a caption and a connected account
+// (channels.ts). Approving a new-listing post also emails the studio
+// (emails.featured). A post is a feed post or, with placement "story", one
+// 9:16 image or video for Instagram and Facebook stories.
 
 import { v } from "convex/values";
 import {
@@ -23,18 +26,22 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { publishResult, socialMediaItem, socialPostKind, socialPostStatus } from "./schema";
+import { publishResult, socialMediaItem, socialPlacement, socialPostKind, socialPostStatus } from "./schema";
 import {
   NETWORKS,
   NETWORK_NAME,
   PlatformError,
+  STORY_NETWORKS,
   THREADS_MAX,
   instagramImageUrl,
   mediaFor,
+  storyProblem,
   threadsLength,
   type MediaItem,
   type Network,
+  type Placement,
 } from "./lib/socialApi";
+import { channelView, channelsOf, type ChannelView } from "./channels";
 import { requireAdmin } from "./authHelpers";
 import { categoryName, fail, isPublicStatus, listingCategories, mediaUrls } from "./lib/listingHelpers";
 import { TIER_NAMES } from "./lib/awards";
@@ -361,6 +368,7 @@ export const postView = v.object({
   facts: v.any(),
   captions: captionsValidator,
   media: mediaValidator,
+  placement: socialPlacement,
   scheduledFor: v.union(v.number(), v.null()),
   note: v.union(v.string(), v.null()),
   error: v.union(v.string(), v.null()),
@@ -392,6 +400,7 @@ export async function viewPost(ctx: QueryCtx, post: Doc<"socialPosts">) {
     facts: post.facts ?? (post.payload ? { legacy: post.payload } : null),
     captions: post.captions ?? {},
     media: postMedia(post),
+    placement: post.placement ?? "feed",
     scheduledFor: post.scheduledFor ?? null,
     note: post.note ?? null,
     error: post.error ?? null,
@@ -451,11 +460,14 @@ export function isPublishing(post: Doc<"socialPosts">) {
   return !!post.publishingUntil && post.publishingUntil > Date.now();
 }
 
-/** Media with the width and height of the images we uploaded (the media table), for Instagram's ratio rule. */
+/**
+ * Media with the width and height of the files we uploaded (the media table):
+ * images for Instagram's ratio rule, images and videos for a story's 9:16.
+ */
 export async function withSizes(ctx: QueryCtx, media: MediaItem[]): Promise<MediaItem[]> {
   return await Promise.all(
     media.map(async (m) => {
-      if (m.kind !== "image" || (m.width && m.height)) return m;
+      if (m.width && m.height) return m;
       const row = await ctx.db
         .query("media")
         .withIndex("by_url", (q) => q.eq("url", m.url))
@@ -480,6 +492,11 @@ async function instagramMediaProblem(ctx: QueryCtx, post: Doc<"socialPosts">) {
   return null;
 }
 
+/** Why these media can't make a story (count, or a known size that isn't 9:16), or null. */
+async function storyMediaProblem(ctx: QueryCtx, media: MediaItem[]) {
+  return storyProblem(await withSizes(ctx, media));
+}
+
 /** Networks with a caption, in a fixed order. */
 export function captionedNetworks(post: Doc<"socialPosts">): Network[] {
   const captions = post.captions ?? {};
@@ -501,7 +518,13 @@ async function cancelJob(ctx: MutationCtx, post: Doc<"socialPosts">) {
 export async function editPost(
   ctx: MutationCtx,
   id: Id<"socialPosts">,
-  edit: { captions?: Partial<Record<Network, string>>; media?: MediaItem[]; scheduledFor?: number | null; note?: string },
+  edit: {
+    captions?: Partial<Record<Network, string>>;
+    media?: MediaItem[];
+    scheduledFor?: number | null;
+    note?: string;
+    placement?: Placement;
+  },
 ) {
   const post = await ctx.db.get(id);
   if (!post) fail("Post not found.");
@@ -526,6 +549,13 @@ export async function editPost(
     if (edit.media.length > 10) fail("At most 10 images or videos per post.");
     for (const m of edit.media) if (!/^https:\/\//.test(m.url)) fail(`Media must be a public https URL: ${m.url}`);
   }
+  // A story is checked as soon as it has media; an empty one is still being made.
+  const placement = edit.placement ?? post.placement ?? "feed";
+  const media = edit.media ?? postMedia(post);
+  if (placement === "story" && media.length > 0) {
+    const problem = await storyMediaProblem(ctx, media);
+    if (problem) fail(problem);
+  }
   if (edit.scheduledFor != null && edit.scheduledFor < Date.now() - 60_000) fail("The publish time is in the past.");
   if (status === "scheduled") await cancelJob(ctx, post);
   const backToWaiting = status === "approved" || status === "scheduled" || status === "failed";
@@ -535,6 +565,8 @@ export async function editPost(
     ...(edit.media ? { media: edit.media } : post.media ? {} : { media: postMedia(post) }),
     ...(edit.scheduledFor !== undefined ? { scheduledFor: edit.scheduledFor ?? undefined } : {}),
     ...(edit.note !== undefined ? { note: edit.note.trim() || undefined } : {}),
+    // Absent means feed, so older rows and feed posts read the same.
+    ...(edit.placement !== undefined ? { placement: edit.placement === "story" ? ("story" as const) : undefined } : {}),
     // Editing an approved, scheduled or failed post sends it back for another look.
     ...(backToWaiting
       ? { status: "waiting" as const, approvedAt: undefined, approvedBy: undefined, publishJobId: undefined, error: undefined }
@@ -571,7 +603,14 @@ export async function approvePost(ctx: MutationCtx, id: Id<"socialPosts">, by: I
   if (status !== "waiting") fail(`This post is ${status}, not waiting.`);
   const captions = post.captions ?? {};
   if (captionedNetworks(post).length === 0) fail("Write at least one caption first.");
-  if (captions.instagram) {
+  if (post.placement === "story") {
+    // Stories show no text, but the captions still pick the networks.
+    if (!captionedNetworks(post).some((n) => STORY_NETWORKS.includes(n))) {
+      fail("A story goes to Instagram and Facebook only: give it an Instagram or Facebook caption (stories show no text; the caption picks the network).");
+    }
+    const problem = await storyMediaProblem(ctx, postMedia(post));
+    if (problem) fail(problem);
+  } else if (captions.instagram) {
     if (!mediaFor(postMedia(post), "instagram").length) fail("Instagram needs an image or a video.");
     const problem = await instagramMediaProblem(ctx, post);
     if (problem) fail(problem);
@@ -656,7 +695,89 @@ export async function retryPost(ctx: MutationCtx, id: Id<"socialPosts">) {
   });
 }
 
-// Admin Social page (Clerk session).
+/**
+ * A post an admin starts (Studio or MCP). With a listing it gets the listing's
+ * facts (extra facts merged in) and, for a feed post, its screenshots; a
+ * story starts without media (it needs one 9:16 file). Captions, media and
+ * placement go through editPost, so they are checked like any edit.
+ */
+export async function createPost(
+  ctx: MutationCtx,
+  input: {
+    kind: SocialKind;
+    listingId?: Id<"listings">;
+    facts?: unknown;
+    captions?: Partial<Record<Network, string>>;
+    media?: MediaItem[];
+    placement?: Placement;
+  },
+) {
+  const listing = input.listingId ? await ctx.db.get(input.listingId) : null;
+  if (input.listingId && !listing) fail("Listing not found.");
+  const base = listing ? await listingFacts(ctx, listing) : null;
+  const extra = input.facts && typeof input.facts === "object" ? input.facts : {};
+  const story = input.placement === "story";
+  const id = await queuePost(ctx, {
+    kind: input.kind,
+    listingId: listing?._id,
+    facts: base ? { ...base, ...extra } : (input.facts ?? {}),
+    media: base && !story ? base.screenshots.map((url) => ({ kind: "image" as const, url, role: "screenshot" })) : [],
+  });
+  if (input.captions || input.media || input.placement) {
+    await editPost(ctx, id, { captions: input.captions, media: input.media, placement: input.placement });
+  }
+  return id;
+}
+
+/**
+ * Approve and publish in one step: now when `at` is absent or past, else at
+ * `at`. A scheduled post is unscheduled first, so this also moves its time.
+ * Failed posts are retried instead (retryPost), so sent networks stay sent.
+ */
+export async function publishPost(ctx: MutationCtx, id: Id<"socialPosts">, by: Id<"users">, at?: number) {
+  const post = await ctx.db.get(id);
+  if (!post) fail("Post not found.");
+  const status = readStatus(post.status);
+  if (status === "scheduled") await unschedulePost(ctx, id);
+  else if (status === "failed" || status === "approved") fail(`This post is ${status}: retry it instead.`);
+  else if (status !== "waiting") fail(`This post is ${status}; it can't be published again.`);
+  const now = Date.now();
+  await ctx.db.patch(id, { scheduledFor: at !== undefined && at > now ? at : undefined, updatedAt: now });
+  await approvePost(ctx, id, by);
+}
+
+/** A scheduled post back to waiting: its publish job is cancelled; its publish time is kept for the next approval. */
+export async function unschedulePost(ctx: MutationCtx, id: Id<"socialPosts">) {
+  const post = await ctx.db.get(id);
+  if (!post) fail("Post not found.");
+  const status = readStatus(post.status);
+  if (status !== "scheduled") fail(`This post is ${status}, not scheduled.`);
+  if (isPublishing(post)) fail("This post is being published right now; wait a few minutes.");
+  await cancelJob(ctx, post);
+  await ctx.db.patch(id, {
+    status: "waiting",
+    approvedAt: undefined,
+    approvedBy: undefined,
+    publishJobId: undefined,
+    publishingUntil: undefined,
+    updatedAt: Date.now(),
+  });
+}
+
+/** The latest sent posts, by when they went out (looked up among the newest 200 sent). */
+export async function recentSent(ctx: QueryCtx, limit: number) {
+  const sent = await postsWithStatus(ctx, "sent", 200);
+  const picked = sent.sort((a, b) => (b.sentAt ?? b.createdAt) - (a.sentAt ?? a.createdAt)).slice(0, limit);
+  return await Promise.all(picked.map((p) => viewPost(ctx, p)));
+}
+
+async function viewById(ctx: QueryCtx, id: Id<"socialPosts">) {
+  const post = await ctx.db.get(id);
+  if (!post) fail("Post not found.");
+  return await viewPost(ctx, post);
+}
+
+// Admin Social page and the Studio (Clerk session).
 
 export const queue = query({
   args: { status: v.optional(v.union(socialPostStatus, v.literal("all"))) },
@@ -704,6 +825,87 @@ export const retry = mutation({
     await requireAdmin(ctx);
     await retryPost(ctx, id);
     return null;
+  },
+});
+
+export const get = query({
+  args: { id: v.id("socialPosts") },
+  returns: postView,
+  handler: async (ctx, { id }) => {
+    await requireAdmin(ctx);
+    return await viewById(ctx, id);
+  },
+});
+
+export const create = mutation({
+  args: {
+    kind: socialPostKind,
+    listingId: v.optional(v.id("listings")),
+    facts: v.optional(v.any()),
+    captions: v.optional(captionsValidator),
+    media: v.optional(mediaValidator),
+    placement: v.optional(socialPlacement),
+  },
+  returns: postView,
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+    return await viewById(ctx, await createPost(ctx, args));
+  },
+});
+
+export const update = mutation({
+  args: {
+    id: v.id("socialPosts"),
+    captions: v.optional(captionsValidator),
+    media: v.optional(mediaValidator),
+    publishAt: v.optional(v.union(v.number(), v.null())), // null: as soon as approved
+    note: v.optional(v.string()),
+    placement: v.optional(socialPlacement),
+  },
+  returns: postView,
+  handler: async (ctx, { id, publishAt, ...edit }) => {
+    await requireAdmin(ctx);
+    await editPost(ctx, id, { ...edit, scheduledFor: publishAt });
+    return await viewById(ctx, id);
+  },
+});
+
+export const publish = mutation({
+  args: { id: v.id("socialPosts"), at: v.optional(v.number()) },
+  returns: postView,
+  handler: async (ctx, { id, at }) => {
+    const admin = await requireAdmin(ctx);
+    await publishPost(ctx, id, admin._id, at);
+    return await viewById(ctx, id);
+  },
+});
+
+export const unschedule = mutation({
+  args: { id: v.id("socialPosts") },
+  returns: postView,
+  handler: async (ctx, { id }) => {
+    await requireAdmin(ctx);
+    await unschedulePost(ctx, id);
+    return await viewById(ctx, id);
+  },
+});
+
+/** The four networks as stored (no tokens). Newly set env tokens show after the next sync (daily, or before a publish). */
+export const channels = query({
+  args: {},
+  returns: v.array(channelView),
+  handler: async (ctx): Promise<ChannelView[]> => {
+    await requireAdmin(ctx);
+    return await channelsOf(ctx);
+  },
+});
+
+export const recent = query({
+  args: { limit: v.optional(v.number()) },
+  returns: v.array(postView),
+  handler: async (ctx, { limit }) => {
+    await requireAdmin(ctx);
+    return await recentSent(ctx, Math.min(Math.max(Math.floor(limit ?? 10), 1), 50));
   },
 });
 
