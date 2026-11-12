@@ -39,6 +39,7 @@ import { channelView, type ChannelView } from "./channels";
 import { audience, deliver, type Message } from "./emails";
 import { ensureListingClaimUrl, newClaimToken } from "./claimLinks";
 import { siteUrl } from "./seo";
+import { MEDIA_ROLES, type MediaRole } from "../lib/mediaRoles";
 
 const token = v.string();
 
@@ -458,9 +459,10 @@ export const renderGraphic = action({
     fields: v.optional(v.record(v.string(), v.string())),
     imageUrls: v.optional(v.array(v.string())),
     glass: v.optional(v.string()),
+    style: v.optional(v.string()),
   },
-  returns: v.object({ url: v.string(), mediaId: v.id("media") }),
-  handler: async (ctx, { token, ...args }): Promise<{ url: string; mediaId: Id<"media"> }> => {
+  returns: v.object({ url: v.string(), mediaId: v.id("media"), width: v.number(), height: v.number() }),
+  handler: async (ctx, { token, ...args }): Promise<{ url: string; mediaId: Id<"media">; width: number; height: number }> => {
     await ctx.runQuery(internal.mcp.checkToken, { token });
     return await ctx.runAction(internal.graphics.render, args);
   },
@@ -473,6 +475,7 @@ export const renderCarousel = action({
     listingSlug: v.optional(v.string()),
     facts: v.optional(v.record(v.string(), v.string())),
     palette: v.string(),
+    style: v.optional(v.string()),
     story: v.optional(
       v.object({
         chips: v.optional(v.array(v.string())),
@@ -498,8 +501,6 @@ export const renderCarousel = action({
 // Media: past renders, reels, screenshots (the media table)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const MEDIA_ROLES = ["graphic", "carousel", "reel", "screenshot", "preview", "other"] as const;
-export type MediaRole = (typeof MEDIA_ROLES)[number];
 const mediaRole = v.union(...MEDIA_ROLES.map((r) => v.literal(r)));
 
 /**

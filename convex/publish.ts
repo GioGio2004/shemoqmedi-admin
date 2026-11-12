@@ -24,11 +24,13 @@
 // time fails with that reason before it sends anything more; finish still runs.
 
 import { v } from "convex/values";
-import { internalAction, internalMutation } from "./_generated/server";
+import { internalAction, internalMutation, type MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { socialNetwork, socialPlacement } from "./schema";
-import { captionedNetworks, postMedia, readStatus, withSizes } from "./social";
+import { KIND_LABEL, captionedNetworks, postMedia, readStatus, withSizes } from "./social";
+import { pushAdmins } from "./push";
+import { studioUrl } from "../lib/hosts";
 import { accountOf, ENV_VARS } from "./channels";
 import {
   NETWORK_NAME,
@@ -184,7 +186,19 @@ export const record = internalMutation({
   },
 });
 
-/** The post's status from its results; releases the lease. */
+/** "Award: Site name" / "Story: Site name", for push titles. */
+async function postLabel(ctx: MutationCtx, post: Doc<"socialPosts">) {
+  const listing = post.listingId ? await ctx.db.get(post.listingId) : null;
+  const what = post.placement === "story" ? "Story" : ((post.kind && KIND_LABEL[post.kind]) || "Post");
+  return listing ? `${what}: ${listing.title}` : what;
+}
+
+/** Where a post's push opens: the post in the Studio queue. */
+export function postLink(id: Id<"socialPosts">) {
+  return studioUrl(`/queue?post=${encodeURIComponent(id)}`);
+}
+
+/** The post's status from its results; releases the lease. Pushes sent / failed to the admins. */
 export const finish = internalMutation({
   args: { postId: v.id("socialPosts") },
   returns: v.union(v.literal("sent"), v.literal("failed"), v.literal("approved"), v.null()),
@@ -202,10 +216,23 @@ export const finish = internalMutation({
     if (failed.length > 0) {
       const error = failed.map((r) => `${NETWORK_NAME[r.network]}: ${r.error ?? "failed"}`).join(" · ");
       await ctx.db.patch(postId, { ...base, status: "failed", error });
+      const ok = sent.map((r) => NETWORK_NAME[r.network]);
+      await pushAdmins(ctx, {
+        title: `Failed: ${await postLabel(ctx, post)}`,
+        body: `${error.slice(0, 200)}${ok.length ? ` · Sent: ${ok.join(", ")}` : ""}`,
+        url: postLink(postId),
+        tag: `post-${postId}`,
+      });
       return "failed";
     }
     if (sent.length > 0) {
       await ctx.db.patch(postId, { ...base, status: "sent", sentAt: now, error: undefined });
+      await pushAdmins(ctx, {
+        title: `Published: ${await postLabel(ctx, post)}`,
+        body: `On ${sent.map((r) => NETWORK_NAME[r.network]).join(", ")}`,
+        url: postLink(postId),
+        tag: `post-${postId}`,
+      });
       return "sent";
     }
     // Networks a story never goes to (Threads, LinkedIn) are not missing an account.

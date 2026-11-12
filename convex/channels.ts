@@ -21,6 +21,8 @@ import type { Doc } from "./_generated/dataModel";
 import { accountNetwork } from "./schema";
 import { DAY_MS } from "./lib/time";
 import { emailHtml, sendEmail } from "./lib/email";
+import { pushAdmins } from "./push";
+import { studioUrl } from "../lib/hosts";
 import { IG_LOOKUP_FAILED, linkedinIds, metaIds, refreshThreadsToken, scrub, sha256Hex, threadsIds } from "./lib/socialApi";
 
 type AccountNetwork = Doc<"socialAccounts">["network"];
@@ -312,6 +314,13 @@ export const refreshThreads = internalAction({
         network: "threads",
         error: scrub(`Token refresh failed: ${(err as Error).message}`, row.token),
       });
+      // No error text in the push: it leaves our systems through the push service.
+      await pushAdmins(ctx, {
+        title: "The Threads token refresh failed",
+        body: "Posts to Threads may stop when it expires. Channels in the Studio show the error.",
+        url: studioUrl("/"),
+        tag: "token-threads",
+      });
       return "failed";
     }
   },
@@ -371,6 +380,16 @@ export const warnLinkedin = internalAction({
         : `The LinkedIn access token expires on ${new Date(info.expiresAt).toUTCString()}. LinkedIn tokens can't be refreshed automatically.`;
     const to: string[] = await ctx.runQuery(internal.notify.adminEmails, {});
     const error = await sendEmail({ to, subject, text: `${lead}\n\n${LINKEDIN_HOWTO}`, html: emailHtml([lead, LINKEDIN_HOWTO]) });
+    // The push goes out even when the email fails (then both repeat tomorrow).
+    await pushAdmins(ctx, {
+      title: subject,
+      body:
+        kind === "expired"
+          ? "LinkedIn fails on every post until the token is replaced. The email has the steps."
+          : "LinkedIn tokens can't be refreshed automatically. The email has the steps.",
+      url: studioUrl("/"),
+      tag: "token-linkedin",
+    });
     if (error) {
       console.warn(`LinkedIn token warning not sent: ${error}`);
       return null;

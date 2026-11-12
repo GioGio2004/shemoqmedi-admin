@@ -409,14 +409,24 @@ describe("hooks", () => {
     await env.t.action(internal.notify.awardAnnounced, { awardId: await award("F100", "7") });
     await drain(env);
     warn.mockRestore();
-    expect(sent()).toEqual([
-      expect.objectContaining({
-        title: "Site of the Day: Paper Weather",
-        body: "Paper Weather by Fold & Co. won Site of the Day · 12 Nov 2026.",
-        url: "https://admin.shemoqmedi.space/awards",
-        tag: `award-${sotd}`,
-      }),
-    ]);
+    // The admins' copy, and the award's queued post (social.queueAward); nothing for the First 100.
+    expect(sent()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: "Site of the Day: Paper Weather",
+          body: "Paper Weather by Fold & Co. won Site of the Day · 12 Nov 2026.",
+          url: "https://admin.shemoqmedi.space/awards",
+          tag: `award-${sotd}`,
+        }),
+        expect.objectContaining({
+          title: "A post is waiting",
+          body: "Site of the Day: Paper Weather",
+          url: "https://studio.shemoqmedi.space/queue",
+          tag: "social-queue",
+        }),
+      ]),
+    );
+    expect(sent()).toHaveLength(2);
   });
 
   it("an empty day and a round without a winner push to the admins", async () => {

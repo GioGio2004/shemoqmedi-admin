@@ -111,6 +111,7 @@
 .admin-header-actions { display: flex; align-items: center; gap: 16px; }
 .admin-storefront-link { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; font-size: 11px; }
 .admin-storefront-link > span { font-size: 19px; }
+.admin-storefront-link > .admin-count { font-size: 10px; }
 /* ── Phones: compact header + bottom tab bar (AdminShell MobileTabBar) ─── */
 /* The page runs edge to edge (viewport-fit: cover): keep content clear of
    the notch in landscape and of the home indicator at the bottom. */

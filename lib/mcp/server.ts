@@ -7,7 +7,17 @@ import { api } from "@/convex/_generated/api";
 import { THREADS_MAX, threadsLength } from "@/convex/lib/socialApi";
 import type { Id } from "@/convex/_generated/dataModel";
 import { publicOrigin, serviceCredential, verifyOAuthToken } from "./oauth";
-import { FORMAT_ENUM, PALETTE_DESCRIPTION, TEMPLATE_ENUM, paletteCatalog, templateCatalog } from "./catalog";
+import {
+  FORMAT_ENUM,
+  MEDIA_ROLE_ENUM,
+  PALETTE_DESCRIPTION,
+  STYLE_DESCRIPTION,
+  STYLE_ENUM,
+  TEMPLATE_ENUM,
+  paletteCatalog,
+  styleCatalog,
+  templateCatalog,
+} from "./catalog";
 
 /**
  * The Shemoqmedi social desk connector: Giorgi's own Claude (the Claude app on
@@ -85,12 +95,12 @@ What the database does by itself: when an award is announced (Honorable Mention,
 
 Your daily loop when Giorgi asks "what's waiting?":
 1. social_queue (status waiting). For each post read its facts (get_post; get_listing for jury comments and more).
-2. Make the graphics. Always attach graphics, not only screenshots. For award and new-listing posts render the storytelling carousel (render_carousel with the listing's slug) and use its slides for Instagram, Facebook and LinkedIn (media items with networks ["instagram","facebook","linkedin"]); add the carousel's first (hook) slide once more with networks ["threads"] for Threads. For calls, roundups and announcements render one graphic (render_graphic) in ig_portrait or square: Instagram only takes images between 4:5 and 1.91:1, so story, reel_cover and link graphics get padded with white for Instagram (keep those for other networks via the media item's networks). A preview video can go first instead when Giorgi wants a reel (voiceovers: list_voices, create_voiceover, then he builds the reel on the admin Voiceover page).
+2. Make the graphics. Always attach graphics, not only screenshots. For award and new-listing posts render the storytelling carousel (render_carousel with the listing's slug) and use its slides for Instagram, Facebook and LinkedIn (media items with networks ["instagram","facebook","linkedin"]); add the carousel's first (hook) slide once more with networks ["threads"] for Threads. For calls, roundups and announcements render one graphic (render_graphic) in ig_portrait or square: Instagram only takes images between 4:5 and 1.91:1, so story, reel_cover and link graphics get padded with white for Instagram (keep those for other networks via the media item's networks). Pick a style for each post (list_styles): glass is the frosted look over a blurred backdrop of the site; swiss, kinetic, magazine and bento are flat and render fast. Keep one style across a post's slides and vary styles between posts so the feed doesn't repeat itself; pass the same style to render_graphic and render_carousel. A preview video can go first instead when Giorgi wants a reel (voiceovers: list_voices, create_voiceover, then he builds the reel on the Studio's Reels page).
 3. Write captions for the networks that fit: instagram, facebook, threads, linkedin. Save captions and media with update_post.
 4. Show him every caption in full and the rendered image URLs it will use, then ask. Only call approve_post after he says yes to that exact post. If he asks for changes, edit and show again.
 5. Approving publishes: at once, or at the post's publish time (publishAt), to every network that has a caption and a connected account. publish_post does it in one step (now, or at a time Giorgi gives); unschedule_post takes a scheduled post back to waiting. Check list_channels when unsure what is connected. Afterwards get_post shows each network's result and link; a failed network can be sent again with retry_post (networks already sent are never sent twice).
 
-Stories: a post with placement "story" is exactly one 9:16 image (render_graphic in the story format) or video (find_reel finds a listing's latest reel). It goes to Instagram and the Facebook Page as a story; Threads and LinkedIn have no stories and are skipped. Stories show no text, so a short caption for instagram and/or facebook only picks where it goes. list_templates, list_palettes and list_media help pick and reuse graphics.
+Stories: a post with placement "story" (set on create_post or update_post) is exactly one 9:16 image (render_graphic with format story, in any style) or video (find_reel finds a listing's latest reel). It goes to Instagram and the Facebook Page as a story; Threads and LinkedIn have no stories and are skipped. Stories show no text, so a short caption for instagram and/or facebook only picks where it goes. list_templates, list_palettes, list_styles and list_media help pick and reuse graphics.
 
 Voice and rules:
 - English only. Short, specific and warm; say what is good about the site in concrete terms (motion, typography, the idea). No hype words ("stunning", "game-changer", "mind-blowing"), no emoji walls (one or two at most), no engagement bait.
@@ -149,7 +159,8 @@ const placement = z
   .enum(["feed", "story"])
   .describe('"story": one 9:16 image or video, posted as an Instagram and Facebook story (Threads and LinkedIn are skipped). Default feed.');
 const when = z.string().describe("ISO date-time, Tbilisi time when no offset, e.g. 2026-11-14T18:00");
-const glass = z.enum(["frost", "liquid", "tint"]).optional().describe("Glass style (default frost)");
+const glass = z.enum(["frost", "liquid", "tint"]).optional().describe("Glass finish for the glass style (default frost)");
+const style = z.enum(STYLE_ENUM).optional().describe(STYLE_DESCRIPTION);
 const audience = z
   .enum(["users", "studios", "jurors", "all"])
   .describe("users: everyone with an account; studios: studio contact emails and owners; jurors: active jurors; all: everyone");
@@ -411,6 +422,17 @@ const handler = createMcpHandler(
     );
 
     server.registerTool(
+      "list_styles",
+      {
+        title: "List styles",
+        description:
+          "The visual styles for render_graphic and render_carousel (glass, the frosted look and the default, plus flat styles that render fast), with what each looks like.",
+        inputSchema: z.object({}),
+      },
+      async () => text(styleCatalog()),
+    );
+
+    server.registerTool(
       "list_media",
       {
         title: "List media",
@@ -418,7 +440,7 @@ const handler = createMcpHandler(
           "Uploaded files newest first, with URLs, sizes and dimensions, to reuse instead of rendering again. role: graphic (rendered graphics), carousel (carousel slides), reel (finished reels), screenshot / preview (listing media). folder narrows to a path, e.g. social/graphics.",
         inputSchema: z.object({
           kind: z.enum(["image", "video"]).optional(),
-          role: z.enum(["graphic", "carousel", "reel", "screenshot", "preview", "other"]).optional(),
+          role: z.enum(MEDIA_ROLE_ENUM).optional(),
           folder: z.string().max(200).optional(),
           limit: z.number().int().min(1).max(100).optional(),
         }),
@@ -431,7 +453,7 @@ const handler = createMcpHandler(
       {
         title: "Find reel",
         description:
-          "The latest finished reel (MP4 with voiceover, built on the Voiceover page) of a listing, with its URL and size, or null. Attach it to a post as a video (an Instagram reel, or a story when it is 9:16 and the post's placement is story).",
+          "The latest finished reel (MP4 with voiceover, built on the Studio Reels page) of a listing, with its URL and size, or null. Attach it to a post as a video (an Instagram reel, or a story when it is 9:16 and the post's placement is story).",
         inputSchema: z.object({ listingSlug: slug }),
       },
       async (args, ctx) => run(() => convex.query(api.mcp.findReel, { ...auth(ctx), listingSlug: args.listingSlug })),
@@ -442,13 +464,14 @@ const handler = createMcpHandler(
       {
         title: "Render graphic",
         description:
-          "Render one post graphic (JPEG, uploaded to ImageKit) and return its public URL, to attach with update_post (kind image, role graphic). list_templates shows every template's fields and every format. For an Instagram feed post use ig_portrait or square (it takes 4:5 to 1.91:1; story, reel_cover and link are padded with white there); for a story post use story. fields are the template's texts, e.g. { tier: \"SOTD\", title, studio, date, awardSlug, url } for award; imageUrls the template's images in order (award: [screenshot, badge], others: [screenshot]).",
+          "Render one post graphic (JPEG, uploaded to ImageKit) and return its public URL and size, to attach with update_post (kind image, role graphic). list_templates shows every template's fields and every format. For an Instagram feed post use ig_portrait or square (it takes 4:5 to 1.91:1; story, reel_cover and link are padded with white there); for a story post use story. fields are the template's texts, e.g. { tier: \"SOTD\", title, studio, date, awardSlug, url } for award; imageUrls the template's images in order (award: [screenshot, badge], others: [screenshot]).",
         inputSchema: z.object({
           template: z.enum(TEMPLATE_ENUM),
           format: z.enum(FORMAT_ENUM),
           palette,
           fields: z.record(z.string(), z.string()).optional(),
           imageUrls: z.array(z.string().url()).max(4).optional(),
+          style,
           glass,
         }),
       },
@@ -460,11 +483,12 @@ const handler = createMcpHandler(
       {
         title: "Render carousel",
         description:
-          "Render a listing's storytelling carousel (6-8 JPEG slides, 1080x1350) from its facts, screenshots, award and jury, and return the slide URLs in order (the first is the hook slide) with the slide names. Attach the slides with update_post (networks instagram, facebook, linkedin) and the hook slide for Threads. facts override or supply texts (title, studio, url, tagline, kicker, date, tier, awardSlug, score, quote, juror, role, cta, ...); story adds chips/notes for the detail slides, the last slide's cta, glass, and screenshot overrides.",
+          "Render a listing's storytelling carousel (6-8 JPEG slides, 1080x1350) in a style from its facts, screenshots, award and jury, and return the slide URLs in order (the first is the hook slide) with the slide names. Attach the slides with update_post (networks instagram, facebook, linkedin) and the hook slide for Threads. facts override or supply texts (title, studio, url, tagline, kicker, date, tier, awardSlug, score, quote, juror, role, cta, ...); story adds chips/notes for the detail slides, the last slide's cta, glass, and screenshot overrides.",
         inputSchema: z.object({
           listingSlug: slug.optional(),
           facts: z.record(z.string(), z.string()).optional(),
           palette,
+          style,
           story: z
             .object({
               chips: z.array(z.string().max(60)).max(4).optional(),
@@ -496,7 +520,7 @@ const handler = createMcpHandler(
       {
         title: "Create voiceover",
         description:
-          "Voice a narration script for a listing's preview video with ElevenLabs and return the MP3 URL and its length. Spends ElevenLabs credits: only after Giorgi approved the script and the voice. The reel itself (the muted preview with this narration) is built by Giorgi on the admin Voiceover page (/voiceover), which uploads it; then attach the reel's URL to the post as a video.",
+          "Voice a narration script for a listing's preview video with ElevenLabs and return the MP3 URL and its length. Spends ElevenLabs credits: only after Giorgi approved the script and the voice. The reel itself (the muted preview with this narration) is built by Giorgi on the Studio Reels page (studio.shemoqmedi.space/reels), which uploads it; then attach the reel's URL to the post as a video.",
         inputSchema: z.object({ listingSlug: slug, script: z.string().min(1).max(2000), voice: z.string().min(1).max(80).describe("Narrator name from list_voices") }),
       },
       async (args, ctx) => run(() => convex.action(api.mcp.createVoiceover, { ...auth(ctx), ...args })),

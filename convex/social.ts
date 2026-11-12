@@ -49,6 +49,8 @@ import { DAY_MS, tbilisiDay, weekOf } from "./lib/time";
 import { emailHtml, escapeHtml, sendEmail } from "./lib/email";
 import { ensureListingClaimUrl } from "./claimLinks";
 import { creatorPath, siteUrl, sitePath } from "./seo";
+import { pushAdmins } from "./push";
+import { studioUrl } from "../lib/hosts";
 
 export type SocialKind = Doc<"socialPosts">["kind"] & string;
 export type PostStatus = "waiting" | "approved" | "scheduled" | "sent" | "failed" | "rejected";
@@ -158,6 +160,24 @@ export async function queuePost(
   });
 }
 
+/** The Studio queue tag: a newer "posts waiting" push replaces the older one on the device. */
+const QUEUE_TAG = "social-queue";
+
+/**
+ * One push per queueing run that added posts (never one per post), linking
+ * the Studio queue. Scheduled, so it rolls back with the run.
+ */
+async function pushQueued(ctx: MutationCtx, titles: string[]) {
+  const n = titles.length;
+  if (n === 0) return;
+  await pushAdmins(ctx, {
+    title: n === 1 ? "A post is waiting" : `${n} new posts are waiting`,
+    body: digestBody(titles, n),
+    url: studioUrl("/queue"),
+    tag: QUEUE_TAG,
+  });
+}
+
 /** An announced award → a waiting post (once per award). Not for the honorary First 100. */
 export const queueAward = internalMutation({
   args: { awardId: v.id("awards") },
@@ -173,7 +193,7 @@ export const queueAward = internalMutation({
     const listing = await ctx.db.get(award.listingId);
     if (!listing) return null;
     const facts = await listingFacts(ctx, listing);
-    return await queuePost(ctx, {
+    const id = await queuePost(ctx, {
       kind: "award",
       awardId,
       listingId: listing._id,
@@ -192,6 +212,8 @@ export const queueAward = internalMutation({
       },
       media: listingMedia(facts),
     });
+    await pushQueued(ctx, [`${TIER_NAMES[award.tier]}: ${listing.title}`]);
+    return id;
   },
 });
 
@@ -205,7 +227,7 @@ export const queueNewListings = internalMutation({
       .query("listings")
       .withIndex("by_status_published", (q) => q.eq("status", "in_voting").gte("publishedAt", since))
       .take(200);
-    let queued = 0;
+    const queued: string[] = [];
     for (const listing of fresh) {
       const existing = await ctx.db
         .query("socialPosts")
@@ -219,9 +241,10 @@ export const queueNewListings = internalMutation({
         facts: { ...facts, links: links() },
         media: listingMedia(facts),
       });
-      queued++;
+      queued.push(`New listing: ${listing.title}`);
     }
-    return queued;
+    await pushQueued(ctx, queued);
+    return queued.length;
   },
 });
 
@@ -248,7 +271,7 @@ export const queueCall = internalMutation({
   handler: async (ctx, { kind, everyOtherWeek }) => {
     if (everyOtherWeek && !isEvenWeek(Date.now())) return null;
     if (await recentOfKind(ctx, kind, 6 * DAY_MS)) return null;
-    return await queuePost(ctx, {
+    const id = await queuePost(ctx, {
       kind,
       facts: {
         what: kind === "call_submissions" ? "Invite studios and freelancers to submit their best site." : "Invite designers and developers to join the jury (invite-only: they reply or email us).",
@@ -256,6 +279,8 @@ export const queueCall = internalMutation({
         links: links(),
       },
     });
+    await pushQueued(ctx, [KIND_LABEL[kind]]);
+    return id;
   },
 });
 
@@ -275,7 +300,7 @@ export const queueRoundup = internalMutation({
     );
     if (fresh.length === 0 && awards.length === 0) return null;
     const awardListings = await Promise.all(awards.map((a) => ctx.db.get(a.listingId)));
-    return await queuePost(ctx, {
+    const id = await queuePost(ctx, {
       kind: "roundup",
       facts: {
         week: weekOf(Date.now()),
@@ -292,6 +317,8 @@ export const queueRoundup = internalMutation({
         links: links(),
       },
     });
+    await pushQueued(ctx, [`${KIND_LABEL.roundup} (${fresh.length} new, ${awards.length} award${awards.length === 1 ? "" : "s"})`]);
+    return id;
   },
 });
 
@@ -930,7 +957,7 @@ export const waitingSummary = internalQuery({
   },
 });
 
-const KIND_LABEL: Record<string, string> = {
+export const KIND_LABEL: Record<string, string> = {
   award: "Award",
   new_listing: "New listing",
   call_submissions: "Call for submissions",
@@ -940,7 +967,14 @@ const KIND_LABEL: Record<string, string> = {
   custom: "Post",
 };
 
-/** Cron (morning, Tbilisi): "N posts are waiting", to every admin. */
+/** A push body: the first few waiting posts, then how many more. */
+export function digestBody(labels: string[], total: number) {
+  const shown = labels.slice(0, 3);
+  const more = total - shown.length;
+  return `${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
+}
+
+/** Cron (morning, Tbilisi): "N posts are waiting", to every admin (email and push). */
 export const waitingPing = internalAction({
   args: {},
   returns: v.null(),
@@ -966,6 +1000,12 @@ export const waitingPing = internalAction({
       ]),
     });
     if (error) console.warn(`Social desk nudge not sent: ${error}`);
+    await pushAdmins(ctx, {
+      title: `${n} post${n === 1 ? " is" : "s are"} waiting`,
+      body: digestBody(waiting.map((w) => `${KIND_LABEL[w.kind] ?? w.kind}${w.title ? `: ${w.title}` : ""}`), n),
+      url: studioUrl("/queue"),
+      tag: QUEUE_TAG,
+    });
     return null;
   },
 });

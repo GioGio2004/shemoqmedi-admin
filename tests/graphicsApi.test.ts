@@ -15,6 +15,7 @@ import { deliveryUrl } from "../lib/graphics/imaging";
 import { GET as assetsGET } from "../app/api/graphics/assets/route";
 import { GET as fontsGET } from "../app/api/graphics/fonts/[file]/route";
 import { GET as graphicGET } from "../app/api/graphics/route";
+import { mintServiceCredential } from "../convex/lib/tokens";
 
 const modules = import.meta.glob("../convex/**/*.{ts,js}");
 
@@ -71,6 +72,33 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+});
+
+describe("MCP render tools", () => {
+  async function mcp() {
+    vi.stubEnv("MCP_SERVICE_SECRET", "test-secret-test-secret-test-secret");
+    const env = await setup();
+    return { ...env, token: (await mintServiceCredential("admin"))! };
+  }
+
+  it("render_graphic forwards the style and returns the graphic's size", async () => {
+    const { t, token } = await mcp();
+    const calls = fakeServices();
+    const out = await t.action(api.mcp.renderGraphic, { token, template: "award", format: "story", palette: "egypt", style: "kinetic", fields: { title: "Floema" } });
+    expect(out).toEqual({ url: `${IK}/social/graphics/f1.jpg`, mediaId: expect.any(String), width: 1080, height: 1920 });
+    expect(calls.find((c) => c.url.pathname === "/api/graphics")!.url.searchParams.get("style")).toBe("kinetic");
+    await expect(t.action(api.mcp.renderGraphic, { token, template: "award", format: "story", palette: "egypt", style: "brutal" })).rejects.toThrow(/Unknown style/);
+  });
+
+  it("render_carousel forwards the style in its one request", async () => {
+    const { t, token } = await mcp();
+    const calls = fakeServices();
+    const out = await t.action(api.mcp.renderCarousel, { token, facts: { title: "Floema", studio: "Studio" }, palette: "egypt", style: "bento" });
+    expect(out.urls).toHaveLength(3);
+    const renders = calls.filter((c) => c.url.origin === ORIGIN);
+    expect(renders).toHaveLength(1);
+    expect(renders[0].url.searchParams.get("style")).toBe("bento");
+  });
 });
 
 describe("graphics.renderForPost", () => {

@@ -45,10 +45,11 @@ function SocialCount() {
   return <CountBubble value={count} label="posts waiting" />;
 }
 
+// Social, Design and Voiceover moved to the Studio (its own host and app);
+// the old addresses redirect there (proxy.ts, lib/studioRouting.ts).
 const NAV = [
   { href: "/dashboard", label: "Overview", count: null },
   { href: "/review", label: "Review", count: ReviewCount },
-  { href: "/social", label: "Social", count: SocialCount },
   { href: "/nominees", label: "Nominees", count: null },
   { href: "/featured", label: "Featured", count: null },
   { href: "/awards", label: "Awards", count: null },
@@ -56,8 +57,6 @@ const NAV = [
   { href: "/creators", label: "Creators", count: null },
   { href: "/jury", label: "Jury", count: null },
   { href: "/outreach", label: "Outreach", count: null },
-  { href: "/design", label: "Design", count: null },
-  { href: "/voiceover", label: "Voiceover", count: null },
   { href: "/users", label: "Users", count: null },
   { href: "/claims", label: "Claims", count: ClaimsCount },
   { href: "/seed", label: "Import", count: null },
@@ -68,7 +67,26 @@ function isCurrent(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-/** Every admin section as links: the desktop popup and the mobile "More" sheet. */
+/** The Studio (social queue, design, reels) opens as its own app in a new tab, with the waiting posts count. */
+function StudioLink({
+  className,
+  showCounts,
+  onNavigate,
+}: {
+  className?: string;
+  showCounts: boolean;
+  onNavigate?: () => void;
+}) {
+  return (
+    <a href={STUDIO_ORIGIN} className={className} target="_blank" rel="noopener noreferrer" onClick={onNavigate}>
+      Studio <span aria-hidden="true">↗</span>
+      <span className="sr-only"> (opens in a new tab)</span>
+      {showCounts && <SocialCount />}
+    </a>
+  );
+}
+
+/** Every admin section as links (and the Studio): the desktop popup and the mobile "More" sheet. */
 function SectionLinks({
   pathname,
   showCounts,
@@ -78,20 +96,25 @@ function SectionLinks({
   showCounts: boolean;
   onNavigate: () => void;
 }) {
-  return NAV.map((item) => {
-    const Count = item.count;
-    return (
-      <Link
-        key={item.href}
-        href={item.href}
-        aria-current={isCurrent(pathname, item.href) ? "page" : undefined}
-        onClick={onNavigate}
-      >
-        {item.label}
-        {Count && showCounts && <Count />}
-      </Link>
-    );
-  });
+  return (
+    <>
+      {NAV.map((item) => {
+        const Count = item.count;
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            aria-current={isCurrent(pathname, item.href) ? "page" : undefined}
+            onClick={onNavigate}
+          >
+            {item.label}
+            {Count && showCounts && <Count />}
+          </Link>
+        );
+      })}
+      <StudioLink showCounts={showCounts} onNavigate={onNavigate} />
+    </>
+  );
 }
 
 /**
@@ -208,6 +231,7 @@ function MobileTabBar({
           <TabIcon d="M5 15 15 5M8 5h7v7" />
           Studio
           <span className="sr-only"> (opens in a new tab)</span>
+          {showCounts && <SocialCount />}
         </a>
         <button
           type="button"
@@ -241,7 +265,7 @@ function AdminHeader() {
         <Wordmark />
         <span className="admin-brand-label">Admin</span>
       </Link>
-      {/* Eleven items: the bar scrolls sideways (no scrollbar) when the window
+      {/* Thirteen items: the bar scrolls sideways (no scrollbar) when the window
           is narrow, and the button at its end lists every section at once. */}
       <div className="admin-nav-wrap">
         <nav className="admin-navigation" aria-label="Admin navigation">
@@ -264,14 +288,7 @@ function AdminHeader() {
         <AllSections pathname={pathname} showCounts={admin.kind === "admin"} />
       </div>
       <div className="admin-header-actions">
-        <a
-          href={STUDIO_ORIGIN}
-          className="admin-storefront-link"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Studio <span aria-hidden="true">↗</span>
-        </a>
+        <StudioLink className="admin-storefront-link" showCounts={admin.kind === "admin"} />
         <a
           href={STOREFRONT_URL}
           className="admin-storefront-link"

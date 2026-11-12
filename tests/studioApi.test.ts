@@ -12,8 +12,19 @@ import type { Id } from "../convex/_generated/dataModel";
 import { mintServiceCredential } from "../convex/lib/tokens";
 import { storyProblem } from "../convex/lib/socialApi";
 import { folderOf, roleOf } from "../convex/mcp";
-import { FORMAT_ENUM, PALETTE_DESCRIPTION, TEMPLATE_ENUM, paletteCatalog, templateCatalog } from "../lib/mcp/catalog";
-import { FORMAT_IDS, TEMPLATE_IDS } from "../lib/graphics/spec";
+import {
+  FORMAT_ENUM,
+  MEDIA_ROLE_ENUM,
+  PALETTE_DESCRIPTION,
+  STYLE_DESCRIPTION,
+  STYLE_ENUM,
+  TEMPLATE_ENUM,
+  paletteCatalog,
+  styleCatalog,
+  templateCatalog,
+} from "../lib/mcp/catalog";
+import { FORMAT_IDS, STYLES, STYLE_INFO, TEMPLATE_IDS } from "../lib/graphics/spec";
+import { MEDIA_ROLES } from "../lib/mediaRoles";
 import { PALETTE_IDS } from "../lib/palettes";
 
 const modules = import.meta.glob("../convex/**/*.{ts,js}");
@@ -535,5 +546,23 @@ describe("MCP: catalogs", () => {
     expect(paletteCatalog().palettes.map((p) => p.id)).toEqual(PALETTE_IDS);
     for (const id of PALETTE_IDS) expect(PALETTE_DESCRIPTION).toContain(id);
     expect(PALETTE_DESCRIPTION).toContain('"auto"');
+  });
+
+  it("styles and their description come from STYLES", () => {
+    const { styles, default: fallback } = styleCatalog();
+    expect(styles.map((s) => s.id)).toEqual([...STYLES]);
+    expect(STYLE_ENUM).toEqual([...STYLES]);
+    for (const s of styles) expect(s).toMatchObject({ label: STYLE_INFO[s.id].label, description: STYLE_INFO[s.id].description });
+    expect(styles.find((s) => s.id === "glass")!.speed).toMatch(/slower/);
+    expect(styles.filter((s) => s.id !== "glass").every((s) => s.speed.startsWith("fast"))).toBe(true);
+    expect(fallback).toBe("glass");
+    for (const id of STYLES) expect(STYLE_DESCRIPTION).toContain(id);
+  });
+
+  it("the media roles are one list for list_media's schema and roleOf", () => {
+    expect(MEDIA_ROLE_ENUM).toEqual([...MEDIA_ROLES]);
+    for (const path of ["/social/graphics/a.jpg", "/social/carousels/x/a.jpg", "/listings/s/a.webp", "/x/y.png"]) {
+      expect(MEDIA_ROLES).toContain(roleOf({ filePath: path, kind: "image" }));
+    }
   });
 });

@@ -1,9 +1,10 @@
-// What the graphics renderer offers, for the MCP tools list_templates and
-// list_palettes and the descriptions of render_graphic / render_carousel.
+// What the graphics renderer offers, for the MCP tools list_templates,
+// list_palettes and list_styles and the descriptions of render_graphic / render_carousel.
 // Everything is read from lib/graphics/spec.ts and lib/palettes.ts, so the
 // connector can't drift from what the renderer accepts.
 
-import { FORMATS, FORMAT_IDS, TEMPLATES, TEMPLATE_IDS, type FormatId } from "@/lib/graphics/spec";
+import { FORMATS, FORMAT_IDS, STYLES, STYLE_INFO, TEMPLATES, TEMPLATE_IDS, type FormatId, type Style } from "@/lib/graphics/spec";
+import { MEDIA_ROLES, type MediaRole } from "@/lib/mediaRoles";
 import { PALETTES, PALETTE_IDS } from "@/lib/palettes";
 
 /** Instagram feed images must be between 4:5 and 1.91:1 (convex/lib/socialApi.ts). */
@@ -48,9 +49,28 @@ export function paletteCatalog() {
   };
 }
 
+export function styleCatalog() {
+  return {
+    styles: STYLES.map((id) => ({
+      id,
+      label: STYLE_INFO[id].label,
+      description: STYLE_INFO[id].description,
+      // Only glass composes a blurred backdrop of the screenshot (sharp); the others are flat.
+      speed: id === "glass" ? "slower (blurred backdrop)" : "fast (flat)",
+    })),
+    default: "glass" satisfies Style,
+    note: "Every style renders every template, format and the carousel, and keeps the palette's 60/30/10 roles.",
+  };
+}
+
+/** The style argument's description, from STYLES. */
+export const STYLE_DESCRIPTION = `Visual style: ${STYLES.join(", ")} (default glass, the frosted look). The flat styles render fast. list_styles describes each.`;
+
 /** The palette argument's description, from PALETTE_IDS. */
 export const PALETTE_DESCRIPTION = `Palette id: ${PALETTE_IDS.join(", ")}, or "auto" (tinted from the screenshot). list_palettes shows their colours.`;
 
 /** z.enum needs a non-empty tuple; the spec's id lists always have entries. */
 export const TEMPLATE_ENUM = TEMPLATE_IDS as [(typeof TEMPLATE_IDS)[number], ...(typeof TEMPLATE_IDS)[number][]];
 export const FORMAT_ENUM = FORMAT_IDS as [FormatId, ...FormatId[]];
+export const STYLE_ENUM = STYLES as unknown as [Style, ...Style[]];
+export const MEDIA_ROLE_ENUM = MEDIA_ROLES as unknown as [MediaRole, ...MediaRole[]];
