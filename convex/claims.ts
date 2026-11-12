@@ -4,6 +4,8 @@ import type { Doc } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { LIMITS } from "./lib/taxonomy";
 import { claimedListingPatch, cleanText, fail, normalizeUrl } from "./lib/listingHelpers";
+import { pushAdmins } from "./push";
+import { adminUrl } from "../lib/hosts";
 
 const claimStatus = v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"));
 
@@ -23,6 +25,7 @@ export const submit = mutation({
 
     let listingId: Doc<"listings">["_id"] | undefined;
     let creatorId: Doc<"creators">["_id"] | undefined;
+    let targetName: string;
     if (args.targetType === "listing") {
       const listing = await ctx.db
         .query("listings")
@@ -33,6 +36,7 @@ export const submit = mutation({
       }
       if (listing.isClaimed) fail("This site has already been claimed.");
       listingId = listing._id;
+      targetName = listing.title;
     } else {
       const creator = await ctx.db
         .query("creators")
@@ -41,6 +45,7 @@ export const submit = mutation({
       if (!creator) fail("Creator not found.");
       if (creator.isClaimed) fail("This profile has already been claimed.");
       creatorId = creator._id;
+      targetName = creator.name;
     }
 
     const mine = await ctx.db
@@ -60,7 +65,7 @@ export const submit = mutation({
       fail("You have too many claims waiting for review.");
     }
 
-    await ctx.db.insert("claims", {
+    const claimId = await ctx.db.insert("claims", {
       targetType: args.targetType,
       listingId,
       creatorId,
@@ -69,6 +74,12 @@ export const submit = mutation({
       proofUrl,
       status: "pending",
       createdAt: Date.now(),
+    });
+    await pushAdmins(ctx, {
+      title: "New claim",
+      body: `${user.name} claims ${targetName}`,
+      url: adminUrl("/claims"),
+      tag: `claim-${claimId}`,
     });
     return null;
   },

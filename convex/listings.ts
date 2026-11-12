@@ -34,6 +34,8 @@ import {
   uniqueSlug,
 } from "./lib/listingHelpers";
 import { awardPaths, listingPaths, scheduleIndexNow } from "./seo";
+import { pushAdmins } from "./push";
+import { adminUrl } from "../lib/hosts";
 
 const MAX_PUBLIC = 200;
 
@@ -208,7 +210,7 @@ export const submit = mutation({
 
     const now = Date.now();
     const slug = await uniqueSlug(ctx, "listings", slugify(title));
-    await ctx.db.insert("listings", {
+    const id = await ctx.db.insert("listings", {
       ownerId: user._id,
       isStartup: args.isStartup || undefined,
       domainKey: domainKey(url),
@@ -235,6 +237,12 @@ export const submit = mutation({
       isClaimed: true,
       createdAt: now,
       updatedAt: now,
+    });
+    await pushAdmins(ctx, {
+      title: "New submission",
+      body: `${title} by ${creditName}`,
+      url: adminUrl(`/review/${id}`),
+      tag: `submission-${id}`,
     });
     return { slug };
   },

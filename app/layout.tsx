@@ -1,9 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ClerkProvider } from "@/components/clerk-provider";
 import ConvexClientProvider from "@/components/ConvexProviderWithClerk";
 import { AlertViewport } from "@/components/admin/Alerts";
+import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -26,7 +27,16 @@ export const metadata: Metadata = {
     shortcut: "/icons/crow-favicon.ico",
     apple: { url: "/icons/crow-180.png", sizes: "180x180" },
   },
-  manifest: "/crow.webmanifest",
+  // The web app manifest comes from app/manifest.ts (per host: Studio or
+  // Admin). On iPhone, installing from Safari's Share menu opens the app
+  // full screen; the status bar stays white with dark text.
+  appleWebApp: { capable: true, statusBarStyle: "default" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#ffffff",
+  // Edge to edge on notched phones; globals.css pads with the safe-area insets.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -38,6 +48,7 @@ export default function RootLayout({
         <body className={inter.variable}>
           <ConvexClientProvider>{children}</ConvexClientProvider>
           <AlertViewport />
+          <ServiceWorkerRegister />
         </body>
       </html>
     </ClerkProvider>

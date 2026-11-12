@@ -13,6 +13,21 @@ const nextConfig: NextConfig = {
     // cold start.
     turbopackFileSystemCacheForDev: false,
   },
+  async headers() {
+    return [
+      {
+        // The service worker (push for the Studio and admin PWAs). Never
+        // cached, so a fix reaches every installed app on its next visit,
+        // and limited to its own origin.
+        source: "/sw.js",
+        headers: [
+          { key: "Content-Type", value: "application/javascript; charset=utf-8" },
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          { key: "Content-Security-Policy", value: "default-src 'self'; script-src 'self'" },
+        ],
+      },
+    ];
+  },
   async redirects() {
     return [
       // The admin used to be localized under /en, /ka and /ru. English only now.

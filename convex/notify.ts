@@ -1,5 +1,6 @@
 // Award emails and the social posting job, run by the scheduler right after
 // an award is given (lib/awards.ts grantAward) or a day/round has no winner.
+// Each also pushes a short copy to the admins' devices (push.ts).
 //
 //   Winner email: to the site's verified owner (or the person who claimed
 //   its creator profile), with the badge and its embed code; for a site
@@ -19,6 +20,8 @@ import { emailHtml, escapeHtml, sendEmail } from "./lib/email";
 import { siteUrl } from "./seo";
 import { deliver, type Message } from "./emails";
 import { newClaimToken } from "./claimLinks";
+import { pushAdmins } from "./push";
+import { adminUrl } from "../lib/hosts";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -170,6 +173,15 @@ export const awardAnnounced = internalAction({
     }
 
     await ctx.runMutation(internal.social.queueAward, { awardId });
+    // The admins' copy. Not for the honorary First 100, given by hand in bulk.
+    if (!honorary) {
+      await pushAdmins(ctx, {
+        title: `${name}: ${data.listing.title}`,
+        body: `${data.listing.title} by ${data.listing.creditName} ${verb} ${label}.`,
+        url: adminUrl("/awards"),
+        tag: `award-${awardId}`,
+      });
+    }
     return null;
   },
 });
@@ -199,6 +211,12 @@ export const emptyDay = internalAction({
       ]),
     });
     if (error) console.warn(`Empty-day alert for ${day} not sent: ${error}`);
+    await pushAdmins(ctx, {
+      title: `No Site of the Day for ${formatDay(day)}`,
+      body: "The queue was empty. Ask the jury to score, or give the day a winner by hand.",
+      url: adminUrl("/awards"),
+      tag: `empty-day-${day}`,
+    });
     return null;
   },
 });
@@ -231,6 +249,12 @@ export const noRoundWinner = internalAction({
       ]),
     });
     if (error) console.warn(`No-winner alert for ${name} ${round.period} not sent: ${error}`);
+    await pushAdmins(ctx, {
+      title: `No ${name} for ${round.period}`,
+      body: "The round closed without an eligible winner. You can give it by hand.",
+      url: adminUrl("/awards"),
+      tag: `no-winner-${roundId}`,
+    });
     return null;
   },
 });

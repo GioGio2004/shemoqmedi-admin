@@ -111,12 +111,33 @@
 .admin-header-actions { display: flex; align-items: center; gap: 16px; }
 .admin-storefront-link { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; font-size: 11px; }
 .admin-storefront-link > span { font-size: 19px; }
+/* ── Phones: compact header + bottom tab bar (AdminShell MobileTabBar) ─── */
+/* The page runs edge to edge (viewport-fit: cover): keep content clear of
+   the notch in landscape and of the home indicator at the bottom. */
+.admin-shell { padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); }
+.admin-tabbar-wrap { display: none; }
 @media (max-width: 900px) {
-  .admin-header { flex-wrap: wrap; min-height: 0; border-radius: 0 0 28px 28px; }
-  .admin-nav-wrap { order: 3; width: 100%; }
-  .admin-navigation { flex: 1; }
-  .admin-all-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .admin-storefront-link { display: none; }
+  .admin-header { min-height: 0; padding: calc(10px + env(safe-area-inset-top)) 16px 10px; border-radius: 0 0 22px 22px; gap: 12px; }
+  .admin-brand { gap: 14px; }
+  .admin-brand-label { padding-left: 14px; }
+  .admin-nav-wrap, .admin-storefront-link { display: none; }
+
+  .admin-tabbar-wrap { display: block; position: fixed; inset: auto 0 0; z-index: 35; }
+  .admin-tabbar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 6px max(8px, env(safe-area-inset-left)) calc(6px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-right)); border-top: 1px solid var(--line); background: var(--header); -webkit-backdrop-filter: blur(22px); backdrop-filter: blur(22px); }
+  .admin-tabbar > a, .admin-tabbar > button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 56px; border-radius: 16px; color: var(--muted-ink); font-size: 11px; font-weight: 500; }
+  .admin-tabbar > [aria-current="page"], .admin-tabbar > button[aria-expanded="true"] { color: var(--foreground); }
+  .admin-tabbar > [aria-current="page"] svg, .admin-tabbar > button[aria-expanded="true"] svg { stroke-width: 2.2; }
+  .admin-tabbar .admin-count { position: absolute; top: 4px; left: calc(50% + 6px); color: var(--foreground); }
+
+  /* "More": every section, as a sheet above the tab bar. The shadow dims the
+     page without catching taps, so a tap outside still closes it. */
+  .admin-sheet { position: absolute; inset: auto 8px calc(100% + 8px); max-height: min(70dvh, 560px); overflow-y: auto; scrollbar-width: none; padding: 16px 10px 10px; border: 1px solid var(--line); border-radius: 28px; background: var(--background); box-shadow: 0 0 0 100vmax rgb(0 0 0 / .2); }
+  .admin-sheet::-webkit-scrollbar { display: none; }
+  .admin-sheet > .admin-eyebrow { padding: 0 12px 10px; }
+  .admin-sheet-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+  .admin-sheet-links a { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 52px; padding: 12px 16px; border-radius: 18px; font-size: 14px; font-weight: 500; color: var(--muted-ink); }
+  .admin-sheet-links a[aria-current="page"] { background: var(--foreground); color: var(--background); }
+  .admin-sheet-links a[aria-current="page"] .admin-count > span { color: var(--foreground); }
 }
 
 .admin-page { width: min(100%, 1440px); flex: 1; margin-inline: auto; padding: clamp(36px, 5vw, 72px) clamp(20px, 4vw, 64px) 80px; }
@@ -238,3 +259,37 @@
 .media-drop { position: relative; display: grid; place-items: center; width: 100%; overflow: hidden; border: 1px dashed rgb(0 0 0 / .25); border-radius: 18px; background: var(--background); color: var(--muted-ink); font-size: 13px; text-align: center; cursor: pointer; }
 .media-drop:hover, .media-drop[data-dragging] { border-color: var(--foreground); color: var(--foreground); }
 .media-drop img, .media-drop video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+
+/* ── PWA: install + notifications (components/pwa) ─────────────────────── */
+.pwa-panel { display: grid; gap: 28px; max-width: 760px; }
+.pwa-panel h2 { margin-top: 14px; font-size: clamp(26px, 3vw, 36px); font-weight: 500; line-height: 1.1; }
+.pwa-panel h2 + .pwa-note { margin-top: 14px; max-width: 60ch; }
+.pwa-note { color: var(--muted-ink); font-size: 13px; line-height: 1.7; }
+.pwa-push { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding-top: 24px; border-top: 1px solid var(--line); }
+.pwa-switch { display: inline-flex; align-items: center; gap: 14px; min-height: 48px; font-size: 15px; font-weight: 500; text-align: left; }
+.pwa-switch-track { position: relative; flex-shrink: 0; width: 52px; height: 32px; border-radius: 999px; background: var(--line); transition: background-color .2s; }
+.pwa-switch-thumb { position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: var(--background); box-shadow: 0 1px 3px rgb(0 0 0 / .2); transition: transform .2s; }
+.pwa-switch[aria-checked="true"] .pwa-switch-track { background: var(--foreground); }
+.pwa-switch[aria-checked="true"] .pwa-switch-thumb { transform: translateX(20px); }
+.pwa-switch:disabled { opacity: .5; }
+.pwa-install { display: grid; gap: 12px; justify-items: start; padding: 20px; border-radius: 20px; background: var(--surface-raised); }
+.pwa-install-title { font-size: 15px; font-weight: 600; }
+.pwa-steps { display: grid; gap: 8px; padding-left: 20px; list-style: decimal; font-size: 14px; line-height: 1.6; }
+.pwa-share-icon { display: inline-block; margin: 0 4px; vertical-align: -3px; }
+.pwa-devices { display: grid; gap: 12px; padding-top: 24px; border-top: 1px solid var(--line); }
+.pwa-devices ul { display: grid; }
+.pwa-devices li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.pwa-devices li:last-child { border-bottom: 0; }
+.pwa-device-name { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 14px; font-weight: 500; }
+@media (prefers-reduced-motion: reduce) { .pwa-switch-track, .pwa-switch-thumb { transition: none; } }
+
+/* ── Phones: touch sizes (last, so they win over the rules above) ──────── */
+@media (max-width: 900px) {
+  /* Clear of the fixed tab bar and the home indicator. */
+  .admin-page { padding-bottom: calc(112px + env(safe-area-inset-bottom)); }
+  /* iOS zooms into any field under 16px; fingers need ~44px targets. */
+  input:not([type="checkbox"], [type="radio"], [type="range"]), textarea, select, .admin-input { font-size: 16px; }
+  .admin-toggle, .admin-tabs a { min-height: 44px; }
+  .admin-button { min-height: 50px; }
+  .admin-check input { width: 22px; height: 22px; }
+}

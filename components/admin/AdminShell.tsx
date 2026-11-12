@@ -7,6 +7,7 @@ import { UserButton } from "@clerk/nextjs";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { STOREFRONT_URL } from "@/lib/storefront";
+import { STUDIO_ORIGIN } from "@/lib/hosts";
 import { Wordmark } from "./Wordmark";
 import { useAdmin } from "./useAdmin";
 
@@ -60,27 +61,48 @@ const NAV = [
   { href: "/users", label: "Users", count: null },
   { href: "/claims", label: "Claims", count: ClaimsCount },
   { href: "/seed", label: "Import", count: null },
+  { href: "/settings", label: "Settings", count: null },
 ] as const;
 
 function isCurrent(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-/** The "all sections" button at the end of the nav, and its popup. */
-function AllSections({
+/** Every admin section as links: the desktop popup and the mobile "More" sheet. */
+function SectionLinks({
   pathname,
   showCounts,
+  onNavigate,
 }: {
   pathname: string;
   showCounts: boolean;
+  onNavigate: () => void;
 }) {
-  // Open on the page it was opened on: navigating elsewhere closes it.
+  return NAV.map((item) => {
+    const Count = item.count;
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        aria-current={isCurrent(pathname, item.href) ? "page" : undefined}
+        onClick={onNavigate}
+      >
+        {item.label}
+        {Count && showCounts && <Count />}
+      </Link>
+    );
+  });
+}
+
+/**
+ * Open/closed state for a menu that belongs to the page it was opened on:
+ * navigating elsewhere closes it. Escape and a press outside `wrap` close it too.
+ */
+function usePageMenu(pathname: string) {
   const [openOn, setOpenOn] = useState<string | null>(null);
   const open = openOn === pathname;
-  const setOpen = (v: boolean) => setOpenOn(v ? pathname : null);
   const wrap = useRef<HTMLDivElement>(null);
 
-  // Close on Escape or a click anywhere outside.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
@@ -95,6 +117,19 @@ function AllSections({
     };
   }, [open]);
 
+  return { open, wrap, setOpen: (v: boolean) => setOpenOn(v ? pathname : null) };
+}
+
+/** The "all sections" button at the end of the desktop nav, and its popup. */
+function AllSections({
+  pathname,
+  showCounts,
+}: {
+  pathname: string;
+  showCounts: boolean;
+}) {
+  const { open, wrap, setOpen } = usePageMenu(pathname);
+
   return (
     <div ref={wrap} className="admin-all">
       <button
@@ -105,19 +140,7 @@ function AllSections({
         aria-label="All sections"
         onClick={() => setOpen(!open)}
       >
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 16 16"
-          width="16"
-          height="16"
-          fill="currentColor"
-        >
-          {[2, 8, 14].flatMap((y) =>
-            [2, 8, 14].map((x) => (
-              <circle key={`${x}${y}`} cx={x} cy={y} r="1.6" />
-            )),
-          )}
-        </svg>
+        <DotsIcon />
       </button>
       {open && (
         <div
@@ -126,25 +149,85 @@ function AllSections({
           role="dialog"
           aria-label="All sections"
         >
-          {NAV.map((item) => {
-            const Count = item.count;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                aria-current={
-                  isCurrent(pathname, item.href) ? "page" : undefined
-                }
-                onClick={() => setOpen(false)}
-              >
-                {item.label}
-                {Count && showCounts && <Count />}
-              </Link>
-            );
-          })}
+          <SectionLinks pathname={pathname} showCounts={showCounts} onNavigate={() => setOpen(false)} />
         </div>
       )}
     </div>
+  );
+}
+
+function DotsIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
+      {[2, 8, 14].flatMap((y) =>
+        [2, 8, 14].map((x) => <circle key={`${x}${y}`} cx={x} cy={y} r="1.6" />),
+      )}
+    </svg>
+  );
+}
+
+/**
+ * Phones (under 900px): a bottom tab bar instead of the header nav, within
+ * thumb reach. "More" opens every section as a sheet; Studio opens the
+ * Studio app in a new tab.
+ */
+function MobileTabBar({
+  pathname,
+  showCounts,
+}: {
+  pathname: string;
+  showCounts: boolean;
+}) {
+  const { open, wrap, setOpen } = usePageMenu(pathname);
+  const tab = (href: string) => (isCurrent(pathname, href) ? "page" : undefined);
+
+  return (
+    <div ref={wrap} className="admin-tabbar-wrap">
+      {open && (
+        <div id="admin-more-sheet" className="admin-sheet" role="dialog" aria-label="All sections">
+          <p className="admin-eyebrow">All sections</p>
+          <div className="admin-sheet-links">
+            <SectionLinks pathname={pathname} showCounts={showCounts} onNavigate={() => setOpen(false)} />
+            <a href={STOREFRONT_URL} target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}>
+              Storefront <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+        </div>
+      )}
+      <nav className="admin-tabbar" aria-label="Admin sections">
+        <Link href="/dashboard" aria-current={tab("/dashboard")}>
+          <TabIcon d="M3 10.5 10 4l7 6.5V17h-4.5v-4h-5v4H3z" />
+          Overview
+        </Link>
+        <Link href="/review" aria-current={tab("/review")}>
+          <TabIcon d="M4 4h12v12H4zM7 8h6M7 11h6M7 14h3" />
+          Review
+          {showCounts && <ReviewCount />}
+        </Link>
+        <a href={STUDIO_ORIGIN} target="_blank" rel="noopener noreferrer">
+          <TabIcon d="M5 15 15 5M8 5h7v7" />
+          Studio
+          <span className="sr-only"> (opens in a new tab)</span>
+        </a>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls="admin-more-sheet"
+          onClick={() => setOpen(!open)}
+        >
+          <TabIcon d="M4 6h12M4 10h12M4 14h12" />
+          More
+        </button>
+      </nav>
+    </div>
+  );
+}
+
+function TabIcon({ d }: { d: string }) {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d={d} />
+    </svg>
   );
 }
 
@@ -182,6 +265,14 @@ function AdminHeader() {
       </div>
       <div className="admin-header-actions">
         <a
+          href={STUDIO_ORIGIN}
+          className="admin-storefront-link"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Studio <span aria-hidden="true">↗</span>
+        </a>
+        <a
           href={STOREFRONT_URL}
           className="admin-storefront-link"
           target="_blank"
@@ -195,12 +286,13 @@ function AdminHeader() {
   );
 }
 
-/** Header + page frame. Children render only for platform admins. */
+/** Header + page frame (+ the tab bar on phones). Children render only for platform admins. */
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const admin = useAdmin();
+  const pathname = usePathname();
 
   return (
-    <div className="flex min-h-dvh flex-col">
+    <div className="admin-shell flex min-h-dvh flex-col">
       <AdminHeader />
       <main className="admin-page">
         {admin.kind === "admin" ? (
@@ -211,6 +303,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           <AccessNotice state={admin} />
         )}
       </main>
+      <MobileTabBar pathname={pathname} showCounts={admin.kind === "admin"} />
     </div>
   );
 }

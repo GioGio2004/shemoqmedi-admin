@@ -660,4 +660,31 @@ export default defineSchema({
     .index("by_user", ["userId"])
     .index("by_listing", ["listingId"])
     .index("by_creator", ["creatorId"]),
+
+  // Web push: one row per admin device and app (convex/push.ts). The same
+  // phone has one row for the Studio and one for the admin, told apart by
+  // origin, so a notification opens in the app it belongs to. Rows the push
+  // service answers 404/410 for are deleted on the next send.
+  pushSubscriptions: defineTable({
+    userId: v.id("users"),
+    endpoint: v.string(),
+    keys: v.object({ p256dh: v.string(), auth: v.string() }),
+    origin: v.string(), // e.g. https://studio.shemoqmedi.space
+    userAgent: v.optional(v.string()),
+    createdAt: v.number(),
+    lastOkAt: v.optional(v.number()), // last push the service accepted
+  })
+    .index("by_endpoint", ["endpoint"])
+    .index("by_user", ["userId"]),
+
+  // "Remind me at …" (convex/reminders.ts): a push to the admin at `at`.
+  reminders: defineTable({
+    userId: v.id("users"),
+    text: v.string(),
+    at: v.number(),
+    done: v.boolean(),
+    // The scheduled reminders.fire job, cancelled when the reminder is removed.
+    jobId: v.optional(v.id("_scheduled_functions")),
+    createdAt: v.number(),
+  }).index("by_user_done_at", ["userId", "done", "at"]),
 });
