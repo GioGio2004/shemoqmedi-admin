@@ -14,8 +14,11 @@ const isPublicRoute = createRouteMatcher([
 
 const isApiRoute = createRouteMatcher(["/api/(.*)", "/trpc/(.*)"]);
 
+// API routes that check access themselves (an admin session or a server key).
+const isSelfCheckedApi = createRouteMatcher(["/api/graphics"]);
+
 export default clerkMiddleware(async (auth, req) => {
-  if (isPublicRoute(req)) return;
+  if (isPublicRoute(req) || isSelfCheckedApi(req)) return;
 
   // API routes answer 401/404 instead of redirecting.
   if (isApiRoute(req)) {

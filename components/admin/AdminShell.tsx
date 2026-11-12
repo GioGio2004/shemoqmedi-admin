@@ -55,6 +55,7 @@ const NAV = [
   { href: "/creators", label: "Creators", count: null },
   { href: "/jury", label: "Jury", count: null },
   { href: "/outreach", label: "Outreach", count: null },
+  { href: "/design", label: "Design", count: null },
   { href: "/users", label: "Users", count: null },
   { href: "/claims", label: "Claims", count: ClaimsCount },
   { href: "/seed", label: "Import", count: null },
