@@ -77,7 +77,8 @@ export const submit = mutation({
     });
     await pushAdmins(ctx, {
       title: "New claim",
-      body: `${user.name} claims ${targetName}`,
+      // Clerk can sync a user without a name.
+      body: `${user.name.trim() || "Someone"} claims ${targetName}`,
       url: adminUrl("/claims"),
       tag: `claim-${claimId}`,
     });

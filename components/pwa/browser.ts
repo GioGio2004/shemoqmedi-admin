@@ -36,10 +36,14 @@ export function keyBytes(base64url: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-/** Whether a subscription was made with this VAPID key (keys can be rotated). */
+/**
+ * Whether a subscription was made with this VAPID key (keys can be rotated).
+ * A browser that doesn't report the key gets the benefit of the doubt:
+ * answering "no" there would drop a working subscription on every visit.
+ */
 export function madeWithKey(subscription: PushSubscription, base64url: string) {
-  const current = subscription.options.applicationServerKey;
-  if (!current) return false;
+  const current = subscription.options?.applicationServerKey;
+  if (!current) return true;
   const a = new Uint8Array(current);
   const b = keyBytes(base64url);
   return a.length === b.length && a.every((byte, i) => byte === b[i]);

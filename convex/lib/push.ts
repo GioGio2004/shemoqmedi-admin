@@ -38,11 +38,13 @@ function clip(text: string, max: number) {
  * post links to the Studio and a submission to the admin from either app.
  */
 export function payloadFor(message: PushPayload, origin: string): string {
-  let url: string;
+  // Anything but a web link (a typo, javascript:, mailto:) opens the app's home.
+  let url = origin;
   try {
-    url = new URL(message.url, origin).href;
+    const link = new URL(message.url, origin);
+    if (link.protocol === "https:" || link.protocol === "http:") url = link.href;
   } catch {
-    url = origin;
+    // Unparseable: the app's home.
   }
   const payload: PushPayload = {
     title: clip(message.title, TITLE_MAX) || "Shemoqmedi",

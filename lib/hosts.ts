@@ -11,14 +11,16 @@ function hostname(host: string) {
   return host.trim().toLowerCase().replace(/:\d+$/, "");
 }
 
-/**
- * Whether a request's Host header is the Studio. Any "studio." subdomain
- * counts, so studio.localhost:3000 works in development the same way.
- */
+// studio.localhost:3000 stands in for the Studio in development (browsers
+// resolve *.localhost to this machine). Only these two names count: the host
+// decides routing (proxy.ts), so a look-alike such as studio.example.com
+// must not.
+const STUDIO_HOSTS = new Set([new URL(STUDIO_ORIGIN).hostname, "studio.localhost"]);
+
+/** Whether a request's Host header is the Studio (production or local development). */
 export function isStudioHost(host: string | null | undefined): boolean {
   if (!host) return false;
-  const name = hostname(host);
-  return name === new URL(STUDIO_ORIGIN).hostname || name.startsWith("studio.");
+  return STUDIO_HOSTS.has(hostname(host));
 }
 
 /** An absolute admin link for a path, e.g. adminUrl("/review/abc"). */

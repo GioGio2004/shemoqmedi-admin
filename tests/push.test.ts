@@ -117,6 +117,29 @@ describe("subscriptions", () => {
     await env.admin.mutation(api.push.unsubscribe, { endpoint: phone.endpoint });
     expect(await subscriptions(env)).toHaveLength(0);
   });
+
+  it("keep at most 20 devices per admin, dropping the oldest", async () => {
+    const env = await setup();
+    const first = device();
+    await env.admin.mutation(api.push.subscribe, first);
+    for (let i = 0; i < 20; i += 1) {
+      vi.advanceTimersByTime(1000);
+      await env.admin.mutation(api.push.subscribe, device());
+    }
+    const rows = await subscriptions(env);
+    expect(rows).toHaveLength(20);
+    expect(rows.map((r) => r.endpoint)).not.toContain(first.endpoint);
+  });
+
+  it("move to whoever signs in on the same browser", async () => {
+    const env = await setup();
+    const shared = device();
+    await env.admin.mutation(api.push.subscribe, shared);
+    await env.boss.mutation(api.push.subscribe, shared);
+    const rows = await subscriptions(env);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].userId).toBe(env.ids.boss);
+  });
 });
 
 describe("notifyAdmins", () => {
@@ -204,12 +227,23 @@ describe("payloads", () => {
     expect(payload.url).toBe("https://admin.shemoqmedi.space");
   });
 
+  it("open only web links", () => {
+    const urlOf = (url: string) => JSON.parse(payloadFor({ title: "T", body: "B", url }, "https://studio.shemoqmedi.space")).url;
+    expect(urlOf("javascript:alert(1)")).toBe("https://studio.shemoqmedi.space");
+    expect(urlOf("mailto:x@example.com")).toBe("https://studio.shemoqmedi.space");
+    expect(urlOf("https://admin.shemoqmedi.space/claims")).toBe("https://admin.shemoqmedi.space/claims");
+    expect(urlOf("/queue?id=1")).toBe("https://studio.shemoqmedi.space/queue?id=1");
+  });
+
   it("tell the Studio host apart", () => {
     expect(isStudioHost("studio.shemoqmedi.space")).toBe(true);
     expect(isStudioHost("Studio.Shemoqmedi.Space:443")).toBe(true);
     expect(isStudioHost("studio.localhost:3000")).toBe(true);
     expect(isStudioHost("admin.shemoqmedi.space")).toBe(false);
     expect(isStudioHost("localhost:3000")).toBe(false);
+    // A look-alike host never counts as the Studio.
+    expect(isStudioHost("studio.example.com")).toBe(false);
+    expect(isStudioHost("studio.shemoqmedi.space.example.com")).toBe(false);
     expect(isStudioHost(null)).toBe(false);
   });
 });
@@ -329,6 +363,59 @@ describe("hooks", () => {
     await drain(env);
     expect(sent()).toEqual([
       expect.objectContaining({ title: "New claim", body: "Member claims Unclaimed Site", url: "https://admin.shemoqmedi.space/claims" }),
+    ]);
+  });
+
+  it("an award pushes the admins' copy, except for the honorary First 100", async () => {
+    const env = await setup();
+    await env.admin.mutation(api.push.subscribe, device("https://admin.shemoqmedi.space"));
+    const { slug } = await env.admin.mutation(api.admin.createListing, {
+      title: "Paper Weather",
+      tagline: "A forecast you can fold.",
+      url: "https://paperweather.example",
+      categories: ["portfolio"],
+      technologies: [],
+      region: "global",
+      creatorTier: "agency",
+      creditName: "Fold & Co.",
+      coverId: await storeFile(env),
+      status: "in_voting",
+      isClaimed: false,
+    });
+    await drain(env);
+    sendNotification.mockClear();
+    const award = (tier: "SOTD" | "F100", period: string) =>
+      env.t.run(async (ctx) => {
+        const listing = await ctx.db
+          .query("listings")
+          .withIndex("by_slug", (q) => q.eq("slug", slug))
+          .unique();
+        return ctx.db.insert("awards", {
+          listingId: listing!._id,
+          tier,
+          period,
+          date: "2026-11-12",
+          score: tier === "F100" ? null : 7.5,
+          slug: `${slug}-${tier.toLowerCase()}-${period}`,
+          status: "active",
+          source: "manual",
+          reason: "test",
+          createdAt: Date.now(),
+        });
+      });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const sotd = await award("SOTD", "2026-11-12");
+    await env.t.action(internal.notify.awardAnnounced, { awardId: sotd });
+    await env.t.action(internal.notify.awardAnnounced, { awardId: await award("F100", "7") });
+    await drain(env);
+    warn.mockRestore();
+    expect(sent()).toEqual([
+      expect.objectContaining({
+        title: "Site of the Day: Paper Weather",
+        body: "Paper Weather by Fold & Co. won Site of the Day · 12 Nov 2026.",
+        url: "https://admin.shemoqmedi.space/awards",
+        tag: `award-${sotd}`,
+      }),
     ]);
   });
 
