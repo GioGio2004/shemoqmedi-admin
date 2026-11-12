@@ -4,14 +4,43 @@ import { alpha, type Palette } from "@/lib/palettes";
 
 // The glass language of the social graphics, for satori.
 //
-// Satori has no backdrop-filter, so glass is faked the honest way: every
-// panel holds a copy of the frost layer (the backdrop blurred further and
-// lightened, lib/graphics/imaging.ts) placed so it lines up exactly with the
-// backdrop behind it, then a white fill, a 1px light edge, a soft top-left
-// highlight and a large soft shadow. Everything glass is absolutely
-// positioned in canvas (or panorama) coordinates, so that alignment is exact.
+// Satori has no backdrop-filter, so glass is faked the honest way: under
+// every panel lies the frost layer (the backdrop blurred further and
+// lightened, lib/graphics/imaging.ts) lined up exactly with the backdrop
+// around it, then a white fill, a 1px light edge, a soft top-left highlight
+// and a large soft shadow. Everything glass is absolutely positioned in
+// canvas (or panorama) coordinates, so that alignment is exact.
+//
+// Where the frost comes from depends on the scene's layer:
+//   shared  (server) each panel registers its outline, rim and shadow in
+//           scene.panels while the graphic is resolved (tree.ts); sharp then
+//           draws every shadow, the frost cut to the panels and the rims in
+//           one raster under a transparent satori render. One copy of the
+//           frost instead of one per panel, and no blur filters for librsvg
+//           (box-shadows were half of a render's time).
+//   panel   (browser preview) each panel shows the frost as its own
+//           background, positioned to line up; the browser decodes it once.
 
 export type GlassStyle = "frost" | "liquid" | "tint";
+
+export type Rect = { x: number; y: number; w: number; h: number };
+
+/** A linear gradient: a CSS angle (deg) and colour stops at 0–1. */
+export type Gradient = { angle: number; stops: [colour: string, at: number][] };
+
+/** A drop shadow: offset down, blur radius (CSS: blur = 2σ), colour. */
+export type Shadow = { y: number; blur: number; colour: string };
+
+/** A glass panel as sharp draws it under the satori layer, in world coordinates. */
+export type PanelShape = Rect & { radius: number; edge: number; rim: Gradient; shadows: Shadow[] };
+
+export function cssGradient(g: Gradient) {
+  return `linear-gradient(${g.angle}deg, ${g.stops.map(([c, at]) => `${c} ${Math.round(at * 100)}%`).join(", ")})`;
+}
+
+function cssShadows(list: Shadow[]) {
+  return list.map((sh) => `0 ${sh.y}px ${sh.blur}px ${sh.colour}`).join(", ");
+}
 
 export type Scene = {
   palette: Palette;
@@ -21,9 +50,11 @@ export type Scene = {
   frost: string | null;
   view: { x: number; y: number; w: number; h: number };
   style: GlassStyle;
+  /** "shared": the backdrop and frost are composited by sharp, outside satori (see above). Default "panel". */
+  layer?: "shared" | "panel";
+  /** Filled while resolving a shared-layer graphic: every panel's outline. */
+  panels?: PanelShape[];
 };
-
-export type Rect = { x: number; y: number; w: number; h: number };
 
 export const row: CSSProperties = { display: "flex", flexDirection: "row" };
 export const col: CSSProperties = { display: "flex", flexDirection: "column" };
@@ -43,32 +74,37 @@ export const SCORE_BLUE = "rgba(0, 64, 255, 0.78)";
 // Glass
 // ─────────────────────────────────────────────────────────────────────────────
 
-function treatment(s: Scene) {
+const white = (a: number) => `rgba(255,255,255,${a})`;
+
+function treatment(s: Scene): { fill: string; rim: Gradient; highlight: string; shade: string; shadows: Shadow[] } {
   const L = s.light;
   switch (s.style) {
     case "liquid":
       return {
-        fill: L ? "rgba(255,255,255,0.30)" : "rgba(255,255,255,0.07)",
-        rim: `linear-gradient(140deg, rgba(255,255,255,${L ? 0.95 : 0.7}) 0%, rgba(255,255,255,0.12) 34%, rgba(255,255,255,0.04) 62%, rgba(255,255,255,${L ? 0.7 : 0.42}) 100%)`,
-        highlight: `radial-gradient(120% 70% at 12% 0%, rgba(255,255,255,${L ? 0.55 : 0.26}) 0%, rgba(255,255,255,0) 60%)`,
+        fill: L ? white(0.3) : white(0.07),
+        rim: { angle: 140, stops: [[white(L ? 0.95 : 0.7), 0], [white(0.12), 0.34], [white(0.04), 0.62], [white(L ? 0.7 : 0.42), 1]] },
+        highlight: `radial-gradient(120% 70% at 12% 0%, ${white(L ? 0.55 : 0.26)} 0%, ${white(0)} 60%)`,
         shade: `linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,${L ? 0.03 : 0.12}) 100%)`,
-        shadow: `0 34px 80px rgba(0,0,0,${L ? 0.16 : 0.32}), 0 6px 18px rgba(0,0,0,${L ? 0.06 : 0.14})`,
+        shadows: [
+          { y: 34, blur: 80, colour: `rgba(0,0,0,${L ? 0.16 : 0.32})` },
+          { y: 6, blur: 18, colour: `rgba(0,0,0,${L ? 0.06 : 0.14})` },
+        ],
       };
     case "tint":
       return {
         fill: alpha(s.palette.surface, L ? 0.22 : 0.3),
-        rim: `linear-gradient(160deg, rgba(255,255,255,0.4), rgba(255,255,255,0.14))`,
-        highlight: `linear-gradient(135deg, rgba(255,255,255,${L ? 0.3 : 0.16}) 0%, rgba(255,255,255,0) 42%)`,
+        rim: { angle: 160, stops: [[white(0.4), 0], [white(0.14), 1]] },
+        highlight: `linear-gradient(135deg, ${white(L ? 0.3 : 0.16)} 0%, ${white(0)} 42%)`,
         shade: "none",
-        shadow: `0 40px 120px ${alpha(s.palette.accent, 0.22)}`,
+        shadows: [{ y: 40, blur: 120, colour: alpha(s.palette.accent, 0.22) }],
       };
     default:
       return {
-        fill: L ? "rgba(255,255,255,0.42)" : "rgba(255,255,255,0.13)",
-        rim: `linear-gradient(160deg, rgba(255,255,255,${L ? 0.85 : 0.42}), rgba(255,255,255,${L ? 0.5 : 0.22}))`,
-        highlight: `linear-gradient(135deg, rgba(255,255,255,${L ? 0.5 : 0.3}) 0%, rgba(255,255,255,0.04) 38%, rgba(255,255,255,0) 60%)`,
+        fill: L ? white(0.42) : white(0.13),
+        rim: { angle: 160, stops: [[white(L ? 0.85 : 0.42), 0], [white(L ? 0.5 : 0.22), 1]] },
+        highlight: `linear-gradient(135deg, ${white(L ? 0.5 : 0.3)} 0%, ${white(0.04)} 38%, ${white(0)} 60%)`,
         shade: "none",
-        shadow: `0 40px 90px rgba(0,0,0,${L ? 0.14 : 0.3})`,
+        shadows: [{ y: 40, blur: 90, colour: `rgba(0,0,0,${L ? 0.14 : 0.3})` }],
       };
   }
 }
@@ -102,6 +138,10 @@ export function Glass({
   const t = treatment(s);
   const { x, y, w, h } = rect;
   const r = Math.max(0, radius - edge);
+  const shared = s.layer === "shared";
+  // Shared: sharp draws the shadow, the frost and the rim (render.ts); satori only the fill and the content.
+  if (shared) s.panels?.push({ x, y, w, h, radius, edge, rim: t.rim, shadows: t.shadows });
+  const ownFrost = !shared && !!s.frost;
   return (
     <div
       style={{
@@ -113,8 +153,7 @@ export function Glass({
         display: "flex",
         borderRadius: radius,
         padding: edge,
-        backgroundImage: t.rim,
-        boxShadow: t.shadow,
+        ...(shared ? {} : { backgroundImage: cssGradient(t.rim), boxShadow: cssShadows(t.shadows) }),
         overflow: "hidden",
       }}
     >
@@ -127,8 +166,9 @@ export function Glass({
           height: h - edge * 2,
           borderRadius: r,
           overflow: "hidden",
-          backgroundColor: s.light ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.04)",
-          ...(s.frost
+          // Under the frost, or alone while it is missing (a preview still loading).
+          ...(shared ? {} : { backgroundColor: s.light ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.04)" }),
+          ...(ownFrost
             ? {
                 backgroundImage: `url(${s.frost})`,
                 backgroundSize: `${s.view.w}px ${s.view.h}px`,

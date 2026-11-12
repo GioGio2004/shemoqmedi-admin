@@ -8,30 +8,20 @@ import { authedConvexClient } from "@/lib/convexServer";
 import { getPalette, PALETTE_IDS, type Palette } from "@/lib/palettes";
 import { autoPalette, buildBackdrop, finish, type Backdrop, type OutputType, type Picture } from "./imaging";
 import type { GlassStyle } from "./glass";
+import { FONT_FILES } from "./fonts";
 
 // Shared by the graphics routes: fonts, access, satori → PNG → finished file.
 
-const FONT_FILES = [
-  ["latin", 400],
-  ["latin", 500],
-  ["latin", 600],
-  ["latin", 700],
-  ["latin-ext", 400],
-  ["latin-ext", 500],
-  ["latin-ext", 600],
-  ["latin-ext", 700],
-] as const;
-
-type Font = { name: string; data: Buffer; weight: 400 | 500 | 600 | 700; style: "normal" };
+type Font = { name: string; data: Buffer; weight: 400 | 500 | 600 | 700; style: "normal" | "italic" };
 let fontsPromise: Promise<Font[]> | null = null;
 
 export function loadFonts() {
   fontsPromise ??= Promise.all(
-    FONT_FILES.map(async ([subset, weight]) => ({
-      name: "Inter",
-      data: await readFile(join(process.cwd(), "assets", "fonts", `inter-${subset}-${weight}-normal.woff`)),
+    FONT_FILES.map(async ({ family, file, weight, style }) => ({
+      name: family,
+      data: await readFile(join(process.cwd(), "assets", "fonts", file)),
       weight,
-      style: "normal" as const,
+      style,
     })),
   ).catch((error) => {
     fontsPromise = null;
@@ -59,9 +49,15 @@ async function isAdminSession() {
   }
 }
 
-/** A signed-in platform admin, or the x-render-key header = GRAPHICS_RENDER_KEY. */
+/**
+ * The x-render-key header = GRAPHICS_RENDER_KEY (Convex), or a signed-in
+ * platform admin (the Studio). A request that carries a key is judged by the
+ * key alone: no Clerk and Convex round trip for server renders.
+ */
 export async function authorized(request: Request) {
-  return keyMatches(request.headers.get("x-render-key")) || (await isAdminSession());
+  const key = request.headers.get("x-render-key");
+  if (key !== null) return keyMatches(key);
+  return isAdminSession();
 }
 
 export function bad(message: string, status = 400) {

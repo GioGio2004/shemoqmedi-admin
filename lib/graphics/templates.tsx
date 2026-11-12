@@ -136,7 +136,8 @@ function Header({ s, fr, right }: { s: Scene; fr: Frame; right?: string }) {
 
 function Canvas({ s, fr, back, children }: { s: Scene; fr: Frame; back: string | null; children: ReactNode }) {
   return (
-    <div style={{ display: "flex", position: "relative", width: fr.W, height: fr.H, overflow: "hidden", fontFamily: "Inter", background: s.palette.base }}>
+    // A shared-layer render is transparent: sharp lays it over the backdrop (render.ts).
+    <div style={{ display: "flex", position: "relative", width: fr.W, height: fr.H, overflow: "hidden", fontFamily: "Inter", background: s.layer === "shared" ? "transparent" : s.palette.base }}>
       {back ? <img src={back} width={fr.W} height={fr.H} style={{ position: "absolute", left: 0, top: 0 }} /> : null}
       {children}
     </div>

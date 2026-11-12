@@ -1,29 +1,35 @@
 import { v } from "convex/values";
-import { internalAction, internalQuery, type ActionCtx } from "./_generated/server";
+import { action, internalAction, internalQuery, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { uploadToImageKitFromServer } from "./lib/imagekitServer";
 import { categoryName, listingCategories, slugify } from "./lib/listingHelpers";
 import { mediaRow, mediaUrl } from "./lib/media";
 import { readPillars } from "./lib/scoring";
-import { FORMATS, TEMPLATES, graphicsQuery, isFormat, isTemplate } from "../lib/graphics/spec";
+import { signUpload, vUploadAuth } from "./media";
+import { FORMATS, STYLES, TEMPLATES, graphicsQuery, isFormat, isStyle, isTemplate } from "../lib/graphics/spec";
 import { PALETTE_IDS } from "../lib/palettes";
 
 // Social post graphics. The pictures are drawn by the admin app's
 // /api/graphics routes (satori + sharp; templates in lib/graphics); these
-// actions ask for JPEGs and store them on ImageKit so Postiz, Instagram and
-// the rest can fetch them from a public URL.
+// actions ask for JPEGs and store them on ImageKit so Instagram and the
+// rest can fetch them from a public URL.
 //
 // Convex env:
 //   ADMIN_ORIGIN         the admin app, e.g. https://admin.shemoqmedi.space
 //   GRAPHICS_RENDER_KEY  shared secret; the same value on the admin app
 //   IMAGEKIT_PRIVATE_KEY (already set for the media pipeline)
 //
-// Called by the MCP tools render_graphic / render_carousel (workstream 5).
+// Called by the MCP tools render_graphic / render_carousel (mcp.ts) and by
+// the Studio (renderForPost, and finalUploadAuth + media.registerSocial for a
+// JPEG the browser uploads itself).
 
 const FOLDER = "/social/graphics";
 const GLASS = ["frost", "liquid", "tint"];
 const PALETTES = [...PALETTE_IDS, "auto"];
+
+/** What /api/graphics/carousel?slide=all answers (lib/graphics/render.ts packSlides). */
+const SLIDES_CONTENT_TYPE = "application/vnd.shemoqmedi.slides";
 
 function config() {
   const origin = process.env.ADMIN_ORIGIN?.replace(/\/+$/, "");
@@ -32,10 +38,10 @@ function config() {
   return { origin, key };
 }
 
-/** Slides rendered at once (each is one request to /api/graphics/carousel). */
+/** Slides uploaded to ImageKit at once. */
 export const CAROUSEL_CONCURRENCY = 4;
-/** One slide's render; the render route itself stops at 60 s. */
-const SLIDE_TIMEOUT_MS = 65_000;
+/** The whole carousel's render (one request); the route itself stops at 60 s. */
+const CAROUSEL_TIMEOUT_MS = 70_000;
 
 /** Runs `fn` over `items` with at most `limit` running at a time; results in input order. */
 export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
@@ -59,54 +65,36 @@ async function fetchJpeg(url: string, key: string, timeoutMs = 90_000) {
   return res.blob();
 }
 
-function checkPalette(palette: string, glass: string | undefined) {
+function checkOptions(palette: string, glass: string | undefined, style: string | undefined) {
   if (!PALETTES.includes(palette)) throw new Error(`Unknown palette "${palette}". Use one of: ${PALETTES.join(", ")}.`);
   if (glass !== undefined && !GLASS.includes(glass)) throw new Error(`Unknown glass "${glass}". Use one of: ${GLASS.join(", ")}.`);
+  if (style !== undefined && !isStyle(style)) throw new Error(`Unknown style "${style}". Use one of: ${STYLES.join(", ")}.`);
 }
 
 /**
- * Render one graphic (JPEG) and upload it.
- *
- *   template   award | new_listing | call_submissions | call_jury |
- *              announcement | jury_quote | screenshot
- *   format     ig_portrait | square | story | reel_cover | link
- *   palette    a lib/palettes.ts id (house, egypt, night, paper, saperavi,
- *              moss) or "auto" (tinted from the screenshot's own colours)
- *   fields     the template's text fields by key (lib/graphics/spec.ts),
- *              e.g. { tier: "SOTD", title, studio, date, awardSlug, url }
- *   imageUrls  the template's image slots in order: award [screenshot, badge],
- *              the rest [screenshot]. Award badges come from fields.awardSlug,
- *              so a badge URL is rarely needed. Calls use the screenshot only
- *              as a blurred backdrop.
- *   glass      frost (default) | liquid | tint
+ * The files of a slide=all response: a 4-byte big-endian header length, the
+ * JSON header ({ slides: [{ name, bytes }], width, height, type }), then the
+ * files back to back.
  */
-export const render = internalAction({
-  args: {
-    template: v.string(),
-    format: v.string(),
-    palette: v.string(),
-    fields: v.optional(v.record(v.string(), v.string())),
-    imageUrls: v.optional(v.array(v.string())),
-    glass: v.optional(v.string()),
-  },
-  returns: v.object({ url: v.string(), mediaId: v.id("media") }),
-  // Return type spelled out: it references `internal`, which would otherwise make the api types circular.
-  handler: async (ctx, { template, format, palette, fields = {}, imageUrls = [], glass }): Promise<{ url: string; mediaId: Id<"media"> }> => {
-    if (!isTemplate(template)) throw new Error(`Unknown template "${template}". Use one of: ${Object.keys(TEMPLATES).join(", ")}.`);
-    if (!isFormat(format)) throw new Error(`Unknown format "${format}". Use one of: ${Object.keys(FORMATS).join(", ")}.`);
-    checkPalette(palette, glass);
-    const { origin, key } = config();
-
-    const slots: readonly string[] = TEMPLATES[template].images;
-    const images = Object.fromEntries(slots.map((slot, i) => [slot, imageUrls[i]]));
-    const query = graphicsQuery({ template, format, palette, fields: { ...fields, glass, output: "jpeg" }, images });
-    const jpeg = await fetchJpeg(`${origin}/api/graphics?${query}`, key);
-
-    const label = fields.title || fields.headline || fields.site || template;
-    const { width, height } = FORMATS[format];
-    return await store(ctx, jpeg, `shemoqmedi-${slugify(template)}-${slugify(label, "graphic")}-${format}.jpg`, FOLDER, [template, format, palette], width, height);
-  },
-});
+export function unpackSlides(body: ArrayBuffer) {
+  if (body.byteLength < 4) throw new Error("Empty carousel response.");
+  const headerLength = new DataView(body).getUint32(0);
+  if (headerLength === 0 || 4 + headerLength > body.byteLength) throw new Error("Malformed carousel response.");
+  const header = JSON.parse(new TextDecoder().decode(new Uint8Array(body, 4, headerLength))) as {
+    slides: { name: string; bytes: number }[];
+    width: number;
+    height: number;
+    type: string;
+  };
+  let at = 4 + headerLength;
+  const slides = header.slides.map(({ name, bytes }) => {
+    if (!Number.isInteger(bytes) || bytes <= 0 || at + bytes > body.byteLength) throw new Error("Malformed carousel response.");
+    const blob = new Blob([new Uint8Array(body, at, bytes)], { type: header.type });
+    at += bytes;
+    return { name, blob };
+  });
+  return { slides, width: header.width, height: header.height };
+}
 
 async function store(ctx: ActionCtx, body: Blob, fileName: string, folder: string, tags: string[], width: number, height: number) {
   const file = await uploadToImageKitFromServer(body, { fileName, folder, tags: ["social", ...tags] });
@@ -122,6 +110,65 @@ async function store(ctx: ActionCtx, body: Blob, fileName: string, folder: strin
   });
   return { url: file.url, mediaId };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// One graphic
+// ─────────────────────────────────────────────────────────────────────────────
+
+const renderArgs = {
+  template: v.string(),
+  format: v.string(),
+  palette: v.string(),
+  fields: v.optional(v.record(v.string(), v.string())),
+  imageUrls: v.optional(v.array(v.string())),
+  glass: v.optional(v.string()),
+  style: v.optional(v.string()),
+};
+
+type RenderArgs = { template: string; format: string; palette: string; fields?: Record<string, string>; imageUrls?: string[]; glass?: string; style?: string };
+type Rendered = { url: string; mediaId: Id<"media">; width: number; height: number };
+
+async function renderOne(ctx: ActionCtx, { template, format, palette, fields = {}, imageUrls = [], glass, style }: RenderArgs): Promise<Rendered> {
+  if (!isTemplate(template)) throw new Error(`Unknown template "${template}". Use one of: ${Object.keys(TEMPLATES).join(", ")}.`);
+  if (!isFormat(format)) throw new Error(`Unknown format "${format}". Use one of: ${Object.keys(FORMATS).join(", ")}.`);
+  checkOptions(palette, glass, style);
+  const { origin, key } = config();
+
+  const slots: readonly string[] = TEMPLATES[template].images;
+  const images = Object.fromEntries(slots.map((slot, i) => [slot, imageUrls[i]]));
+  const query = graphicsQuery({ template, format, palette, style, fields: { ...fields, glass, output: "jpeg" }, images });
+  const jpeg = await fetchJpeg(`${origin}/api/graphics?${query}`, key);
+
+  const label = fields.title || fields.headline || fields.site || template;
+  const { width, height } = FORMATS[format];
+  const name = `shemoqmedi-${slugify(template)}-${slugify(label, "graphic")}-${format}.jpg`;
+  const saved = await store(ctx, jpeg, name, FOLDER, [template, format, palette, style ?? "glass"], width, height);
+  return { ...saved, width, height };
+}
+
+/**
+ * Render one graphic (JPEG) and upload it.
+ *
+ *   template   award | new_listing | call_submissions | call_jury |
+ *              announcement | jury_quote | screenshot
+ *   format     ig_portrait | square | story | reel_cover | link
+ *   palette    a lib/palettes.ts id (house, egypt, night, paper, saperavi,
+ *              moss) or "auto" (tinted from the screenshot's own colours)
+ *   style      glass (default) | swiss | kinetic | magazine | bento
+ *   fields     the template's text fields by key (lib/graphics/spec.ts),
+ *              e.g. { tier: "SOTD", title, studio, date, awardSlug, url }
+ *   imageUrls  the template's image slots in order: award [screenshot, badge],
+ *              the rest [screenshot]. Award badges come from fields.awardSlug,
+ *              so a badge URL is rarely needed. Glass calls use the
+ *              screenshot only as a blurred backdrop.
+ *   glass      frost (default) | liquid | tint   (glass style only)
+ */
+export const render = internalAction({
+  args: renderArgs,
+  returns: v.object({ url: v.string(), mediaId: v.id("media"), width: v.number(), height: v.number() }),
+  // Return type spelled out: it references `internal`, which would otherwise make the api types circular.
+  handler: async (ctx, args): Promise<Rendered> => renderOne(ctx, args),
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The storytelling carousel
@@ -202,14 +249,92 @@ export const carouselFacts = internalQuery({
   },
 });
 
+const storyOptions = v.object({
+  chips: v.optional(v.array(v.string())),
+  notes: v.optional(v.array(v.string())),
+  cta: v.optional(v.string()),
+  glass: v.optional(v.string()),
+  shots: v.optional(v.array(v.string())),
+  mobile: v.optional(v.string()),
+});
+
+type CarouselArgs = {
+  listingId?: Id<"listings">;
+  facts?: Record<string, string>;
+  palette: string;
+  style?: string;
+  story?: { chips?: string[]; notes?: string[]; cta?: string; glass?: string; shots?: string[]; mobile?: string };
+};
+type Carousel = { urls: string[]; mediaIds: Id<"media">[]; slides: string[] };
+
+async function renderStory(ctx: ActionCtx, { listingId, facts = {}, palette, style, story = {} }: CarouselArgs): Promise<Carousel> {
+  checkOptions(palette, story.glass, style);
+  if (!listingId && !facts.title) throw new Error("Give a listingId, or facts with at least a title.");
+  const { origin, key } = config();
+
+  const base = listingId ? await ctx.runQuery(internal.graphics.carouselFacts, { listingId }) : null;
+  if (listingId && !base) throw new Error("Listing not found.");
+
+  const q = new URLSearchParams({ palette, output: "jpeg" });
+  if (story.glass) q.set("glass", story.glass);
+  if (style && style !== "glass") q.set("style", style);
+  const put = (k: string, value: string | number | null | undefined) => {
+    if (value !== null && value !== undefined && String(value).trim()) q.set(k, String(value));
+  };
+  if (base) {
+    put("title", base.title);
+    put("studio", base.studio);
+    put("url", base.url);
+    put("tagline", base.tagline);
+    put("slug", base.slug);
+    put("tech", base.tech.join(","));
+    put("categories", base.categories.join(","));
+    if (base.award) {
+      put("tier", base.award.tier);
+      put("date", base.award.date);
+      put("awardSlug", base.award.slug);
+    }
+    put("score", base.score);
+    if (base.pillars) for (const [k, value] of Object.entries(base.pillars)) put(k, value);
+    if (base.quote) {
+      put("quote", base.quote.text);
+      put("juror", base.quote.juror);
+      put("role", base.quote.role);
+    }
+  }
+  for (const [k, value] of Object.entries(facts)) put(k, value);
+  for (const shot of story.shots ?? base?.shots ?? []) q.append("shot", shot);
+  put("mobile", story.mobile ?? base?.mobile ?? null);
+  for (const chip of story.chips ?? []) q.append("chip", chip);
+  for (const note of story.notes ?? []) q.append("note", note);
+  put("cta", story.cta);
+
+  // One request renders every slide (the admin app builds the backdrop and
+  // prepares each picture once) and answers with all of them in one body.
+  q.set("slide", "all");
+  const res = await fetch(`${origin}/api/graphics/carousel?${q}`, { headers: { "x-render-key": key }, signal: AbortSignal.timeout(CAROUSEL_TIMEOUT_MS) });
+  if (!res.ok || res.headers.get("content-type") !== SLIDES_CONTENT_TYPE) {
+    throw new Error(`Rendering the carousel failed (HTTP ${res.status}): ${(await res.text()).slice(0, 200)}`);
+  }
+  const { slides, width, height } = unpackSlides(await res.arrayBuffer());
+
+  const label = slugify(q.get("title") ?? "carousel", "carousel");
+  const folder = `/social/carousels/${label}-${Date.now().toString(36)}`;
+  const saved = await mapLimit(slides, CAROUSEL_CONCURRENCY, ({ name, blob }, i) =>
+    store(ctx, blob, `shemoqmedi-${label}-${String(i + 1).padStart(2, "0")}-${name}.jpg`, folder, ["carousel", name, palette, style ?? "glass"], width, height),
+  );
+  return { urls: saved.map((s) => s.url), mediaIds: saved.map((s) => s.mediaId), slides: slides.map((s) => s.name) };
+}
+
 /**
- * Render the storytelling Instagram carousel (6–8 JPEG slides, 1080×1350,
- * cut from one panorama) and upload every slide. Give a `listingId` to
- * take the facts from the database, `facts` to override or supply them
- * (keys: title, studio, url, tagline, kicker, date, tier, awardSlug, score,
- * design, usability, creativity, content, quote, juror, role, tech,
- * categories, link, cta), or both.
+ * Render the storytelling Instagram carousel (5–8 JPEG slides, 1080×1350)
+ * and upload every slide. Give a `listingId` to take the facts from the
+ * database, `facts` to override or supply them (keys: title, studio, url,
+ * tagline, kicker, date, tier, awardSlug, score, design, usability,
+ * creativity, content, quote, juror, role, tech, categories, link, cta), or
+ * both.
  *
+ *   style         glass (default) | swiss | kinetic | magazine | bento
  *   story.chips   one-line chips for the detail slides ("The type", "The grid")
  *   story.notes   a sentence under each detail
  *   story.cta     the last slide's headline
@@ -222,76 +347,53 @@ export const renderCarousel = internalAction({
     listingId: v.optional(v.id("listings")),
     facts: v.optional(v.record(v.string(), v.string())),
     palette: v.string(),
-    story: v.optional(
-      v.object({
-        chips: v.optional(v.array(v.string())),
-        notes: v.optional(v.array(v.string())),
-        cta: v.optional(v.string()),
-        glass: v.optional(v.string()),
-        shots: v.optional(v.array(v.string())),
-        mobile: v.optional(v.string()),
-      }),
-    ),
+    style: v.optional(v.string()),
+    story: v.optional(storyOptions),
   },
   returns: v.object({ urls: v.array(v.string()), mediaIds: v.array(v.id("media")), slides: v.array(v.string()) }),
-  handler: async (ctx, { listingId, facts = {}, palette, story = {} }): Promise<{ urls: string[]; mediaIds: Id<"media">[]; slides: string[] }> => {
-    checkPalette(palette, story.glass);
-    if (!listingId && !facts.title) throw new Error("Give a listingId, or facts with at least a title.");
-    const { origin, key } = config();
+  handler: async (ctx, args): Promise<Carousel> => renderStory(ctx, args),
+});
 
-    const base = listingId ? await ctx.runQuery(internal.graphics.carouselFacts, { listingId }) : null;
-    if (listingId && !base) throw new Error("Listing not found.");
+// ─────────────────────────────────────────────────────────────────────────────
+// The Studio (admin session)
+// ─────────────────────────────────────────────────────────────────────────────
 
-    const q = new URLSearchParams({ palette, output: "jpeg" });
-    if (story.glass) q.set("glass", story.glass);
-    const put = (k: string, value: string | number | null | undefined) => {
-      if (value !== null && value !== undefined && String(value).trim()) q.set(k, String(value));
-    };
-    if (base) {
-      put("title", base.title);
-      put("studio", base.studio);
-      put("url", base.url);
-      put("tagline", base.tagline);
-      put("slug", base.slug);
-      put("tech", base.tech.join(","));
-      put("categories", base.categories.join(","));
-      if (base.award) {
-        put("tier", base.award.tier);
-        put("date", base.award.date);
-        put("awardSlug", base.award.slug);
-      }
-      put("score", base.score);
-      if (base.pillars) for (const [k, value] of Object.entries(base.pillars)) put(k, value);
-      if (base.quote) {
-        put("quote", base.quote.text);
-        put("juror", base.quote.juror);
-        put("role", base.quote.role);
-      }
+/**
+ * Admin: the final graphic for a post (the Studio's "Render final"). The
+ * same arguments as render; with `carousel: true` the storytelling carousel
+ * instead, of `listingId` and/or `fields` (as facts), with `imageUrls` as its
+ * screenshots when given. Always a list: one URL per image.
+ */
+export const renderForPost = action({
+  args: { ...renderArgs, carousel: v.optional(v.boolean()), listingId: v.optional(v.id("listings")) },
+  returns: v.object({ urls: v.array(v.string()), mediaIds: v.array(v.id("media")), width: v.number(), height: v.number() }),
+  handler: async (ctx, { carousel, listingId, ...args }): Promise<{ urls: string[]; mediaIds: Id<"media">[]; width: number; height: number }> => {
+    await ctx.runQuery(internal.users.assertAdmin, {});
+    if (carousel) {
+      const story = await renderStory(ctx, {
+        listingId,
+        facts: args.fields,
+        palette: args.palette,
+        style: args.style,
+        story: { glass: args.glass, ...(args.imageUrls?.length ? { shots: args.imageUrls } : {}) },
+      });
+      return { urls: story.urls, mediaIds: story.mediaIds, width: FORMATS.ig_portrait.width, height: FORMATS.ig_portrait.height };
     }
-    for (const [k, value] of Object.entries(facts)) put(k, value);
-    for (const shot of story.shots ?? base?.shots ?? []) q.append("shot", shot);
-    put("mobile", story.mobile ?? base?.mobile ?? null);
-    for (const chip of story.chips ?? []) q.append("chip", chip);
-    for (const note of story.notes ?? []) q.append("note", note);
-    put("cta", story.cta);
+    const one = await renderOne(ctx, args);
+    return { urls: [one.url], mediaIds: [one.mediaId], width: one.width, height: one.height };
+  },
+});
 
-    const endpoint = `${origin}/api/graphics/carousel`;
-    q.set("slide", "plan");
-    const planRes = await fetch(`${endpoint}?${q}`, { headers: { "x-render-key": key }, signal: AbortSignal.timeout(60_000) });
-    if (!planRes.ok) throw new Error(`Carousel plan failed (HTTP ${planRes.status}): ${(await planRes.text()).slice(0, 200)}`);
-    const { slides } = (await planRes.json()) as { slides: string[] };
-
-    const label = slugify(q.get("title") ?? "carousel", "carousel");
-    const folder = `/social/carousels/${label}-${Date.now().toString(36)}`;
-    // Each slide is a full render on the admin app (its own request, so its own
-    // function instance): render and upload CAROUSEL_CONCURRENCY at a time, so
-    // the whole carousel stays well inside the MCP request's time limit.
-    const saved = await mapLimit(slides, CAROUSEL_CONCURRENCY, async (name, i) => {
-      const query = new URLSearchParams(q);
-      query.set("slide", String(i));
-      const jpeg = await fetchJpeg(`${endpoint}?${query}`, key, SLIDE_TIMEOUT_MS);
-      return await store(ctx, jpeg, `shemoqmedi-${label}-${String(i + 1).padStart(2, "0")}-${name}.jpg`, folder, ["carousel", name, palette], 1080, 1350);
-    });
-    return { urls: saved.map((s) => s.url), mediaIds: saved.map((s) => s.mediaId), slides };
+/**
+ * Admin: signed parameters for the browser to upload a final JPEG straight
+ * to ImageKit (into `folder`, /social/graphics); media.registerSocial then
+ * records it. The private key never leaves Convex.
+ */
+export const finalUploadAuth = action({
+  args: {},
+  returns: v.object({ ...vUploadAuth.fields, folder: v.string() }),
+  handler: async (ctx) => {
+    await ctx.runQuery(internal.users.assertAdmin, {});
+    return { ...(await signUpload()), folder: FOLDER };
   },
 });

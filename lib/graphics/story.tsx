@@ -22,10 +22,11 @@ import {
   type Scene,
 } from "./glass";
 
-// The storytelling Instagram carousel: 1080×1350 slides cut from one wide
-// panorama, so the backdrop, the site's browser window and a thin thread
-// run across the swipe. Each slide is rendered on its own as a window onto
-// the panorama (satori lays out the neighbours too, then clips them).
+// The storytelling Instagram carousel in the glass style: 1080×1350 slides
+// cut from one wide panorama, so the backdrop, the site's browser window and
+// a thin thread run across the swipe. Each slide is rendered on its own as a
+// window onto the panorama; only a slide whose content reaches across the
+// seam (BLEEDS) is laid out again for its right-hand neighbour.
 //
 //   hook     title, award, date, studio
 //   site     the site, sharp, in a glass browser (bleeds into the next slide)
@@ -96,6 +97,9 @@ export const DETAIL_TILES: Rect[] = [
 ];
 export const DETAIL_ZOOM = [2.1, 1.7];
 export const PHONE = { x: 150, y: 214, w: 430, h: 900 };
+
+/** Slides whose content reaches into the next one (the site's browser window is wider than a slide). */
+const BLEEDS = new Set<SlideKind>(["site"]);
 
 function Counter({ s, k, n }: { s: Scene; k: number; n: number }) {
   return (
@@ -427,9 +431,10 @@ export function storySlide({
   const total = n * SLIDE_W;
   const left = index * SLIDE_W;
   const detailIndexOf = (k: number) => plan.slice(0, k).filter((p) => p === "detail").length;
-  const visible = [index - 1, index, index + 1].filter((k) => k >= 0 && k < n);
+  // Only this slide, plus the one before when its content bleeds across the seam.
+  const visible = [index - 1, index].filter((k) => k >= 0 && (k === index || BLEEDS.has(plan[k])));
   return (
-    <div style={{ display: "flex", position: "relative", width: SLIDE_W, height: SLIDE_H, overflow: "hidden", fontFamily: "Inter", background: scene.palette.base }}>
+    <div style={{ display: "flex", position: "relative", width: SLIDE_W, height: SLIDE_H, overflow: "hidden", fontFamily: "Inter", background: scene.layer === "shared" ? "transparent" : scene.palette.base }}>
       {assets.back ? <img src={assets.back} width={SLIDE_W} height={SLIDE_H} style={{ position: "absolute", left: 0, top: 0 }} /> : null}
       <div style={{ display: "flex", position: "absolute", left: -left, top: 0, width: total, height: SLIDE_H }}>
         {/* The thread: one hairline across the whole carousel, a tick at every seam. */}

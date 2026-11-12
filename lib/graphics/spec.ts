@@ -144,6 +144,28 @@ export const TEMPLATES = {
 export type TemplateId = keyof typeof TEMPLATES;
 export const TEMPLATE_IDS = Object.keys(TEMPLATES) as TemplateId[];
 
+/**
+ * The visual language a graphic is drawn in. Every style implements every
+ * template, format and carousel slide; palettes keep their 60/30/10 roles in
+ * all of them. Only glass needs the blurred backdrop (sharp), so the others
+ * render faster.
+ */
+export const STYLES = ["glass", "swiss", "kinetic", "magazine", "bento"] as const;
+
+export type Style = (typeof STYLES)[number];
+
+export const STYLE_INFO: Record<Style, { label: string; description: string }> = {
+  glass: { label: "Glass", description: "Frosted glass panels over a blurred, palette-tinted backdrop of the site." },
+  swiss: { label: "Swiss", description: "Strict 12-column grid, huge grotesk headline, hairline rules, lots of white." },
+  kinetic: { label: "Kinetic", description: "Type as the image: oversized split, stacked and cropped words. Works as a reel cover." },
+  magazine: { label: "Magazine", description: "A print cover: serif display, issue number, columns and a cover-story layout." },
+  bento: { label: "Bento", description: "Modular rounded tiles: screenshot, score, stack, studio and award." },
+};
+
+export function isStyle(x: string | null | undefined): x is Style {
+  return !!x && (STYLES as readonly string[]).includes(x);
+}
+
 export function isTemplate(x: string | null | undefined): x is TemplateId {
   return !!x && x in TEMPLATES;
 }
@@ -152,15 +174,18 @@ export function isFormat(x: string | null | undefined): x is FormatId {
   return !!x && x in FORMATS;
 }
 
-/** The query string the route reads, from template + format + palette + fields + named images. */
+/** The query string the route reads, from template + format + palette (+ style) + fields + named images. */
 export function graphicsQuery(input: {
   template: string;
   format: string;
   palette: string;
+  style?: string;
   fields?: Record<string, string | undefined>;
   images?: Record<string, string | undefined>;
 }) {
   const q = new URLSearchParams({ template: input.template, format: input.format, palette: input.palette });
+  // Glass is the default, so its URLs stay as they were.
+  if (input.style && input.style !== "glass") q.set("style", input.style);
   for (const [k, v] of Object.entries({ ...input.fields, ...input.images })) {
     if (v && v.trim()) q.set(k, v.trim());
   }

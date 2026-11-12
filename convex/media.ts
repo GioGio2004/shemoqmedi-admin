@@ -67,29 +67,30 @@ function checkLimits(kind: "image" | "video", contentType: string, size: number)
   }
 }
 
+export const vUploadAuth = v.object({
+  token: v.string(),
+  expire: v.number(),
+  signature: v.string(),
+  publicKey: v.string(),
+  urlEndpoint: v.string(),
+});
+
+/** Signed parameters for one direct browser → ImageKit upload, valid 30 minutes (the private key stays here). */
+export async function signUpload() {
+  const token = crypto.randomUUID();
+  const expire = Math.floor(Date.now() / 1000) + 30 * 60;
+  const signature = await hmacSha1Hex(env("IMAGEKIT_PRIVATE_KEY"), `${token}${expire}`);
+  return { token, expire, signature, publicKey: env("IMAGEKIT_PUBLIC_KEY"), urlEndpoint: env("IMAGEKIT_URL_ENDPOINT") };
+}
+
 /** Signed parameters for one direct browser → ImageKit upload (valid 30 minutes). */
 export const uploadAuth = action({
   args: {},
-  returns: v.object({
-    token: v.string(),
-    expire: v.number(),
-    signature: v.string(),
-    publicKey: v.string(),
-    urlEndpoint: v.string(),
-  }),
+  returns: vUploadAuth,
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new ConvexError("Please log in to upload.");
-    const token = crypto.randomUUID();
-    const expire = Math.floor(Date.now() / 1000) + 30 * 60;
-    const signature = await hmacSha1Hex(env("IMAGEKIT_PRIVATE_KEY"), `${token}${expire}`);
-    return {
-      token,
-      expire,
-      signature,
-      publicKey: env("IMAGEKIT_PUBLIC_KEY"),
-      urlEndpoint: env("IMAGEKIT_URL_ENDPOINT"),
-    };
+    return await signUpload();
   },
 });
 
@@ -132,11 +133,57 @@ export const register = mutation({
   },
 });
 
-/** Double-check a registered file against ImageKit (real size, type, path). */
+/** Where the Studio's final renders live on ImageKit (graphics.finalUploadAuth signs uploads there). */
+export const SOCIAL_FOLDER = "/social/graphics/";
+
+/**
+ * Admin: record a final social graphic the Studio uploaded straight to
+ * ImageKit (graphics.finalUploadAuth → browser upload to /social/graphics).
+ * Only JPEG or PNG files in that folder of our own account; verified
+ * against ImageKit afterwards like any other upload.
+ */
+export const registerSocial = mutation({
+  args: {
+    url: v.string(),
+    fileId: v.string(),
+    filePath: v.string(),
+    size: v.number(),
+    width: v.number(),
+    height: v.number(),
+    contentType: v.string(),
+  },
+  returns: v.id("media"),
+  handler: async (ctx, args) => {
+    const user = await requireAdmin(ctx);
+    const endpoint = env("IMAGEKIT_URL_ENDPOINT");
+    if (!args.url.startsWith(`${endpoint}${SOCIAL_FOLDER}`) || !args.filePath.startsWith(SOCIAL_FOLDER)) {
+      throw new ConvexError("That file is not in the social graphics folder. Render it again.");
+    }
+    if (!/^[A-Za-z0-9_-]{6,64}$/.test(args.fileId)) throw new ConvexError("Invalid upload.");
+    if (args.contentType !== "image/jpeg" && args.contentType !== "image/png") throw new ConvexError("Social graphics are JPEG or PNG files.");
+    if (!(args.width > 0 && args.height > 0 && args.width <= 4096 && args.height <= 4096)) throw new ConvexError("Invalid image size.");
+    checkLimits("image", args.contentType, args.size);
+    const existing = await ctx.db
+      .query("media")
+      .withIndex("by_fileId", (q) => q.eq("fileId", args.fileId))
+      .first();
+    if (existing) return existing._id;
+    const id = await ctx.db.insert("media", { ...args, kind: "image", uploadedBy: user._id, createdAt: Date.now() });
+    await ctx.scheduler.runAfter(0, internal.media.verify, { id, fileId: args.fileId, kind: "image", folder: SOCIAL_FOLDER });
+    return id;
+  },
+});
+
+/** Double-check a registered file against ImageKit (real size, type, path; listings unless `folder` says otherwise). */
 export const verify = internalAction({
-  args: { id: v.id("media"), fileId: v.string(), kind: v.union(v.literal("image"), v.literal("video")) },
+  args: {
+    id: v.id("media"),
+    fileId: v.string(),
+    kind: v.union(v.literal("image"), v.literal("video")),
+    folder: v.optional(v.union(v.literal("/listings/"), v.literal(SOCIAL_FOLDER))),
+  },
   returns: v.null(),
-  handler: async (ctx, { id, fileId, kind }) => {
+  handler: async (ctx, { id, fileId, kind, folder = "/listings/" }) => {
     const res = await fetch(`https://api.imagekit.io/v1/files/${encodeURIComponent(fileId)}/details`, {
       headers: { Authorization: authHeader() },
     });
@@ -146,7 +193,7 @@ export const verify = internalAction({
       const file = (await res.json()) as { size?: number; mime?: string; filePath?: string };
       try {
         checkLimits(kind, file.mime ?? "", file.size ?? Infinity);
-        ok = (file.filePath ?? "").startsWith("/listings/");
+        ok = (file.filePath ?? "").startsWith(folder);
       } catch {
         ok = false;
       }

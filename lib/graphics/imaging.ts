@@ -1,18 +1,28 @@
+import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { STOREFRONT_URL } from "@/lib/storefront";
 import { alpha, type Palette } from "@/lib/palettes";
+import type { Gradient, PanelShape } from "./glass";
 
 // Raster work for the social graphics, done with sharp before and after
 // satori (which can't blur, crop or read WebP):
 //
 //   fetchImage     a screenshot from one of our own hosts, cached briefly
+//                  (ImageKit files come as a 1600 px JPEG, not the full WebP)
+//   picture        a fetched image, decoded once; its small raster is shared
+//                  by the backdrop and the auto palette
 //   buildBackdrop  the blurred, palette-tinted backdrop behind a graphic (or a
 //                  whole carousel panorama) and its "frost": the same picture
-//                  blurred further and lightened, which glass panels show
+//                  blurred further and lightened, which glass panels show.
+//                  Cached, so a carousel or a preview being typed into builds
+//                  it once.
 //   region         one canvas-sized window of a backdrop, as a data: URI
+//   glassLayer     a window of the backdrop with the frost laid in under
+//                  every glass panel: one raster under the whole graphic
 //   cropDetail     a zoomed-in crop of a screenshot (the carousel's details)
 //   autoPalette    base / surface / accent picked from a screenshot's colours
-//   finish         film grain over the rendered PNG, then JPEG or PNG out
+//   finish         the satori PNG over its background, film grain, and one
+//                  encode to JPEG or PNG
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fetching
@@ -60,12 +70,32 @@ async function download(url: URL): Promise<Buffer | null> {
   }
 }
 
+function isImageKit(url: URL) {
+  return url.hostname === "ik.imagekit.io" || url.hostname === hostOf(process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT);
+}
+
+/** Widest a screenshot is ever drawn (the carousel's browser window, at 1.2x). */
+export const FETCH_WIDTH = 1600;
+
+/**
+ * ImageKit screenshots are stored as big WebPs. Asking for a 1600 px JPEG
+ * instead is a smaller download, a faster decode, and a format satori draws
+ * as it is. Images that already carry a transform are left alone.
+ */
+export function deliveryUrl(raw: string) {
+  const url = new URL(raw);
+  if (isImageKit(url) && !url.searchParams.has("tr") && !url.pathname.includes("/tr:")) {
+    url.searchParams.set("tr", `w-${FETCH_WIDTH},f-jpg`);
+  }
+  return url;
+}
+
 /** An image's bytes, or null when it is missing, too big or not on our hosts. Cached for ten minutes. */
 export function fetchImage(raw: string | null | undefined): Promise<Buffer | null> {
   if (!raw) return Promise.resolve(null);
   let url: URL;
   try {
-    url = new URL(raw);
+    url = deliveryUrl(raw);
   } catch {
     return Promise.resolve(null);
   }
@@ -84,31 +114,64 @@ export function fetchImage(raw: string | null | undefined): Promise<Buffer | nul
   return data;
 }
 
-export type Picture = { buf: Buffer; width: number; height: number };
+export type Picture = {
+  buf: Buffer;
+  width: number;
+  height: number;
+  format: string;
+  /** Where the bytes came from (part of the backdrop cache key), when known. */
+  source?: string;
+  /** The picture decoded once at SMALL_WIDTH, shared by the backdrop and the auto palette. */
+  small: () => Promise<Buffer>;
+};
 
-/** Decoded size of an image (null when sharp can't read it). */
-export async function picture(buf: Buffer | null): Promise<Picture | null> {
+/** Width of the shared small raster: more than any backdrop span needs (backdrops work at 1/6 size). */
+const SMALL_WIDTH = 480;
+
+/** Size and format of an image, and its lazily decoded small raster (null when sharp can't read it). */
+export async function picture(buf: Buffer | null, source?: string): Promise<Picture | null> {
   if (!buf) return null;
   try {
     const meta = await sharp(buf).metadata();
     if (!meta.width || !meta.height) return null;
+    const width = meta.width;
+    let small: Promise<Buffer> | null = null;
     // Some formats report the first frame only; that's what we draw anyway.
-    return { buf, width: meta.width, height: meta.height };
+    return {
+      buf,
+      width,
+      height: meta.height,
+      format: meta.format ?? "",
+      source,
+      small: () => (small ??= sharp(buf).resize({ width: Math.min(SMALL_WIDTH, width) }).removeAlpha().png({ compressionLevel: 0 }).toBuffer()),
+    };
   } catch {
     return null;
   }
 }
 
-function dataUri(buf: Buffer, type: "jpeg" | "png") {
+/** fetchImage, then picture, remembering the URL for the backdrop cache. */
+export async function fetchPicture(url: string | null | undefined) {
+  return picture(await fetchImage(url), url ?? undefined);
+}
+
+export function dataUri(buf: Buffer, type: "jpeg" | "png") {
   return `data:image/${type};base64,${buf.toString("base64")}`;
 }
 
-/** A picture resized to `width` (keeping its shape) as a JPEG data: URI satori can draw. */
+/**
+ * A picture for satori at about `width` px wide. A JPEG that is already
+ * about that size (what ImageKit delivers) goes in as it is: no decode, no
+ * re-encode. Anything else is resized to a JPEG.
+ */
 export async function asDataUri(pic: Picture | null, width: number, maxHeight?: number) {
   if (!pic) return null;
+  const h = Math.round((pic.height * width) / pic.width);
+  if (pic.format === "jpeg" && pic.width >= width * 0.7 && pic.width <= width * 1.25 && (!maxHeight || h <= maxHeight)) {
+    return dataUri(pic.buf, "jpeg");
+  }
   let p = sharp(pic.buf).resize({ width: Math.round(width), withoutEnlargement: false });
   if (maxHeight) {
-    const h = Math.round((pic.height * width) / pic.width);
     if (h > maxHeight) p = p.extract({ left: 0, top: 0, width: Math.round(width), height: Math.round(maxHeight) });
   }
   return dataUri(await p.jpeg({ quality: 88, mozjpeg: true }).toBuffer(), "jpeg");
@@ -172,7 +235,7 @@ function hslToRgb(h: number, s: number, l: number): RGB {
  */
 export async function autoPalette(pic: Picture | null, fallback: Palette): Promise<Palette> {
   if (!pic) return { ...fallback, id: "auto", name: "Auto" };
-  const { data } = await sharp(pic.buf).resize(48, 30, { fit: "fill" }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { data } = await sharp(await pic.small()).resize(48, 30, { fit: "fill" }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
   const bins = new Array(12).fill(0).map(() => ({ weight: 0, r: 0, g: 0, b: 0, vivid: 0, vividRgb: [0, 0, 0] as RGB }));
   let colourful = 0;
   for (let i = 0; i < data.length; i += 3) {
@@ -266,7 +329,40 @@ function solid(w: number, h: number, colour: string, opacity: number) {
   );
 }
 
-export async function buildBackdrop(o: BackdropOptions): Promise<Backdrop> {
+const backdrops = new Map<string, Promise<Backdrop>>();
+
+function backdropKey(o: BackdropOptions) {
+  const layers = o.layers.map(({ pic, from, to }) => {
+    // A URL names the picture; bytes without one are hashed (cheap next to the blur).
+    const id = pic.source ?? createHash("sha1").update(pic.buf).digest("base64");
+    return `${id}@${from.toFixed(4)}-${to.toFixed(4)}`;
+  });
+  const p = o.palette;
+  return [o.width, o.height, p.base, p.surface, p.accent, o.veil, o.blur, o.frostBlur, o.frostLight, ...layers].join("|");
+}
+
+/**
+ * The backdrop for these options, built once and kept (the last 24): a
+ * carousel's slides, a preview being typed into, and a final render after a
+ * preview all share it.
+ */
+export function buildBackdrop(o: BackdropOptions): Promise<Backdrop> {
+  const key = backdropKey(o);
+  const hit = backdrops.get(key);
+  if (hit) {
+    // Most recently used goes last, so the oldest is evicted first.
+    backdrops.delete(key);
+    backdrops.set(key, hit);
+    return hit;
+  }
+  const built = drawBackdrop(o);
+  backdrops.set(key, built);
+  built.catch(() => backdrops.delete(key));
+  if (backdrops.size > 24) backdrops.delete(backdrops.keys().next().value!);
+  return built;
+}
+
+async function drawBackdrop(o: BackdropOptions): Promise<Backdrop> {
   const w = Math.max(8, Math.round(o.width / SCALE));
   const h = Math.max(8, Math.round(o.height / SCALE));
   const [br, bg, bb] = parseHex(o.palette.base);
@@ -287,7 +383,7 @@ export async function buildBackdrop(o: BackdropOptions): Promise<Backdrop> {
           `</linearGradient></defs><rect width="100%" height="100%" fill="url(#g)"/></svg>`,
       );
       const input = await sharp(
-        await sharp(pic.buf).resize(width, h, { fit: "cover", position: "attention" }).modulate({ saturation: 1.25 }).ensureAlpha().png().toBuffer(),
+        await sharp(await pic.small()).resize(width, h, { fit: "cover", position: "attention" }).modulate({ saturation: 1.25 }).ensureAlpha().png().toBuffer(),
       )
         .composite([{ input: mask, blend: "dest-in" }])
         .png()
@@ -325,25 +421,132 @@ export async function buildBackdrop(o: BackdropOptions): Promise<Backdrop> {
   return { width: o.width, height: o.height, back, frost, luminance: 0.2126 * r + 0.7152 * g + 0.0722 * b };
 }
 
-/** One window of a backdrop layer at full size, as a JPEG data: URI. */
-export async function region(
-  bd: Backdrop,
-  which: "back" | "frost",
-  rect: { left: number; top: number; width: number; height: number },
-) {
-  const src = which === "back" ? bd.back : bd.frost;
+type Window = { left: number; top: number; width: number; height: number };
+
+/** `rect` (final-size pixels) in the backdrop's small raster. */
+function smallWindow(bd: Backdrop, rect: Window) {
   const lw = Math.round(bd.width / SCALE);
   const lh = Math.round(bd.height / SCALE);
   const left = Math.max(0, Math.min(lw - 1, Math.round(rect.left / SCALE)));
   const top = Math.max(0, Math.min(lh - 1, Math.round(rect.top / SCALE)));
   const width = Math.max(1, Math.min(lw - left, Math.round(rect.width / SCALE)));
   const height = Math.max(1, Math.min(lh - top, Math.round(rect.height / SCALE)));
-  const out = await sharp(src)
-    .extract({ left, top, width, height })
-    .resize(Math.round(rect.width), Math.round(rect.height), { kernel: "cubic", fit: "fill" })
-    .jpeg({ quality: 86 })
+  return { left, top, width, height };
+}
+
+/** One window of a backdrop layer at `scale` of full size (1: final pixels), as a JPEG data: URI. */
+export async function region(bd: Backdrop, which: "back" | "frost", rect: Window, scale = 1) {
+  const out = await sharp(which === "back" ? bd.back : bd.frost)
+    .extract(smallWindow(bd, rect))
+    .resize(Math.max(1, Math.round(rect.width * scale)), Math.max(1, Math.round(rect.height * scale)), { kernel: "cubic", fit: "fill" })
+    .jpeg({ quality: scale < 1 ? 80 : 86 })
     .toBuffer();
   return dataUri(out, "jpeg");
+}
+
+/** Decoded pixels, ready to be composited without another encode. */
+export type Raster = { data: Buffer; width: number; height: number; channels: 3 | 4 };
+
+/** One window of a backdrop layer, decoded at full size. */
+async function windowRaster(bd: Backdrop, which: "back" | "frost", rect: Window) {
+  return sharp(which === "back" ? bd.back : bd.frost)
+    .extract(smallWindow(bd, rect))
+    .resize(Math.round(rect.width), Math.round(rect.height), { kernel: "cubic", fit: "fill" })
+    .removeAlpha()
+    .raw()
+    .toBuffer();
+}
+
+/** "rgba(0, 0, 0, 0.3)" / "#RRGGBB" → an SVG fill and its opacity (librsvg wants them apart). */
+function svgColour(c: string) {
+  const m = c.match(/rgba?\(([^)]+)\)/);
+  if (!m) return { fill: c, opacity: 1 };
+  const [r, g, b, a = "1"] = m[1].split(",").map((x) => x.trim());
+  return { fill: `rgb(${r},${g},${b})`, opacity: Number(a) };
+}
+
+const SHADOW_SCALE = 4;
+
+/** Every panel's drop shadows, blurred at 1/4 size (they are soft anyway), as one full-size raster. */
+async function shadowLayer(panels: PanelShape[], rect: Window, width: number, height: number) {
+  const byBlur = new Map<number, string[]>();
+  for (const p of panels) {
+    for (const sh of p.shadows) {
+      const { fill, opacity } = svgColour(sh.colour);
+      const k = SHADOW_SCALE;
+      const shape = `<rect x="${((p.x - rect.left) / k).toFixed(2)}" y="${((p.y + sh.y - rect.top) / k).toFixed(2)}" width="${(p.w / k).toFixed(2)}" height="${(p.h / k).toFixed(2)}" rx="${(Math.min(p.radius, p.w / 2, p.h / 2) / k).toFixed(2)}" fill="${fill}" fill-opacity="${opacity}"/>`;
+      byBlur.set(sh.blur, [...(byBlur.get(sh.blur) ?? []), shape]);
+    }
+  }
+  if (!byBlur.size) return null;
+  const w = Math.ceil(width / SHADOW_SCALE);
+  const h = Math.ceil(height / SHADOW_SCALE);
+  const layers = await Promise.all(
+    [...byBlur].map(async ([blur, shapes]) => ({
+      input: await sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">${shapes.join("")}</svg>`))
+        // CSS: a box-shadow's blur radius is twice the Gaussian's σ.
+        .blur(Math.max(0.3, blur / 2 / SHADOW_SCALE))
+        .png()
+        .toBuffer(),
+    })),
+  );
+  return sharp({ create: { width: w, height: h, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite(layers)
+    .png()
+    .toBuffer()
+    .then((small) => sharp(small).resize(width, height, { fit: "fill" }).png({ compressionLevel: 0 }).toBuffer());
+}
+
+/** An SVG linear gradient matching CSS `linear-gradient(<angle>deg, …)` over a box. */
+function svgGradient(id: string, g: Gradient, box: { x: number; y: number; w: number; h: number }) {
+  const rad = (g.angle * Math.PI) / 180;
+  const dx = Math.sin(rad);
+  const dy = -Math.cos(rad);
+  const half = (Math.abs(box.w * dx) + Math.abs(box.h * dy)) / 2;
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  const stops = g.stops
+    .map(([c, at]) => {
+      const { fill, opacity } = svgColour(c);
+      return `<stop offset="${at}" stop-color="${fill}" stop-opacity="${opacity}"/>`;
+    })
+    .join("");
+  return `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${(cx - dx * half).toFixed(1)}" y1="${(cy - dy * half).toFixed(1)}" x2="${(cx + dx * half).toFixed(1)}" y2="${(cy + dy * half).toFixed(1)}">${stops}</linearGradient>`;
+}
+
+/**
+ * What lies under a glass graphic, as one raster: the backdrop window, every
+ * panel's drop shadow, the frost cut to the panels' shapes, and their rims.
+ * However many panels there are, satori only draws the translucent fills and
+ * the content on top.
+ */
+export async function glassLayer(bd: Backdrop, rect: Window, panels: PanelShape[]): Promise<Raster> {
+  const width = Math.round(rect.width);
+  const height = Math.round(rect.height);
+  const raw = { width, height, channels: 3 as const };
+  if (!panels.length) return { data: await windowRaster(bd, "back", rect), ...raw };
+  const local = panels.map((p) => ({ ...p, x: p.x - rect.left, y: p.y - rect.top }));
+  const svg = (body: string) => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">${body}</svg>`);
+  const rx = (p: PanelShape) => Math.min(p.radius, p.w / 2, p.h / 2);
+  const mask = svg(`<g fill="#fff">${local.map((p) => `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${rx(p)}"/>`).join("")}</g>`);
+  const rims = svg(
+    `<defs>${local.map((p, i) => svgGradient(`r${i}`, p.rim, p)).join("")}</defs>` +
+      local
+        .map((p, i) => {
+          const e = p.edge;
+          return `<rect x="${p.x + e / 2}" y="${p.y + e / 2}" width="${p.w - e}" height="${p.h - e}" rx="${Math.max(0, rx(p) - e / 2)}" fill="none" stroke="url(#r${i})" stroke-width="${e}"/>`;
+        })
+        .join(""),
+  );
+  const [back, frost, shadows] = await Promise.all([
+    windowRaster(bd, "back", rect),
+    windowRaster(bd, "frost", rect),
+    shadowLayer(panels, rect, width, height),
+  ]);
+  const frostInPanels = await sharp(frost, { raw }).ensureAlpha().composite([{ input: mask, blend: "dest-in" }]).png({ compressionLevel: 0 }).toBuffer();
+  const layers: sharp.OverlayOptions[] = [...(shadows ? [{ input: shadows }] : []), { input: frostInPanels }, { input: rims }];
+  const data = await sharp(back, { raw }).composite(layers).removeAlpha().raw().toBuffer();
+  return { data, ...raw };
 }
 
 /**
@@ -390,13 +593,20 @@ function grain() {
 
 export type OutputType = "jpeg" | "png";
 
-/** Grain over the rendered PNG, then the final file. */
-export async function finish(png: Buffer, type: OutputType, withGrain = true) {
-  let p = sharp(png);
-  if (withGrain) p = sharp(await p.composite([{ input: await grain(), tile: true, blend: "soft-light" }]).png().toBuffer());
+/**
+ * The final file in one encode: the rendered PNG laid over `under` (the
+ * glass backdrop, when the render is transparent), film grain on top, then
+ * JPEG or PNG. Grain is applied in the same pipeline, not as its own pass.
+ */
+export async function finish(png: Buffer, type: OutputType, { grain: withGrain = true, under }: { grain?: boolean; under?: Raster } = {}) {
+  const layers: sharp.OverlayOptions[] = [];
+  if (under) layers.push({ input: png });
+  if (withGrain) layers.push({ input: await grain(), tile: true, blend: "soft-light" });
+  const base = under ? sharp(under.data, { raw: { width: under.width, height: under.height, channels: under.channels } }) : sharp(png);
+  const p = layers.length ? base.composite(layers) : base;
   return type === "jpeg"
-    ? p.flatten({ background: "#ffffff" }).jpeg({ quality: 92, mozjpeg: true, chromaSubsampling: "4:4:4" }).toBuffer()
-    : p.png({ compressionLevel: 8 }).toBuffer();
+    ? p.flatten({ background: "#ffffff" }).jpeg({ quality: 90, chromaSubsampling: "4:4:4" }).toBuffer()
+    : p.png({ compressionLevel: 6 }).toBuffer();
 }
 
 /** Side by side (a carousel strip), optionally with a gap of `gap` px in `background`. */
