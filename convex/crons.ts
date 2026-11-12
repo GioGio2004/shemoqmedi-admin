@@ -26,5 +26,8 @@ crons.weekly("social: call for jurors", { dayOfWeek: "thursday", hourUTC: 6, min
 crons.weekly("social: weekly roundup", { dayOfWeek: "sunday", hourUTC: 14, minuteUTC: 0 }, internal.social.queueRoundup, {});
 // Every morning 09:00 Tbilisi: "N posts waiting" to the admins.
 crons.daily("social: waiting nudge", { hourUTC: 5, minuteUTC: 0 }, internal.social.waitingPing, {});
+// Every morning 08:30 Tbilisi: pick up new env tokens, refresh the Threads
+// token when it is due, email the admins before the LinkedIn token expires.
+crons.daily("social: channels", { hourUTC: 4, minuteUTC: 30 }, internal.channels.daily, {});
 
 export default crons;

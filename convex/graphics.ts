@@ -32,8 +32,27 @@ function config() {
   return { origin, key };
 }
 
-async function fetchJpeg(url: string, key: string) {
-  const res = await fetch(url, { headers: { "x-render-key": key }, signal: AbortSignal.timeout(90_000) });
+/** Slides rendered at once (each is one request to /api/graphics/carousel). */
+export const CAROUSEL_CONCURRENCY = 4;
+/** One slide's render; the render route itself stops at 60 s. */
+const SLIDE_TIMEOUT_MS = 65_000;
+
+/** Runs `fn` over `items` with at most `limit` running at a time; results in input order. */
+export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+async function fetchJpeg(url: string, key: string, timeoutMs = 90_000) {
+  const res = await fetch(url, { headers: { "x-render-key": key }, signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok || res.headers.get("content-type") !== "image/jpeg") {
     throw new Error(`Rendering failed (HTTP ${res.status}): ${(await res.text()).slice(0, 200)}`);
   }
@@ -264,16 +283,15 @@ export const renderCarousel = internalAction({
 
     const label = slugify(q.get("title") ?? "carousel", "carousel");
     const folder = `/social/carousels/${label}-${Date.now().toString(36)}`;
-    const urls: string[] = [];
-    const mediaIds: Id<"media">[] = [];
-    // One at a time, in order: each slide is a full render on the admin app.
-    for (let i = 0; i < slides.length; i++) {
-      q.set("slide", String(i));
-      const jpeg = await fetchJpeg(`${endpoint}?${q}`, key);
-      const saved = await store(ctx, jpeg, `shemoqmedi-${label}-${String(i + 1).padStart(2, "0")}-${slides[i]}.jpg`, folder, ["carousel", slides[i], palette], 1080, 1350);
-      urls.push(saved.url);
-      mediaIds.push(saved.mediaId);
-    }
-    return { urls, mediaIds, slides };
+    // Each slide is a full render on the admin app (its own request, so its own
+    // function instance): render and upload CAROUSEL_CONCURRENCY at a time, so
+    // the whole carousel stays well inside the MCP request's time limit.
+    const saved = await mapLimit(slides, CAROUSEL_CONCURRENCY, async (name, i) => {
+      const query = new URLSearchParams(q);
+      query.set("slide", String(i));
+      const jpeg = await fetchJpeg(`${endpoint}?${query}`, key, SLIDE_TIMEOUT_MS);
+      return await store(ctx, jpeg, `shemoqmedi-${label}-${String(i + 1).padStart(2, "0")}-${name}.jpg`, folder, ["carousel", name, palette], 1080, 1350);
+    });
+    return { urls: saved.map((s) => s.url), mediaIds: saved.map((s) => s.mediaId), slides };
   },
 });

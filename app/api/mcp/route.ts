@@ -7,6 +7,9 @@ import { headerAuthHandler } from "@/lib/mcp/server";
  */
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// render_carousel renders and uploads 6-8 slides in one tool call; 300 s is
+// the Hobby maximum with Fluid compute (Vercel's default), so a slow render
+// still returns its URLs instead of timing out while Convex finishes the work.
+export const maxDuration = 300;
 
 export { headerAuthHandler as GET, headerAuthHandler as POST, headerAuthHandler as DELETE };

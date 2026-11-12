@@ -11,6 +11,7 @@
 import type * as admin from "../admin.js";
 import type * as authHelpers from "../authHelpers.js";
 import type * as awards from "../awards.js";
+import type * as channels from "../channels.js";
 import type * as claimLinks from "../claimLinks.js";
 import type * as claims from "../claims.js";
 import type * as conflicts from "../conflicts.js";
@@ -34,6 +35,7 @@ import type * as lib_mcpAuth from "../lib/mcpAuth.js";
 import type * as lib_media from "../lib/media.js";
 import type * as lib_r2 from "../lib/r2.js";
 import type * as lib_scoring from "../lib/scoring.js";
+import type * as lib_socialApi from "../lib/socialApi.js";
 import type * as lib_taxonomy from "../lib/taxonomy.js";
 import type * as lib_time from "../lib/time.js";
 import type * as lib_tokens from "../lib/tokens.js";
@@ -44,6 +46,7 @@ import type * as mcp from "../mcp.js";
 import type * as media from "../media.js";
 import type * as migrations from "../migrations.js";
 import type * as notify from "../notify.js";
+import type * as publish from "../publish.js";
 import type * as rounds from "../rounds.js";
 import type * as seed from "../seed.js";
 import type * as seo from "../seo.js";
@@ -62,6 +65,7 @@ declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   authHelpers: typeof authHelpers;
   awards: typeof awards;
+  channels: typeof channels;
   claimLinks: typeof claimLinks;
   claims: typeof claims;
   conflicts: typeof conflicts;
@@ -85,6 +89,7 @@ declare const fullApi: ApiFromModules<{
   "lib/media": typeof lib_media;
   "lib/r2": typeof lib_r2;
   "lib/scoring": typeof lib_scoring;
+  "lib/socialApi": typeof lib_socialApi;
   "lib/taxonomy": typeof lib_taxonomy;
   "lib/time": typeof lib_time;
   "lib/tokens": typeof lib_tokens;
@@ -95,6 +100,7 @@ declare const fullApi: ApiFromModules<{
   media: typeof media;
   migrations: typeof migrations;
   notify: typeof notify;
+  publish: typeof publish;
   rounds: typeof rounds;
   seed: typeof seed;
   seo: typeof seo;

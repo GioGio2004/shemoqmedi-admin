@@ -109,8 +109,10 @@ describe("social queue", () => {
     await expect(env.t.mutation(api.mcp.approvePost, { token: env.token, id: post._id })).rejects.toThrow(/Instagram needs/);
     await env.t.mutation(api.mcp.updatePost, { token: env.token, id: post._id, captions: { instagram: "" } });
     const approved = await env.t.mutation(api.mcp.approvePost, { token: env.token, id: post._id });
-    expect(approved.status).toBe("approved");
+    // Approval schedules publishing; with no network connected the post waits as approved.
+    expect(approved.status).toBe("scheduled");
     await drain(env);
+    expect((await env.t.run((ctx) => ctx.db.get(post._id)))!).toMatchObject({ status: "approved", error: expect.stringMatching(/no connected account/) });
 
     const log = await emails(env);
     expect(log).toHaveLength(1);
@@ -238,7 +240,7 @@ describe("review fixes", () => {
     expect(queue.map((p) => p.id)).toContain(id);
     await env.t.mutation(api.mcp.updatePost, { token: env.token, id, captions: { instagram: "Honorable Mention" } });
     const approved = await env.t.mutation(api.mcp.approvePost, { token: env.token, id });
-    expect(approved).toMatchObject({ status: "approved", media: [{ url: "https://img.example/a.jpg" }] });
+    expect(approved).toMatchObject({ status: "scheduled", media: [{ url: "https://img.example/a.jpg" }] });
   });
 
   it("refuses to approve a post whose site was unpublished, and sends no featured email", async () => {

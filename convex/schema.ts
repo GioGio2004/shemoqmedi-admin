@@ -27,9 +27,14 @@ export const socialPostKind = v.union(
 );
 
 /**
- * waiting ──approve──▶ approved ──Postiz──▶ scheduled ──▶ sent | failed
+ * waiting ──approve──▶ scheduled ──publish.post──▶ sent | failed ──retry──▶ scheduled
  *    └──reject──▶ rejected
- * "pending" and "skipped" are older award rows; they read as waiting.
+ * "approved": approved, but nothing could be published yet (no connected
+ * account); retry after connecting. An "approved" row without results is
+ * from before publishing existed (it may have been posted by hand): it is not
+ * retried; editing sends it back to waiting. Editing or rejecting a scheduled post
+ * cancels its publish job. "pending" and "skipped" are older award rows;
+ * they read as waiting.
  */
 export const socialPostStatus = v.union(
   v.literal("waiting"),
@@ -41,6 +46,32 @@ export const socialPostStatus = v.union(
   v.literal("pending"),
   v.literal("skipped"),
 );
+
+/** Where a post goes (convex/publish.ts). */
+export const socialNetwork = v.union(v.literal("facebook"), v.literal("instagram"), v.literal("threads"), v.literal("linkedin"));
+
+/** A connected account's kind (socialAccounts): Meta covers the Facebook Page and its Instagram. */
+export const accountNetwork = v.union(v.literal("meta"), v.literal("threads"), v.literal("linkedin"));
+
+/** One media item of a post; `networks` limits it to some networks (absent = everywhere). */
+export const socialMediaItem = v.object({
+  kind: v.union(v.literal("image"), v.literal("video")),
+  url: v.string(),
+  // What it is: "screenshot", "graphic", "voiceover", ...
+  role: v.optional(v.string()),
+  networks: v.optional(v.array(socialNetwork)),
+});
+
+/** How publishing a post went on one network. */
+export const publishResult = v.object({
+  network: socialNetwork,
+  status: v.union(v.literal("sent"), v.literal("failed"), v.literal("skipped")),
+  remoteId: v.optional(v.string()),
+  url: v.optional(v.string()),
+  error: v.optional(v.string()),
+  note: v.optional(v.string()),
+  at: v.number(),
+});
 
 /** Why an email went out (emailLog). */
 export const emailKind = v.union(
@@ -147,7 +178,10 @@ export default defineSchema({
     uploadedBy: v.optional(v.id("users")), // empty for server-side uploads (importer, migration)
     invalid: v.optional(v.boolean()), // failed the server-side check; not shown
     createdAt: v.number(),
-  }).index("by_fileId", ["fileId"]),
+  })
+    .index("by_fileId", ["fileId"])
+    // Image sizes by URL, for Instagram's aspect-ratio rule (social.withSizes).
+    .index("by_url", ["url"]),
 
   // Created and kept in sync by the Clerk webhook (http.ts → users.upsertFromClerk).
   users: defineTable({
@@ -509,19 +543,20 @@ export default defineSchema({
         facebook: v.optional(v.string()),
         instagram: v.optional(v.string()),
         linkedin: v.optional(v.string()),
+        threads: v.optional(v.string()),
       }),
     ),
-    media: v.optional(
-      v.array(
-        v.object({
-          kind: v.union(v.literal("image"), v.literal("video")),
-          url: v.string(),
-          // What it is: "screenshot", "graphic", "voiceover", ...
-          role: v.optional(v.string()),
-        }),
-      ),
-    ),
+    media: v.optional(v.array(socialMediaItem)),
     scheduledFor: v.optional(v.number()), // publish time; absent = as soon as approved
+    // The scheduled publish.post job while the post is "scheduled".
+    publishJobId: v.optional(v.id("_scheduled_functions")),
+    // The run number of the latest scheduled publish.post: only that run may
+    // claim the post (a cancelled run that was already running can't).
+    publishRun: v.optional(v.number()),
+    // A publish run holds the post until then (no edits, no second run).
+    publishingUntil: v.optional(v.number()),
+    // One entry per network that was tried (latest attempt).
+    results: v.optional(v.array(publishResult)),
     approvedAt: v.optional(v.number()),
     approvedBy: v.optional(v.id("users")),
     postizIds: v.optional(v.array(v.string())),
@@ -545,6 +580,34 @@ export default defineSchema({
     .index("by_listing_kind", ["listingId", "kind"])
     .index("by_kind", ["kind", "createdAt"])
     .index("by_status", ["status", "createdAt"]),
+
+  // The accounts posts are published to (convex/channels.ts), seeded from the
+  // Convex env vars META_PAGE_ACCESS_TOKEN, THREADS_ACCESS_TOKEN and
+  // LINKEDIN_ACCESS_TOKEN. Tokens are read by internal functions only.
+  socialAccounts: defineTable({
+    network: accountNetwork,
+    token: v.string(),
+    // sha256 of the env token this row came from ("" while its ids could not be looked up).
+    seedHash: v.string(),
+    issuedAt: v.number(),
+    expiresAt: v.optional(v.number()),
+    refreshedAt: v.optional(v.number()), // Threads: last th_refresh_token
+    ids: v.object({
+      pageId: v.optional(v.string()),
+      pageName: v.optional(v.string()),
+      igUserId: v.optional(v.string()),
+      igUsername: v.optional(v.string()),
+      threadsUserId: v.optional(v.string()),
+      threadsUsername: v.optional(v.string()),
+      personUrn: v.optional(v.string()),
+      name: v.optional(v.string()),
+    }),
+    lastError: v.optional(v.string()),
+    // LinkedIn expiry emails already sent for this token.
+    warnedSoonAt: v.optional(v.number()),
+    warnedExpiredAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  }).index("by_network", ["network"]),
 
   // Every email sent to studios, owners, contacts and broadcast audiences
   // (convex/emails.ts), so nobody gets the same email twice and the admin

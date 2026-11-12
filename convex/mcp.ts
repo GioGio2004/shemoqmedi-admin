@@ -2,8 +2,9 @@
 // lib/mcp/server.ts). Every function takes `token`, the short-lived service
 // credential the admin app mints after checking the caller's Clerk OAuth
 // token, and runs only for platform admins (lib/mcpAuth.ts). These are the
-// social desk's hands: read listings, awards and studios; write and approve
-// posts; email studios; broadcast to an audience.
+// social desk's hands: read listings, awards and studios; write, approve and
+// retry posts; see the connected channels (never their tokens); render
+// graphics and voiceovers; email studios; broadcast to an audience.
 
 import { v } from "convex/values";
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
@@ -27,8 +28,10 @@ import {
   queuePost,
   readStatus,
   rejectPost as reject,
+  retryPost as retry,
   viewPost,
 } from "./social";
+import { channelView, type ChannelView } from "./channels";
 import { audience, deliver, type Message } from "./emails";
 import { ensureListingClaimUrl, newClaimToken } from "./claimLinks";
 import { siteUrl } from "./seo";
@@ -393,6 +396,121 @@ export const rejectPost = mutation({
     await requireTokenAdmin(ctx, token);
     await reject(ctx, id, note);
     return await viewPost(ctx, (await ctx.db.get(id))!);
+  },
+});
+
+export const retryPost = mutation({
+  args: { token, id: v.id("socialPosts") },
+  returns: postView,
+  handler: async (ctx, { token, id }) => {
+    await requireTokenAdmin(ctx, token);
+    await retry(ctx, id);
+    return await viewPost(ctx, (await ctx.db.get(id))!);
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Channels (the accounts posts go to; tokens never leave Convex)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Picks up newly set env tokens, then lists the four networks: account, expiry, last error. */
+export const listChannels = action({
+  args: { token },
+  returns: v.array(channelView),
+  handler: async (ctx, { token }): Promise<ChannelView[]> => {
+    await ctx.runQuery(internal.mcp.checkToken, { token });
+    await ctx.runAction(internal.channels.sync, {});
+    return await ctx.runQuery(internal.channels.view, {});
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Graphics and voiceovers (graphics.ts, voiceover.ts)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One graphic (JPEG on ImageKit): graphics.render. */
+export const renderGraphic = action({
+  args: {
+    token,
+    template: v.string(),
+    format: v.string(),
+    palette: v.string(),
+    fields: v.optional(v.record(v.string(), v.string())),
+    imageUrls: v.optional(v.array(v.string())),
+    glass: v.optional(v.string()),
+  },
+  returns: v.object({ url: v.string(), mediaId: v.id("media") }),
+  handler: async (ctx, { token, ...args }): Promise<{ url: string; mediaId: Id<"media"> }> => {
+    await ctx.runQuery(internal.mcp.checkToken, { token });
+    return await ctx.runAction(internal.graphics.render, args);
+  },
+});
+
+/** The storytelling carousel of a listing (or of facts): graphics.renderCarousel. */
+export const renderCarousel = action({
+  args: {
+    token,
+    listingSlug: v.optional(v.string()),
+    facts: v.optional(v.record(v.string(), v.string())),
+    palette: v.string(),
+    story: v.optional(
+      v.object({
+        chips: v.optional(v.array(v.string())),
+        notes: v.optional(v.array(v.string())),
+        cta: v.optional(v.string()),
+        glass: v.optional(v.string()),
+        shots: v.optional(v.array(v.string())),
+        mobile: v.optional(v.string()),
+      }),
+    ),
+  },
+  returns: v.object({ urls: v.array(v.string()), mediaIds: v.array(v.id("media")), slides: v.array(v.string()) }),
+  handler: async (ctx, { token, listingSlug, ...args }): Promise<{ urls: string[]; mediaIds: Id<"media">[]; slides: string[] }> => {
+    await ctx.runQuery(internal.mcp.checkToken, { token });
+    const listingId: Id<"listings"> | undefined = listingSlug
+      ? await ctx.runQuery(internal.mcp.listingIdBySlug, { slug: listingSlug })
+      : undefined;
+    return await ctx.runAction(internal.graphics.renderCarousel, { ...args, listingId });
+  },
+});
+
+type VoiceList = {
+  voices: { name: string; voiceId: string; description?: string; previewUrl?: string }[];
+  wordsPerSecond: number;
+  video?: { title: string; videoUrl: string; durationSec: number; targetWords: number };
+};
+
+/** The narrators; with a listing, also its preview's length and the word budget. */
+export const listVoices = action({
+  args: { token, listingSlug: v.optional(v.string()) },
+  returns: v.object({
+    voices: v.array(
+      v.object({ name: v.string(), voiceId: v.string(), description: v.optional(v.string()), previewUrl: v.optional(v.string()) }),
+    ),
+    wordsPerSecond: v.number(),
+    video: v.optional(v.object({ title: v.string(), videoUrl: v.string(), durationSec: v.number(), targetWords: v.number() })),
+  }),
+  handler: async (ctx, { token, listingSlug }): Promise<VoiceList> => {
+    await ctx.runQuery(internal.mcp.checkToken, { token });
+    const list: VoiceList = await ctx.runAction(internal.voiceover.listVoices, {});
+    if (!listingSlug) return list;
+    const listingId: Id<"listings"> = await ctx.runQuery(internal.mcp.listingIdBySlug, { slug: listingSlug });
+    const info: { title: string; videoUrl: string; durationSec: number; targetWords: number } = await ctx.runAction(
+      internal.voiceover.videoInfo,
+      { listingId },
+    );
+    return { ...list, video: { title: info.title, videoUrl: info.videoUrl, durationSec: info.durationSec, targetWords: info.targetWords } };
+  },
+});
+
+/** Voices a script for a listing (spends ElevenLabs credits): voiceover.create. */
+export const createVoiceover = action({
+  args: { token, listingSlug: v.string(), script: v.string(), voice: v.string() },
+  returns: v.object({ audioUrl: v.string(), durationSec: v.number() }),
+  handler: async (ctx, { token, listingSlug, script, voice }): Promise<{ audioUrl: string; durationSec: number }> => {
+    await ctx.runQuery(internal.mcp.checkToken, { token });
+    const listingId: Id<"listings"> = await ctx.runQuery(internal.mcp.listingIdBySlug, { slug: listingSlug });
+    return await ctx.runAction(internal.voiceover.create, { listingId, script, voice });
   },
 });
 

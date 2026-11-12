@@ -5,9 +5,11 @@
 //   roundup      - the Sunday roundup of the week (cron)
 // and admins add announcement/custom posts in chat. Each post carries `facts`
 // (plain data about the listing, studio and award) for Claude, who writes
-// the Facebook / Instagram / LinkedIn captions through the MCP connector
-// (mcp.ts). Nothing is published until an admin approves it; approving a
-// new-listing post also emails the studio (emails.featured).
+// the Facebook / Instagram / Threads / LinkedIn captions through the MCP
+// connector (mcp.ts). Nothing is published until an admin approves it:
+// approving schedules publish.post (now, or at scheduledFor), which posts to
+// every network with a caption and a connected account (channels.ts).
+// Approving a new-listing post also emails the studio (emails.featured).
 
 import { v } from "convex/values";
 import {
@@ -21,7 +23,18 @@ import {
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { socialPostKind, socialPostStatus } from "./schema";
+import { publishResult, socialMediaItem, socialPostKind, socialPostStatus } from "./schema";
+import {
+  NETWORKS,
+  NETWORK_NAME,
+  PlatformError,
+  THREADS_MAX,
+  instagramImageUrl,
+  mediaFor,
+  threadsLength,
+  type MediaItem,
+  type Network,
+} from "./lib/socialApi";
 import { requireAdmin } from "./authHelpers";
 import { categoryName, fail, isPublicStatus, listingCategories, mediaUrls } from "./lib/listingHelpers";
 import { TIER_NAMES } from "./lib/awards";
@@ -120,8 +133,6 @@ function links() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Queueing
 // ─────────────────────────────────────────────────────────────────────────────
-
-type MediaItem = { kind: "image" | "video"; url: string; role?: string };
 
 export async function queuePost(
   ctx: MutationCtx,
@@ -330,10 +341,17 @@ export const captionsValidator = v.object({
   facebook: v.optional(v.string()),
   instagram: v.optional(v.string()),
   linkedin: v.optional(v.string()),
+  threads: v.optional(v.string()),
 });
-export const mediaValidator = v.array(
-  v.object({ kind: v.union(v.literal("image"), v.literal("video")), url: v.string(), role: v.optional(v.string()) }),
-);
+export const mediaValidator = v.array(socialMediaItem);
+
+/** Caption limits per network (Threads: 500; Instagram: 2,200; the rest: 3,000). */
+export const CAPTION_MAX: Record<Network, number> = { facebook: 3000, instagram: 2200, threads: THREADS_MAX, linkedin: 3000 };
+
+/** A caption's length as its network counts it: Threads counts emoji as their UTF-8 bytes. */
+export function captionLength(network: Network, text: string) {
+  return network === "threads" ? threadsLength(text) : text.length;
+}
 
 export const postView = v.object({
   id: v.id("socialPosts"),
@@ -346,8 +364,15 @@ export const postView = v.object({
   scheduledFor: v.union(v.number(), v.null()),
   note: v.union(v.string(), v.null()),
   error: v.union(v.string(), v.null()),
+  results: v.array(publishResult),
+  // A publish run holds the post until publishingUntil. `publishing` is that
+  // compared with the time of the query; the admin page compares
+  // publishingUntil with its own clock (a cached query does not re-run as time passes).
+  publishing: v.boolean(),
+  publishingUntil: v.union(v.number(), v.null()),
   createdAt: v.number(),
   approvedAt: v.union(v.number(), v.null()),
+  sentAt: v.union(v.number(), v.null()),
 });
 
 /** A post's media; older award rows only have the screenshot in their payload. */
@@ -370,8 +395,12 @@ export async function viewPost(ctx: QueryCtx, post: Doc<"socialPosts">) {
     scheduledFor: post.scheduledFor ?? null,
     note: post.note ?? null,
     error: post.error ?? null,
+    results: post.results ?? [],
+    publishing: isPublishing(post),
+    publishingUntil: post.publishingUntil ?? null,
     createdAt: post.createdAt,
     approvedAt: post.approvedAt ?? null,
+    sentAt: post.sentAt ?? null,
   };
 }
 
@@ -417,22 +446,79 @@ export async function listPosts(ctx: QueryCtx, status: PostStatus | "all", limit
   return Promise.all(picked.map((p) => viewPost(ctx, p)));
 }
 
-/** Captions, media, time or note of a post that hasn't gone to Postiz yet. */
+/** A publish run holds the post (publish.begin) until its lease ends. */
+export function isPublishing(post: Doc<"socialPosts">) {
+  return !!post.publishingUntil && post.publishingUntil > Date.now();
+}
+
+/** Media with the width and height of the images we uploaded (the media table), for Instagram's ratio rule. */
+export async function withSizes(ctx: QueryCtx, media: MediaItem[]): Promise<MediaItem[]> {
+  return await Promise.all(
+    media.map(async (m) => {
+      if (m.kind !== "image" || (m.width && m.height)) return m;
+      const row = await ctx.db
+        .query("media")
+        .withIndex("by_url", (q) => q.eq("url", m.url))
+        .first();
+      return row?.width && row.height ? { ...m, width: row.width, height: row.height } : m;
+    }),
+  );
+}
+
+/** Why Instagram would refuse the post's images (a ratio that can't be padded), or null. */
+async function instagramMediaProblem(ctx: QueryCtx, post: Doc<"socialPosts">) {
+  const media = await withSizes(ctx, mediaFor(postMedia(post), "instagram"));
+  if (media[0]?.kind !== "image") return null;
+  for (const m of media.filter((x) => x.kind === "image")) {
+    try {
+      instagramImageUrl(m);
+    } catch (err) {
+      if (err instanceof PlatformError) return err.message;
+      throw err;
+    }
+  }
+  return null;
+}
+
+/** Networks with a caption, in a fixed order. */
+export function captionedNetworks(post: Doc<"socialPosts">): Network[] {
+  const captions = post.captions ?? {};
+  return NETWORKS.filter((n) => !!captions[n]?.trim());
+}
+
+/** Cancels the pending publish job of a scheduled post (a no-op when it already ran). */
+async function cancelJob(ctx: MutationCtx, post: Doc<"socialPosts">) {
+  if (!post.publishJobId) return;
+  const job = await ctx.db.system.get(post.publishJobId);
+  if (job && (job.state.kind === "pending" || job.state.kind === "inProgress")) await ctx.scheduler.cancel(post.publishJobId);
+}
+
+/**
+ * Captions, media, time or note of a post that isn't published yet. Editing
+ * an approved, scheduled or failed post sends it back to waiting (a scheduled
+ * post's publish job is cancelled); networks already sent stay sent.
+ */
 export async function editPost(
   ctx: MutationCtx,
   id: Id<"socialPosts">,
-  edit: { captions?: Partial<Record<"facebook" | "instagram" | "linkedin", string>>; media?: MediaItem[]; scheduledFor?: number | null; note?: string },
+  edit: { captions?: Partial<Record<Network, string>>; media?: MediaItem[]; scheduledFor?: number | null; note?: string },
 ) {
   const post = await ctx.db.get(id);
   if (!post) fail("Post not found.");
   const status = readStatus(post.status);
-  if (status !== "waiting" && status !== "approved") fail(`This post is ${status}; it can't be changed any more.`);
+  if (status === "sent" || status === "rejected") fail(`This post is ${status}; it can't be changed any more.`);
+  if (isPublishing(post)) fail("This post is being published right now; wait a few minutes.");
   const captions = { ...(post.captions ?? {}) };
-  for (const network of ["facebook", "instagram", "linkedin"] as const) {
+  for (const network of NETWORKS) {
     const text = edit.captions?.[network];
     if (text === undefined) continue;
     const clean = text.trim();
-    if (clean.length > 3000) fail(`The ${network} caption is too long (3000 characters at most).`);
+    const max = CAPTION_MAX[network];
+    const length = captionLength(network, clean);
+    if (length > max) {
+      const how = length !== clean.length ? ", counting emoji as Threads does (2-4 each)" : "";
+      fail(`The ${NETWORK_NAME[network]} caption is too long (${max} characters at most, it has ${length}${how}).`);
+    }
     if (clean) captions[network] = clean;
     else delete captions[network];
   }
@@ -441,22 +527,42 @@ export async function editPost(
     for (const m of edit.media) if (!/^https:\/\//.test(m.url)) fail(`Media must be a public https URL: ${m.url}`);
   }
   if (edit.scheduledFor != null && edit.scheduledFor < Date.now() - 60_000) fail("The publish time is in the past.");
+  if (status === "scheduled") await cancelJob(ctx, post);
+  const backToWaiting = status === "approved" || status === "scheduled" || status === "failed";
   await ctx.db.patch(id, {
     captions,
     // Older award rows keep their screenshot in `payload`: store it as media on the first edit.
     ...(edit.media ? { media: edit.media } : post.media ? {} : { media: postMedia(post) }),
     ...(edit.scheduledFor !== undefined ? { scheduledFor: edit.scheduledFor ?? undefined } : {}),
     ...(edit.note !== undefined ? { note: edit.note.trim() || undefined } : {}),
-    // Editing an approved post sends it back for another look.
-    ...(status === "approved" ? { status: "waiting" as const, approvedAt: undefined, approvedBy: undefined } : {}),
+    // Editing an approved, scheduled or failed post sends it back for another look.
+    ...(backToWaiting
+      ? { status: "waiting" as const, approvedAt: undefined, approvedBy: undefined, publishJobId: undefined, error: undefined }
+      : {}),
     updatedAt: Date.now(),
   });
 }
 
 /**
+ * Schedules publish.post: at `scheduledFor` when it is in the future, else
+ * now. Each schedule gets the next run number (publishRun), and only that run
+ * may claim the post (publish.begin): a cancelled run that was already
+ * running can't publish it.
+ */
+async function schedulePublish(ctx: MutationCtx, post: Doc<"socialPosts">) {
+  const at = post.scheduledFor;
+  const run = (post.publishRun ?? 0) + 1;
+  const publishJobId =
+    at && at > Date.now()
+      ? await ctx.scheduler.runAt(at, internal.publish.post, { postId: post._id, run })
+      : await ctx.scheduler.runAfter(0, internal.publish.post, { postId: post._id, run });
+  return { publishJobId, publishRun: run };
+}
+
+/**
  * Approve a post: it needs at least one caption, and Instagram needs an image
- * or a video. A new-listing post also emails the studio. (Publishing through
- * Postiz hooks in here once it is connected.)
+ * or a video. Approval schedules publishing to every network with a caption
+ * (now, or at the post's publish time). A new-listing post also emails the studio.
  */
 export async function approvePost(ctx: MutationCtx, id: Id<"socialPosts">, by: Id<"users">) {
   const post = await ctx.db.get(id);
@@ -464,8 +570,12 @@ export async function approvePost(ctx: MutationCtx, id: Id<"socialPosts">, by: I
   const status = readStatus(post.status);
   if (status !== "waiting") fail(`This post is ${status}, not waiting.`);
   const captions = post.captions ?? {};
-  if (!captions.facebook && !captions.instagram && !captions.linkedin) fail("Write at least one caption first.");
-  if (captions.instagram && !postMedia(post).length) fail("Instagram needs an image or a video.");
+  if (captionedNetworks(post).length === 0) fail("Write at least one caption first.");
+  if (captions.instagram) {
+    if (!mediaFor(postMedia(post), "instagram").length) fail("Instagram needs an image or a video.");
+    const problem = await instagramMediaProblem(ctx, post);
+    if (problem) fail(problem);
+  }
   // The award or the listing may have changed since the post was queued.
   if (post.awardId) {
     const award = await ctx.db.get(post.awardId);
@@ -476,7 +586,18 @@ export async function approvePost(ctx: MutationCtx, id: Id<"socialPosts">, by: I
     if (!listing || !isPublicStatus(listing.status)) fail("This site isn't public any more: reject the post instead.");
   }
   const now = Date.now();
-  await ctx.db.patch(id, { status: "approved", approvedAt: now, approvedBy: by, error: undefined, updatedAt: now });
+  const { publishJobId, publishRun } = await schedulePublish(ctx, post);
+  await ctx.db.patch(id, {
+    status: "scheduled",
+    approvedAt: now,
+    approvedBy: by,
+    publishJobId,
+    publishRun,
+    // Older award rows keep their screenshot in `payload`: publishing reads `media`.
+    ...(post.media ? {} : { media: postMedia(post) }),
+    error: undefined,
+    updatedAt: now,
+  });
   if (post.kind === "new_listing" && post.listingId) {
     await ctx.scheduler.runAfter(0, internal.emails.featured, { listingId: post.listingId, postId: id });
   }
@@ -486,8 +607,53 @@ export async function rejectPost(ctx: MutationCtx, id: Id<"socialPosts">, note?:
   const post = await ctx.db.get(id);
   if (!post) fail("Post not found.");
   const status = readStatus(post.status);
-  if (status === "scheduled" || status === "sent") fail(`This post is already ${status}.`);
-  await ctx.db.patch(id, { status: "rejected", note: note?.trim() || post.note, updatedAt: Date.now() });
+  if (status === "sent") fail(`This post is already ${status}.`);
+  if (isPublishing(post)) fail("This post is being published right now; wait a few minutes.");
+  if (status === "scheduled") await cancelJob(ctx, post);
+  await ctx.db.patch(id, { status: "rejected", publishJobId: undefined, note: note?.trim() || post.note, updatedAt: Date.now() });
+}
+
+/**
+ * An "approved" post with no publish results was approved before publishing
+ * existed (the old approve only marked it): nothing was published from here,
+ * but it may have been posted by hand. It is never retried; editing it sends
+ * it back to waiting, and approving it again publishes it.
+ */
+export function isLegacyApproved(post: Doc<"socialPosts">) {
+  return readStatus(post.status) === "approved" && (post.results ?? []).length === 0;
+}
+
+/**
+ * Publish a post again: only the networks that aren't sent yet (failed ones,
+ * and ones skipped because no account was connected). For failed posts,
+ * approved posts that found no account, sent posts with skipped networks, and
+ * scheduled posts whose publish run died. A future publish time is kept.
+ */
+export async function retryPost(ctx: MutationCtx, id: Id<"socialPosts">) {
+  const post = await ctx.db.get(id);
+  if (!post) fail("Post not found.");
+  const status = readStatus(post.status);
+  if (isPublishing(post)) fail("This post is being published right now; wait a few minutes.");
+  const crashed = status === "scheduled" && !!post.publishingUntil;
+  if (!(status === "failed" || status === "approved" || status === "sent" || crashed)) {
+    fail(status === "scheduled" ? "This post is already scheduled." : `This post is ${status}; approve it first.`);
+  }
+  if (isLegacyApproved(post)) {
+    fail(
+      "This post was approved before publishing was connected: nothing was published from here, but it may have been posted by hand. To publish it now, edit it (it goes back to waiting) and approve it again.",
+    );
+  }
+  const sent = new Set((post.results ?? []).filter((r) => r.status === "sent").map((r) => r.network));
+  if (captionedNetworks(post).every((n) => sent.has(n))) fail("Every network of this post is already sent.");
+  const { publishJobId, publishRun } = await schedulePublish(ctx, post);
+  await ctx.db.patch(id, {
+    status: "scheduled",
+    publishJobId,
+    publishRun,
+    publishingUntil: undefined,
+    error: undefined,
+    updatedAt: Date.now(),
+  });
 }
 
 // Admin Social page (Clerk session).
@@ -527,6 +693,16 @@ export const reject = mutation({
   handler: async (ctx, { id, note }) => {
     await requireAdmin(ctx);
     await rejectPost(ctx, id, note);
+    return null;
+  },
+});
+
+export const retry = mutation({
+  args: { id: v.id("socialPosts") },
+  returns: v.null(),
+  handler: async (ctx, { id }) => {
+    await requireAdmin(ctx);
+    await retryPost(ctx, id);
     return null;
   },
 });

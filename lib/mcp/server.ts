@@ -4,13 +4,16 @@ import { ConvexError } from "convex/values";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { z } from "zod";
 import { api } from "@/convex/_generated/api";
+import { THREADS_MAX, threadsLength } from "@/convex/lib/socialApi";
 import type { Id } from "@/convex/_generated/dataModel";
 import { publicOrigin, serviceCredential, verifyOAuthToken } from "./oauth";
 
 /**
  * The Shemoqmedi social desk connector: Giorgi's own Claude (the Claude app on
  * his phone, claude.ai or Claude Code) reads listings, awards and studios,
- * writes and approves social posts, and emails studios. Admins only.
+ * renders graphics and voiceovers, writes and approves social posts (approval
+ * publishes them to Facebook, Instagram, Threads and LinkedIn), and emails
+ * studios. Admins only. Access tokens of the networks never reach this app.
  *
  * Auth on /api/mcp is "Sign in with Shemoqmedi": OAuth through Clerk (see
  * oauth.ts). Every tool is a Convex function in convex/mcp.ts that checks the
@@ -81,15 +84,18 @@ What the database does by itself: when an award is announced (Honorable Mention,
 
 Your daily loop when Giorgi asks "what's waiting?":
 1. social_queue (status waiting). For each post read its facts (get_post; get_listing for jury comments and more).
-2. Write captions for the networks that fit: instagram, facebook, linkedin. Save them with update_post.
-3. Show him every caption in full with the media it will use, then ask. Only call approve_post after he says yes to that exact post. If he asks for changes, edit and show again.
+2. Make the graphics. Always attach graphics, not only screenshots. For award and new-listing posts render the storytelling carousel (render_carousel with the listing's slug) and use its slides for Instagram, Facebook and LinkedIn (media items with networks ["instagram","facebook","linkedin"]); add the carousel's first (hook) slide once more with networks ["threads"] for Threads. For calls, roundups and announcements render one graphic (render_graphic) in ig_portrait or square: Instagram only takes images between 4:5 and 1.91:1, so story, reel_cover and link graphics get padded with white for Instagram (keep those for other networks via the media item's networks). A preview video can go first instead when Giorgi wants a reel (voiceovers: list_voices, create_voiceover, then he builds the reel on the admin Voiceover page).
+3. Write captions for the networks that fit: instagram, facebook, threads, linkedin. Save captions and media with update_post.
+4. Show him every caption in full and the rendered image URLs it will use, then ask. Only call approve_post after he says yes to that exact post. If he asks for changes, edit and show again.
+5. Approving publishes: at once, or at the post's publish time (publishAt), to every network that has a caption and a connected account. Check list_channels when unsure what is connected. Afterwards get_post shows each network's result and link; a failed network can be sent again with retry_post (networks already sent are never sent twice).
 
 Voice and rules:
 - English only. Short, specific and warm; say what is good about the site in concrete terms (motion, typography, the idea). No hype words ("stunning", "game-changer", "mind-blowing"), no emoji walls (one or two at most), no engagement bait.
 - Always credit the studio. Tag them with their handle from facts.studio.socials for that network (Instagram/Facebook "@handle"; LinkedIn mention the studio name and link their site). If there's no handle, use the studio name and offer to look the handle up (then save it with update_creator).
 - Instagram: needs an image or video (the post's media); caption up to ~1,000 characters, line breaks between ideas, the link goes "in bio" or on the award page, 3–5 relevant hashtags at the end (#webdesign #awwwards-style tags are fine, #shemoqmedi always).
 - Facebook: conversational, 1–3 short paragraphs, include the page link (facts.pageUrl or the award pageUrl).
-- LinkedIn: posted from Giorgi's personal profile, so write in first person as him (founder of Shemoqmedi), a bit more reflective, include the link, 0–3 hashtags.
+- Threads: 500 characters at most as Threads counts them: every emoji counts as 2-4 (🏆 = 4, ✨ = 3, ➡️ = 6), so keep emoji few and stay well under 500 (the tool refuses longer). Conversational, like talking to people, one idea, a question is welcome; the link in the text; at most one topic tag (#webdesign style), no hashtag walls.
+- LinkedIn: posted from Giorgi's personal profile, so write in first person as him (founder of Shemoqmedi), a bit more reflective, include the link, 0–3 hashtags. Write plain text; the system escapes LinkedIn's special characters.
 - Award posts lead with the award and the site; new-listing posts say it's in this week's jury vote; calls invite people with the submit or jury link; roundups list the week's sites and awards.
 - Never invent facts (scores, dates, people, quotes). Jury comments from get_listing may be quoted with the juror's name.
 
@@ -103,23 +109,40 @@ Times are Tbilisi time (UTC+4) unless Giorgi says otherwise.`;
 
 const slug = z.string().min(1).max(80);
 const postId = z.string().describe("Post id from social_queue");
+const network = z.enum(["facebook", "instagram", "threads", "linkedin"]);
 const captions = z
   .object({
-    instagram: z.string().max(3000).optional(),
+    instagram: z.string().max(2200).optional(),
     facebook: z.string().max(3000).optional(),
+    threads: z
+      .string()
+      .max(THREADS_MAX)
+      .refine((s) => threadsLength(s.trim()) <= THREADS_MAX, {
+        message: `Threads allows ${THREADS_MAX} characters, and counts every emoji as 2-4 (🏆 = 4, ✨ = 3): shorten the text or drop emoji.`,
+      })
+      .optional()
+      .describe("Threads: 500 characters at most, every emoji counting as 2-4 (🏆 = 4, ✨ = 3); at most one topic tag"),
     linkedin: z.string().max(3000).optional(),
   })
-  .describe('Captions per network; "" removes one');
+  .describe('Captions per network; "" removes one. Every network with a caption is published on approval.');
 const media = z
   .array(
     z.object({
       kind: z.enum(["image", "video"]),
       url: z.string().url().describe("Public https URL"),
-      role: z.string().max(40).optional().describe('e.g. "screenshot", "graphic", "voiceover"'),
+      role: z.string().max(40).optional().describe('e.g. "screenshot", "graphic", "carousel", "hook", "voiceover"'),
+      networks: z
+        .array(network)
+        .optional()
+        .describe('Only on these networks (absent = all). E.g. carousel slides ["instagram","facebook","linkedin"], the hook slide ["threads"].'),
     }),
   )
   .max(10)
-  .describe("The post's images/videos in order (Instagram carousel order). Replaces the current list.");
+  .describe(
+    "The post's images/videos in order (carousel order). Replaces the current list. The first item decides each network's post: a video makes a video post (Instagram reel), images make a photo/carousel post.",
+  );
+const palette = z.string().describe('Palette id: house, egypt, night, paper, saperavi, moss, or "auto" (tinted from the screenshot)');
+const glass = z.enum(["frost", "liquid", "tint"]).optional().describe("Glass style (default frost)");
 const audience = z
   .enum(["users", "studios", "jurors", "all"])
   .describe("users: everyone with an account; studios: studio contact emails and owners; jurors: active jurors; all: everyone");
@@ -247,7 +270,7 @@ const handler = createMcpHandler(
       "get_post",
       {
         title: "Get post",
-        description: "One social post: kind, status, facts, captions, media, publish time, note.",
+        description: "One social post: kind, status, facts, captions, media, publish time, note, and per-network publish results (sent/failed/skipped, links to the live posts, errors).",
         inputSchema: z.object({ id: postId }),
       },
       async (args, ctx) => run(() => convex.query(api.mcp.getPost, { ...auth(ctx), id: args.id as Id<"socialPosts"> })),
@@ -258,7 +281,7 @@ const handler = createMcpHandler(
       {
         title: "Update post",
         description:
-          "Save captions, media, publish time or a note on a waiting (or approved) post. Editing an approved post sends it back to waiting. publishAt: ISO date-time, Tbilisi time when no offset; null = as soon as approved.",
+          "Save captions, media, publish time or a note on a post that isn't published yet. Editing an approved, scheduled or failed post sends it back to waiting (a scheduled publish is cancelled). publishAt: ISO date-time, Tbilisi time when no offset; null = as soon as approved.",
         inputSchema: z.object({
           id: postId,
           captions: captions.optional(),
@@ -302,10 +325,99 @@ const handler = createMcpHandler(
       {
         title: "Approve post",
         description:
-          "Approve a waiting post for publishing. Only after Giorgi said yes to its final captions and media. A new-listing post also emails the studio that it is featured (with its claim link when unclaimed).",
+          "Approve a waiting post: it is published (now, or at its publish time) to every network that has a caption and a connected account: Facebook Page, Instagram, Threads, Giorgi's LinkedIn. Only after Giorgi said yes to its final captions and the rendered images. A new-listing post also emails the studio that it is featured (with its claim link when unclaimed). The post then shows as scheduled; get_post shows each network's result.",
         inputSchema: z.object({ id: postId }),
       },
       async (args, ctx) => run(() => convex.mutation(api.mcp.approvePost, { ...auth(ctx), id: args.id as Id<"socialPosts"> })),
+    );
+
+    server.registerTool(
+      "retry_post",
+      {
+        title: "Retry post",
+        description:
+          "Publish a failed post again (or one that found no connected account, or one whose publish run stopped): only the networks that aren't sent yet are attempted; networks already sent are never sent twice. Use after fixing the cause (list_channels shows connection errors). An approved post with no publish results was approved before publishing existed and may have been posted by hand: it can't be retried; ask Giorgi, and to publish it, update_post (back to waiting) and approve it again.",
+        inputSchema: z.object({ id: postId }),
+      },
+      async (args, ctx) => run(() => convex.mutation(api.mcp.retryPost, { ...auth(ctx), id: args.id as Id<"socialPosts"> })),
+    );
+
+    server.registerTool(
+      "list_channels",
+      {
+        title: "List channels",
+        description:
+          "The networks posts go to (Facebook Page, Instagram, Threads, LinkedIn): whether each is connected, the page name or username, when its token expires, and the last error. Picks up newly set tokens first. Tokens are set by Giorgi as Convex env vars (META_PAGE_ACCESS_TOKEN, THREADS_ACCESS_TOKEN, LINKEDIN_ACCESS_TOKEN) and are never shown.",
+        inputSchema: z.object({}),
+      },
+      async (_args, ctx) => run(() => convex.action(api.mcp.listChannels, auth(ctx))),
+    );
+
+    // Graphics and voiceovers
+
+    server.registerTool(
+      "render_graphic",
+      {
+        title: "Render graphic",
+        description:
+          "Render one post graphic (JPEG, uploaded to ImageKit) and return its public URL, to attach with update_post (kind image, role graphic). Templates: award, new_listing, call_submissions, call_jury, announcement, jury_quote, screenshot. Formats: ig_portrait (1080x1350), square, story, reel_cover, link. For Instagram use ig_portrait or square (it takes 4:5 to 1.91:1; story, reel_cover and link are padded with white there). fields are the template's texts, e.g. { tier: \"SOTD\", title, studio, date, awardSlug, url } for award; imageUrls the template's images in order (award: [screenshot, badge], others: [screenshot]).",
+        inputSchema: z.object({
+          template: z.enum(["award", "new_listing", "call_submissions", "call_jury", "announcement", "jury_quote", "screenshot"]),
+          format: z.enum(["ig_portrait", "square", "story", "reel_cover", "link"]),
+          palette,
+          fields: z.record(z.string(), z.string()).optional(),
+          imageUrls: z.array(z.string().url()).max(4).optional(),
+          glass,
+        }),
+      },
+      async (args, ctx) => run(() => convex.action(api.mcp.renderGraphic, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "render_carousel",
+      {
+        title: "Render carousel",
+        description:
+          "Render a listing's storytelling carousel (6-8 JPEG slides, 1080x1350) from its facts, screenshots, award and jury, and return the slide URLs in order (the first is the hook slide) with the slide names. Attach the slides with update_post (networks instagram, facebook, linkedin) and the hook slide for Threads. facts override or supply texts (title, studio, url, tagline, kicker, date, tier, awardSlug, score, quote, juror, role, cta, ...); story adds chips/notes for the detail slides, the last slide's cta, glass, and screenshot overrides.",
+        inputSchema: z.object({
+          listingSlug: slug.optional(),
+          facts: z.record(z.string(), z.string()).optional(),
+          palette,
+          story: z
+            .object({
+              chips: z.array(z.string().max(60)).max(4).optional(),
+              notes: z.array(z.string().max(200)).max(4).optional(),
+              cta: z.string().max(120).optional(),
+              glass,
+              shots: z.array(z.string().url()).max(4).optional(),
+              mobile: z.string().url().optional(),
+            })
+            .optional(),
+        }),
+      },
+      async (args, ctx) => run(() => convex.action(api.mcp.renderCarousel, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "list_voices",
+      {
+        title: "List voices",
+        description:
+          "The voiceover narrators (ElevenLabs) with sample clips. With listingSlug, also the listing's preview video length and how many words of narration fit it (about 2.5 words a second). Free: uses no credits.",
+        inputSchema: z.object({ listingSlug: slug.optional() }),
+      },
+      async (args, ctx) => run(() => convex.action(api.mcp.listVoices, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "create_voiceover",
+      {
+        title: "Create voiceover",
+        description:
+          "Voice a narration script for a listing's preview video with ElevenLabs and return the MP3 URL and its length. Spends ElevenLabs credits: only after Giorgi approved the script and the voice. The reel itself (the muted preview with this narration) is built by Giorgi on the admin Voiceover page (/voiceover), which uploads it; then attach the reel's URL to the post as a video.",
+        inputSchema: z.object({ listingSlug: slug, script: z.string().min(1).max(2000), voice: z.string().min(1).max(80).describe("Narrator name from list_voices") }),
+      },
+      async (args, ctx) => run(() => convex.action(api.mcp.createVoiceover, { ...auth(ctx), ...args })),
     );
 
     server.registerTool(
