@@ -39,9 +39,15 @@ function ClaimsCount() {
   return <CountBubble value={count} label="pending claims" />;
 }
 
+function SocialCount() {
+  const count = useQuery(api.social.waitingCount, {});
+  return <CountBubble value={count} label="posts waiting" />;
+}
+
 const NAV = [
   { href: "/dashboard", label: "Overview", count: null },
   { href: "/review", label: "Review", count: ReviewCount },
+  { href: "/social", label: "Social", count: SocialCount },
   { href: "/nominees", label: "Nominees", count: null },
   { href: "/featured", label: "Featured", count: null },
   { href: "/awards", label: "Awards", count: null },

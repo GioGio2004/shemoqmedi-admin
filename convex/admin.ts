@@ -32,6 +32,7 @@ import {
   uniqueSlug,
 } from "./lib/listingHelpers";
 import { hasJuryEvaluations } from "./jury";
+import { mergeSocials, normalizeEmail } from "./lib/contacts";
 import { awardPaths, creatorPath, listingPaths, scheduleIndexNow, sitePath } from "./seo";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -477,6 +478,12 @@ const adminCreator = v.object({
   bio: v.union(v.string(), v.null()),
   isClaimed: v.boolean(),
   claimedBy: v.union(v.object({ name: v.string(), email: v.string() }), v.null()),
+  contactEmail: v.union(v.string(), v.null()),
+  socials: v.object({
+    instagram: v.union(v.string(), v.null()),
+    facebook: v.union(v.string(), v.null()),
+    linkedin: v.union(v.string(), v.null()),
+  }),
   listings: v.number(),
   createdAt: v.number(),
 });
@@ -506,6 +513,12 @@ export const listCreators = query({
           bio: c.bio ?? null,
           isClaimed: c.isClaimed,
           claimedBy: owner ? { name: owner.name, email: owner.email } : null,
+          contactEmail: c.contactEmail ?? null,
+          socials: {
+            instagram: c.socials?.instagram ?? null,
+            facebook: c.socials?.facebook ?? null,
+            linkedin: c.socials?.linkedin ?? null,
+          },
           listings: listings.length,
           createdAt: c.createdAt,
         };
@@ -527,12 +540,31 @@ export const updateCreator = mutation({
     links: v.optional(v.array(v.string())), // [] clears
     bio: v.optional(v.string()), // "" clears
     isClaimed: v.optional(v.boolean()),
+    // Private (never public): the social desk's contact email and tag handles.
+    contactEmail: v.optional(v.string()), // "" clears
+    socials: v.optional(
+      v.object({
+        instagram: v.optional(v.string()), // "" clears
+        facebook: v.optional(v.string()),
+        linkedin: v.optional(v.string()),
+      }),
+    ),
   },
   returns: v.object({ slug: v.string() }),
-  handler: async (ctx, { id, ...args }) => {
+  handler: async (ctx, { id, contactEmail, socials, ...args }) => {
     await requireAdmin(ctx);
     const creator = await ctx.db.get(id);
     if (!creator) fail("Creator not found.");
+    // Private fields: saved apart, so they never trigger a search engine ping.
+    if (contactEmail !== undefined || socials !== undefined) {
+      await ctx.db.patch(id, {
+        ...(contactEmail !== undefined
+          ? { contactEmail: contactEmail.trim() ? normalizeEmail(contactEmail) : undefined }
+          : {}),
+        ...(socials !== undefined ? { socials: mergeSocials(creator.socials, socials) } : {}),
+        updatedAt: Date.now(),
+      });
+    }
     const patch: Partial<Doc<"creators">> = {};
     if (args.name !== undefined) patch.name = cleanText(args.name, "Name", LIMITS.creditName);
     if (args.slug !== undefined) {

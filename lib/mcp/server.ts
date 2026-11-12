@@ -1,0 +1,421 @@
+import type { AuthInfo, CallToolResult } from "@modelcontextprotocol/server";
+import { ConvexHttpClient } from "convex/browser";
+import { ConvexError } from "convex/values";
+import { createMcpHandler, withMcpAuth } from "mcp-handler";
+import { z } from "zod";
+import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
+import { publicOrigin, serviceCredential, verifyOAuthToken } from "./oauth";
+
+/**
+ * The Shemoqmedi social desk connector: Giorgi's own Claude (the Claude app on
+ * his phone, claude.ai or Claude Code) reads listings, awards and studios,
+ * writes and approves social posts, and emails studios. Admins only.
+ *
+ * Auth on /api/mcp is "Sign in with Shemoqmedi": OAuth through Clerk (see
+ * oauth.ts). Every tool is a Convex function in convex/mcp.ts that checks the
+ * short-lived credential minted here and requires the admin role.
+ *
+ * Built on Kalami's connector (kalami/lib/mcp/server.ts).
+ */
+
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+if (!convexUrl) {
+  throw new Error("Missing NEXT_PUBLIC_CONVEX_URL");
+}
+const convex = new ConvexHttpClient(convexUrl);
+
+// --- Helpers -----------------------------------------------------------------
+
+function text(data: unknown): CallToolResult {
+  return {
+    content: [{ type: "text", text: typeof data === "string" ? data : JSON.stringify(data, null, 2) }],
+  };
+}
+
+function failure(error: unknown): CallToolResult {
+  let message = "Something went wrong.";
+  if (error instanceof ConvexError) {
+    const data: unknown = error.data;
+    if (typeof data === "string") message = data;
+    else if (typeof data === "object" && data !== null && "message" in data) message = String((data as { message: unknown }).message);
+  } else if (error instanceof Error) {
+    // Convex wraps thrown errors as "[Request ID: …] Server Error\nUncaught Error: <message> …".
+    const m = /Uncaught (?:ConvexError|Error): ([^\n]+)/.exec(error.message);
+    message = m ? m[1] : error.message;
+  }
+  return { isError: true, content: [{ type: "text", text: message }] };
+}
+
+/** Runs a Convex call for a tool and turns its errors into tool errors. */
+async function run(fn: () => Promise<unknown>): Promise<CallToolResult> {
+  try {
+    return text(await fn());
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+type ToolContext = { http?: { authInfo?: AuthInfo } };
+
+function auth(ctx: ToolContext) {
+  const token = ctx.http?.authInfo?.token;
+  if (!token) {
+    throw new Error("Missing access token");
+  }
+  return { token };
+}
+
+/** "2026-11-14T18:00" (Tbilisi when no offset is given) → epoch ms; null clears; undefined keeps. */
+function parseWhen(value: string | null | undefined): number | null | undefined {
+  if (value === undefined || value === null) return value;
+  const hasZone = /([zZ]|[+-]\d\d:?\d\d)$/.test(value);
+  const ms = Date.parse(hasZone ? value : `${value}+04:00`);
+  if (Number.isNaN(ms)) throw new Error(`"${value}" is not a date and time. Use e.g. 2026-11-14T18:00 (Tbilisi time).`);
+  return ms;
+}
+
+const INSTRUCTIONS = `You are connected to Shemoqmedi (shemoqmedi.space), an awards site for web design run by Giorgi, as his social media and outreach desk. He is the only person running it, so your job is to do the work and bring him finished things to approve.
+
+What the database does by itself: when an award is announced (Honorable Mention, Site of the Day, Site of the Month, Site of the Year), when a site goes public (new listing), every Monday (call for submissions), every other Thursday (call for jurors) and on Sundays (weekly roundup), it queues a social post with \`facts\`: plain data about the site, studio, award, screenshots and links. Award winners and featured studios are emailed by the system.
+
+Your daily loop when Giorgi asks "what's waiting?":
+1. social_queue (status waiting). For each post read its facts (get_post; get_listing for jury comments and more).
+2. Write captions for the networks that fit: instagram, facebook, linkedin. Save them with update_post.
+3. Show him every caption in full with the media it will use, then ask. Only call approve_post after he says yes to that exact post. If he asks for changes, edit and show again.
+
+Voice and rules:
+- English only. Short, specific and warm; say what is good about the site in concrete terms (motion, typography, the idea). No hype words ("stunning", "game-changer", "mind-blowing"), no emoji walls (one or two at most), no engagement bait.
+- Always credit the studio. Tag them with their handle from facts.studio.socials for that network (Instagram/Facebook "@handle"; LinkedIn mention the studio name and link their site). If there's no handle, use the studio name and offer to look the handle up (then save it with update_creator).
+- Instagram: needs an image or video (the post's media); caption up to ~1,000 characters, line breaks between ideas, the link goes "in bio" or on the award page, 3–5 relevant hashtags at the end (#webdesign #awwwards-style tags are fine, #shemoqmedi always).
+- Facebook: conversational, 1–3 short paragraphs, include the page link (facts.pageUrl or the award pageUrl).
+- LinkedIn: posted from Giorgi's personal profile, so write in first person as him (founder of Shemoqmedi), a bit more reflective, include the link, 0–3 hashtags.
+- Award posts lead with the award and the site; new-listing posts say it's in this week's jury vote; calls invite people with the submit or jury link; roundups list the week's sites and awards.
+- Never invent facts (scores, dates, people, quotes). Jury comments from get_listing may be quoted with the juror's name.
+
+Email:
+- preview_email shows exactly what will be sent; send_email sends it and needs confirm: true, which you may only set after Giorgi approved that preview. Use {claimLink} in the body to include an unclaimed listing's claim link.
+- For outreach to studios that aren't in the database yet, find their public contact email on their own website, write a short personal note (who we are, why their work, one clear ask), show it, and send only after a yes. Save emails you find with update_creator.
+- Broadcasts (preview_broadcast, send_broadcast) go to many people: always show the recipient count and the full text first; confirm only after an explicit yes.
+- Never message people on LinkedIn or other networks automatically; for LinkedIn, write the message and Giorgi sends it himself.
+
+Times are Tbilisi time (UTC+4) unless Giorgi says otherwise.`;
+
+const slug = z.string().min(1).max(80);
+const postId = z.string().describe("Post id from social_queue");
+const captions = z
+  .object({
+    instagram: z.string().max(3000).optional(),
+    facebook: z.string().max(3000).optional(),
+    linkedin: z.string().max(3000).optional(),
+  })
+  .describe('Captions per network; "" removes one');
+const media = z
+  .array(
+    z.object({
+      kind: z.enum(["image", "video"]),
+      url: z.string().url().describe("Public https URL"),
+      role: z.string().max(40).optional().describe('e.g. "screenshot", "graphic", "voiceover"'),
+    }),
+  )
+  .max(10)
+  .describe("The post's images/videos in order (Instagram carousel order). Replaces the current list.");
+const audience = z
+  .enum(["users", "studios", "jurors", "all"])
+  .describe("users: everyone with an account; studios: studio contact emails and owners; jurors: active jurors; all: everyone");
+
+// --- The server --------------------------------------------------------------
+
+const handler = createMcpHandler(
+  (server) => {
+    server.registerTool(
+      "whoami",
+      { title: "Who am I", description: "The signed-in Shemoqmedi admin.", inputSchema: z.object({}) },
+      async (_args, ctx) => run(() => convex.query(api.mcp.whoami, auth(ctx))),
+    );
+
+    server.registerTool(
+      "stats",
+      {
+        title: "Desk stats",
+        description: "Counts: social posts by status, emails in the last 30 days, listings by status, creators with contact emails, opt-outs.",
+        inputSchema: z.object({}),
+      },
+      async (_args, ctx) => run(() => convex.query(api.mcp.stats, auth(ctx))),
+    );
+
+    // Listings, awards, studios
+
+    server.registerTool(
+      "search_listings",
+      {
+        title: "Search listings",
+        description: "Listings (sites) newest first, optionally filtered by text (title, studio, slug, URL) and status. Returns slugs for get_listing.",
+        inputSchema: z.object({
+          text: z.string().max(100).optional(),
+          status: z.enum(["pending", "in_voting", "awarded", "archived", "rejected"]).optional(),
+          limit: z.number().int().min(1).max(100).optional(),
+        }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.searchListings, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "get_listing",
+      {
+        title: "Get listing",
+        description:
+          "Everything about a site: title, tagline, URLs, studio (with social handles), categories, technologies, jury note and every juror's scores and comment, awards, screenshots and video URLs, and private details (studio contact email, owner, claim link), plus its social posts and emails sent.",
+        inputSchema: z.object({ slug }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.getListing, { ...auth(ctx), slug: args.slug })),
+    );
+
+    server.registerTool(
+      "list_awards",
+      {
+        title: "List awards",
+        description: "The latest awards (HM, SOTD, SOTM, SOTY, First 100) with their site, date, award page and whether the winner was emailed.",
+        inputSchema: z.object({ limit: z.number().int().min(1).max(100).optional() }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.listAwards, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "get_creator",
+      {
+        title: "Get creator",
+        description: "A studio or person: profile, website and links, private contact email, social handles, owner, and their listings.",
+        inputSchema: z.object({ slug }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.getCreator, { ...auth(ctx), slug: args.slug })),
+    );
+
+    server.registerTool(
+      "studios_without_contact",
+      {
+        title: "Studios without contact",
+        description: "Studios with public listings that nobody claimed and that have no contact email yet: who to find an email for.",
+        inputSchema: z.object({}),
+      },
+      async (_args, ctx) => run(() => convex.query(api.mcp.studiosWithoutContact, auth(ctx))),
+    );
+
+    server.registerTool(
+      "update_creator",
+      {
+        title: "Update creator contact",
+        description:
+          'Save a studio\'s private contact email and/or its social handles (instagram, facebook, linkedin: a handle, "@handle" or profile URL; LinkedIn like "company/studio"). "" clears a value.',
+        inputSchema: z.object({
+          slug,
+          contactEmail: z.string().max(254).optional(),
+          socials: z
+            .object({ instagram: z.string().max(200).optional(), facebook: z.string().max(200).optional(), linkedin: z.string().max(200).optional() })
+            .optional(),
+        }),
+      },
+      async (args, ctx) => run(() => convex.mutation(api.mcp.updateCreator, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "claim_link",
+      {
+        title: "Claim link",
+        description: "The secret claim link of an unclaimed listing (created on first use), for outreach. Null when it is already claimed.",
+        inputSchema: z.object({ slug }),
+      },
+      async (args, ctx) => run(() => convex.action(api.mcp.claimLink, { ...auth(ctx), slug: args.slug })),
+    );
+
+    // The social queue
+
+    server.registerTool(
+      "social_queue",
+      {
+        title: "Social queue",
+        description: "Social posts by status (default: waiting for captions/approval), newest first, with their facts, captions and media.",
+        inputSchema: z.object({
+          status: z.enum(["waiting", "approved", "scheduled", "sent", "failed", "rejected", "all"]).optional(),
+          limit: z.number().int().min(1).max(100).optional(),
+        }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.socialQueue, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "get_post",
+      {
+        title: "Get post",
+        description: "One social post: kind, status, facts, captions, media, publish time, note.",
+        inputSchema: z.object({ id: postId }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.getPost, { ...auth(ctx), id: args.id as Id<"socialPosts"> })),
+    );
+
+    server.registerTool(
+      "update_post",
+      {
+        title: "Update post",
+        description:
+          "Save captions, media, publish time or a note on a waiting (or approved) post. Editing an approved post sends it back to waiting. publishAt: ISO date-time, Tbilisi time when no offset; null = as soon as approved.",
+        inputSchema: z.object({
+          id: postId,
+          captions: captions.optional(),
+          media: media.optional(),
+          publishAt: z.string().nullable().optional(),
+          note: z.string().max(500).optional(),
+        }),
+      },
+      async (args, ctx) =>
+        run(() =>
+          convex.mutation(api.mcp.updatePost, {
+            ...auth(ctx),
+            id: args.id as Id<"socialPosts">,
+            captions: args.captions,
+            media: args.media,
+            scheduledFor: parseWhen(args.publishAt),
+            note: args.note,
+          }),
+        ),
+    );
+
+    server.registerTool(
+      "create_post",
+      {
+        title: "Create post",
+        description:
+          "Start a post Giorgi asked for: an announcement, a custom post, or another kind. With listingSlug the post gets that site's facts and screenshots. Extra facts are merged in.",
+        inputSchema: z.object({
+          kind: z.enum(["announcement", "custom", "new_listing", "award", "call_submissions", "call_jury", "roundup"]),
+          listingSlug: slug.optional(),
+          facts: z.record(z.string(), z.unknown()).optional(),
+          captions: captions.optional(),
+          media: media.optional(),
+        }),
+      },
+      async (args, ctx) => run(() => convex.mutation(api.mcp.createPost, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "approve_post",
+      {
+        title: "Approve post",
+        description:
+          "Approve a waiting post for publishing. Only after Giorgi said yes to its final captions and media. A new-listing post also emails the studio that it is featured (with its claim link when unclaimed).",
+        inputSchema: z.object({ id: postId }),
+      },
+      async (args, ctx) => run(() => convex.mutation(api.mcp.approvePost, { ...auth(ctx), id: args.id as Id<"socialPosts"> })),
+    );
+
+    server.registerTool(
+      "reject_post",
+      {
+        title: "Reject post",
+        description: "Drop a post that shouldn't go out, with an optional reason.",
+        inputSchema: z.object({ id: postId, note: z.string().max(500).optional() }),
+      },
+      async (args, ctx) =>
+        run(() => convex.mutation(api.mcp.rejectPost, { ...auth(ctx), id: args.id as Id<"socialPosts">, note: args.note })),
+    );
+
+    // Email
+
+    const emailInput = {
+      listingSlug: slug.optional().describe("Email this listing's studio (owner, else contact email)"),
+      creatorSlug: slug.optional().describe("Email this creator (owner, else contact email)"),
+      to: z.string().max(254).optional().describe("Any address (outreach to a studio not in the database), or override the recipient"),
+      subject: z.string().min(1).max(200),
+      body: z.string().min(1).max(10000).describe("Plain text; blank lines separate paragraphs; URLs become links; {claimLink} = the listing's claim link"),
+    };
+
+    server.registerTool(
+      "preview_email",
+      {
+        title: "Preview email",
+        description: "Shows exactly who gets what, without sending. Always preview and show Giorgi before send_email.",
+        inputSchema: z.object(emailInput),
+      },
+      async (args, ctx) => run(() => convex.action(api.mcp.sendEmail, { ...auth(ctx), ...args, confirm: false })),
+    );
+
+    server.registerTool(
+      "send_email",
+      {
+        title: "Send email",
+        description:
+          "Sends one email (with an unsubscribe footer; skipped if the person unsubscribed) and logs it. confirm must be true and may only be set after Giorgi approved the preview of this exact email.",
+        inputSchema: z.object({ ...emailInput, confirm: z.literal(true) }),
+      },
+      async (args, ctx) => run(() => convex.action(api.mcp.sendEmail, { ...auth(ctx), ...args, confirm: true })),
+    );
+
+    server.registerTool(
+      "preview_broadcast",
+      {
+        title: "Preview broadcast",
+        description: "How many people an audience reaches (minus unsubscribed) and the first few addresses. Nothing is sent.",
+        inputSchema: z.object({ audience, subject: z.string().min(1).max(200), body: z.string().min(1).max(20000) }),
+      },
+      async (args, ctx) => run(() => convex.action(api.mcp.sendBroadcast, { ...auth(ctx), ...args, confirm: false })),
+    );
+
+    server.registerTool(
+      "send_broadcast",
+      {
+        title: "Send broadcast",
+        description:
+          "Emails everyone in the audience in the background (each with their own unsubscribe link). confirm must be true, only after Giorgi saw the recipient count and the full text and said yes.",
+        inputSchema: z.object({ audience, subject: z.string().min(1).max(200), body: z.string().min(1).max(20000), confirm: z.literal(true) }),
+      },
+      async (args, ctx) => run(() => convex.action(api.mcp.sendBroadcast, { ...auth(ctx), ...args, confirm: true })),
+    );
+
+    server.registerTool(
+      "email_history",
+      {
+        title: "Email history",
+        description: "Emails sent (newest first), optionally to one address: subject, kind, status and errors.",
+        inputSchema: z.object({ to: z.string().max(254).optional(), limit: z.number().int().min(1).max(200).optional() }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.emailHistory, { ...auth(ctx), ...args })),
+    );
+  },
+  {
+    serverInfo: { name: "shemoqmedi-desk", version: "1.0.0" },
+    instructions: INSTRUCTIONS,
+  },
+);
+
+/**
+ * Checks the bearer token of an MCP request: a Clerk OAuth access token from
+ * "Sign in with Shemoqmedi". It becomes a short signed credential that tells
+ * Convex which Clerk user this is, and Convex decides whether the person is an
+ * admin: anyone else gets undefined here, so a 401.
+ */
+export async function verifyToken(req: Request, token: string | undefined): Promise<AuthInfo | undefined> {
+  if (!token) {
+    return undefined;
+  }
+  const oauth = await verifyOAuthToken(req).catch((error: unknown) => {
+    console.error("MCP OAuth token check failed", error);
+    return null;
+  });
+  if (oauth === null) {
+    return undefined;
+  }
+  const credential = await serviceCredential(oauth.userId);
+  const me = await convex.query(api.mcp.whoami, { token: credential });
+  if (me === null) {
+    return undefined;
+  }
+  return {
+    token: credential,
+    clientId: me.userId,
+    scopes: oauth.scopes,
+    extra: { email: me.email, origin: publicOrigin(req), client: oauth.clientId },
+  };
+}
+
+/** /api/mcp: bearer tokens are checked against Convex; anything else is a 401. */
+export const headerAuthHandler = withMcpAuth(handler, verifyToken, { required: true });

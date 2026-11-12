@@ -15,6 +15,42 @@ export const listingStatus = v.union(
   v.literal("rejected"),
 );
 
+/** What a social post is about (convex/social.ts). */
+export const socialPostKind = v.union(
+  v.literal("award"),
+  v.literal("new_listing"),
+  v.literal("call_submissions"),
+  v.literal("call_jury"),
+  v.literal("roundup"),
+  v.literal("announcement"),
+  v.literal("custom"),
+);
+
+/**
+ * waiting ──approve──▶ approved ──Postiz──▶ scheduled ──▶ sent | failed
+ *    └──reject──▶ rejected
+ * "pending" and "skipped" are older award rows; they read as waiting.
+ */
+export const socialPostStatus = v.union(
+  v.literal("waiting"),
+  v.literal("approved"),
+  v.literal("scheduled"),
+  v.literal("sent"),
+  v.literal("failed"),
+  v.literal("rejected"),
+  v.literal("pending"),
+  v.literal("skipped"),
+);
+
+/** Why an email went out (emailLog). */
+export const emailKind = v.union(
+  v.literal("award"),
+  v.literal("featured"),
+  v.literal("outreach"),
+  v.literal("broadcast"),
+  v.literal("custom"),
+);
+
 export const creatorTier = v.union(v.literal("solo"), v.literal("agency"));
 export const region = v.union(v.literal("georgia"), v.literal("global"));
 /**
@@ -143,11 +179,24 @@ export default defineSchema({
     bio: v.optional(v.string()),
     isClaimed: v.boolean(),
     claimedBy: v.optional(v.id("users")),
+    // Private, admin-only: where award and "you're featured" emails go while
+    // nobody has claimed the studio (an owner's own email wins once claimed).
+    // Never returned by public queries.
+    contactEmail: v.optional(v.string()),
+    // Handles used to tag the studio in social posts ("@studio", no URL).
+    socials: v.optional(
+      v.object({
+        instagram: v.optional(v.string()),
+        facebook: v.optional(v.string()),
+        linkedin: v.optional(v.string()),
+      }),
+    ),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_slug", ["slug"])
-    .index("by_claimedBy", ["claimedBy"]),
+    .index("by_claimedBy", ["claimedBy"])
+    .index("by_contactEmail", ["contactEmail"]),
 
   // A website in the showcase. /sites/<slug>
   listings: defineTable({
@@ -443,23 +492,85 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
 
-  // Award announcements for the social posting job (convex/social.ts).
+  // The social desk (convex/social.ts): posts the database queues by itself
+  // (awards, new listings, weekly calls, the Sunday roundup) or an admin
+  // creates in chat. Claude writes the captions through the MCP connector and
+  // an admin approves them; Postiz publishes. "pending"/"skipped" are older
+  // award rows from before the desk and read as "waiting".
   socialPosts: defineTable({
-    awardId: v.id("awards"),
-    status: v.union(v.literal("pending"), v.literal("sent"), v.literal("failed"), v.literal("skipped")),
-    payload: v.object({
-      text: v.string(),
-      url: v.string(),
-      screenshotUrl: v.union(v.string(), v.null()),
-      studioName: v.string(),
-      studioTag: v.union(v.string(), v.null()),
-    }),
+    kind: v.optional(socialPostKind), // absent on older rows: "award"
+    awardId: v.optional(v.id("awards")),
+    listingId: v.optional(v.id("listings")),
+    status: socialPostStatus,
+    // What the post is about, as plain data for Claude (see social.ts factsFor*).
+    facts: v.optional(v.any()),
+    captions: v.optional(
+      v.object({
+        facebook: v.optional(v.string()),
+        instagram: v.optional(v.string()),
+        linkedin: v.optional(v.string()),
+      }),
+    ),
+    media: v.optional(
+      v.array(
+        v.object({
+          kind: v.union(v.literal("image"), v.literal("video")),
+          url: v.string(),
+          // What it is: "screenshot", "graphic", "voiceover", ...
+          role: v.optional(v.string()),
+        }),
+      ),
+    ),
+    scheduledFor: v.optional(v.number()), // publish time; absent = as soon as approved
+    approvedAt: v.optional(v.number()),
+    approvedBy: v.optional(v.id("users")),
+    postizIds: v.optional(v.array(v.string())),
+    note: v.optional(v.string()), // why it was rejected, or anything to remember
+    // Older award rows (before the desk): the announcement as one text.
+    payload: v.optional(
+      v.object({
+        text: v.string(),
+        url: v.string(),
+        screenshotUrl: v.union(v.string(), v.null()),
+        studioName: v.string(),
+        studioTag: v.union(v.string(), v.null()),
+      }),
+    ),
     error: v.optional(v.string()),
     createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
     sentAt: v.optional(v.number()),
   })
     .index("by_award", ["awardId"])
+    .index("by_listing_kind", ["listingId", "kind"])
+    .index("by_kind", ["kind", "createdAt"])
     .index("by_status", ["status", "createdAt"]),
+
+  // Every email sent to studios, owners, contacts and broadcast audiences
+  // (convex/emails.ts), so nobody gets the same email twice and the admin
+  // can see what went out. Admin alerts are not logged.
+  emailLog: defineTable({
+    to: v.string(), // lowercased
+    subject: v.string(),
+    kind: emailKind,
+    listingId: v.optional(v.id("listings")),
+    creatorId: v.optional(v.id("creators")),
+    postId: v.optional(v.id("socialPosts")),
+    broadcastId: v.optional(v.string()),
+    status: v.union(v.literal("sent"), v.literal("failed"), v.literal("skipped")),
+    error: v.optional(v.string()),
+    sentAt: v.number(),
+  })
+    .index("by_to", ["to", "sentAt"])
+    .index("by_listing_kind", ["listingId", "kind"])
+    .index("by_sentAt", ["sentAt"]),
+
+  // People who unsubscribed (lowercased email). Checked before every email in
+  // emailLog; the link in each email's footer adds the row (http.ts).
+  emailOptOuts: defineTable({
+    email: v.string(),
+    createdAt: v.number(),
+  }).index("by_email", ["email"]),
 
   // "This is mine" requests for unclaimed listings and creator profiles.
   claims: defineTable({

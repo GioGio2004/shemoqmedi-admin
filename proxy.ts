@@ -1,8 +1,16 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
-// Everything except these (dashboard, /api/*) requires a Clerk session.
-const isPublicRoute = createRouteMatcher(["/", "/sign-in(.*)", "/sign-up(.*)"]);
+// Everything except these (dashboard, /api/*) requires a Clerk session. The
+// MCP connector checks its own OAuth tokens (lib/mcp), and MCP clients probing
+// for OAuth metadata get a clean answer instead of a sign-in redirect.
+const isPublicRoute = createRouteMatcher([
+  "/",
+  "/sign-in(.*)",
+  "/sign-up(.*)",
+  "/api/mcp(.*)",
+  "/.well-known(.*)",
+]);
 
 const isApiRoute = createRouteMatcher(["/api/(.*)", "/trpc/(.*)"]);
 

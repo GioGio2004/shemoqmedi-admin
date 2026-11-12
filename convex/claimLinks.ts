@@ -35,6 +35,28 @@ function newToken() {
 
 const claimUrl = (token: string) => `${siteUrl()}/claim/${token}`;
 
+/** A fresh claim token. Call it in an action and pass the result to a mutation. */
+export const newClaimToken = () => newToken();
+
+/**
+ * The claim link of an unclaimed listing, storing `freshToken` (minted by the
+ * calling action with newClaimToken) on first use; null once it is claimed.
+ * For server-side senders (studio emails, the MCP connector) whose caller
+ * was already checked.
+ */
+export async function ensureListingClaimUrl(
+  ctx: MutationCtx,
+  listingId: Id<"listings">,
+  freshToken: string,
+): Promise<string | null> {
+  const listing = await ctx.db.get(listingId);
+  if (!listing || listing.isClaimed || listing.status === "rejected") return null;
+  if (listing.claimToken) return claimUrl(listing.claimToken);
+  if (!CLAIM_TOKEN.test(freshToken)) fail("Invalid token.");
+  await ctx.db.patch(listingId, { claimToken: freshToken, updatedAt: Date.now() });
+  return claimUrl(freshToken);
+}
+
 const target = v.union(
   v.object({ kind: v.literal("juror"), id: v.id("jurors") }),
   v.object({ kind: v.literal("listing"), id: v.id("listings") }),

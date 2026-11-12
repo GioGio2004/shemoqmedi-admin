@@ -6,7 +6,13 @@ export const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 /** Sends one email. Returns an error message, or null when sent. */
-export async function sendEmail(input: { to: string[]; subject: string; text: string; html: string }) {
+export async function sendEmail(input: {
+  to: string[];
+  subject: string;
+  text: string;
+  html: string;
+  headers?: Record<string, string>;
+}) {
   const key = process.env.RESEND_API_KEY?.trim();
   if (!key) return "RESEND_API_KEY is not set on this Convex deployment.";
   if (input.to.length === 0) return "No recipient.";

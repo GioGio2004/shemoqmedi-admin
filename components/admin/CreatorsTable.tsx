@@ -50,6 +50,10 @@ function CreatorForm({ creator, onDone }: { creator: Creator; onDone: () => void
   const [bio, setBio] = useState(creator.bio ?? "");
   const [links, setLinks] = useState(creator.links.join("\n"));
   const [isClaimed, setIsClaimed] = useState(creator.isClaimed);
+  const [contactEmail, setContactEmail] = useState(creator.contactEmail ?? "");
+  const [instagram, setInstagram] = useState(creator.socials.instagram ?? "");
+  const [facebook, setFacebook] = useState(creator.socials.facebook ?? "");
+  const [linkedin, setLinkedin] = useState(creator.socials.linkedin ?? "");
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +64,7 @@ function CreatorForm({ creator, onDone }: { creator: Creator; onDone: () => void
   const linksInvalid = Boolean(badLink) || linkList.length > LIMITS.creatorLinks;
   const slugValue = toSlug(slug);
   const slugInvalid = slugValue === "";
+  const emailInvalid = contactEmail.trim() !== "" && !/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(contactEmail.trim());
 
   /** Only the fields that differ from what is stored. */
   function changes(): CreatorPatch {
@@ -73,12 +78,18 @@ function CreatorForm({ creator, onDone }: { creator: Creator; onDone: () => void
     if (bio.trim() !== (creator.bio ?? "")) patch.bio = bio.trim();
     if (linkList.join(" ") !== creator.links.join(" ")) patch.links = linkList;
     if (isClaimed !== creator.isClaimed) patch.isClaimed = isClaimed;
+    if (contactEmail.trim().toLowerCase() !== (creator.contactEmail ?? "")) patch.contactEmail = contactEmail.trim();
+    const socials: NonNullable<CreatorPatch["socials"]> = {};
+    if (instagram.trim() !== (creator.socials.instagram ?? "")) socials.instagram = instagram.trim();
+    if (facebook.trim() !== (creator.socials.facebook ?? "")) socials.facebook = facebook.trim();
+    if (linkedin.trim() !== (creator.socials.linkedin ?? "")) socials.linkedin = linkedin.trim();
+    if (Object.keys(socials).length) patch.socials = socials;
     return patch;
   }
 
   const patch = changes();
   const changed = Object.keys(patch).length > 0;
-  const canSave = changed && name.trim() !== "" && !slugInvalid && !websiteInvalid && !linksInvalid && !busy;
+  const canSave = changed && name.trim() !== "" && !slugInvalid && !websiteInvalid && !linksInvalid && !emailInvalid && !busy;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -241,6 +252,43 @@ function CreatorForm({ creator, onDone }: { creator: Creator; onDone: () => void
           />
         </label>
 
+        <fieldset className="grid gap-4">
+          <legend className="admin-eyebrow mb-2">Social desk (private, never shown on the site)</legend>
+          <label className="grid gap-2">
+            <span className="text-xs text-black/55">Contact email: award and “you’re featured” emails go here while nobody owns the studio.</span>
+            <input
+              type="email"
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+              className="admin-input"
+              placeholder="hello@studio.example"
+              aria-label="Contact email"
+              aria-invalid={emailInvalid || undefined}
+            />
+            {emailInvalid && <span className="text-xs font-medium">That is not an email address.</span>}
+          </label>
+          <div className="grid gap-4 md:grid-cols-3">
+            {(
+              [
+                ["Instagram", instagram, setInstagram, "@studio"],
+                ["Facebook", facebook, setFacebook, "studio"],
+                ["LinkedIn", linkedin, setLinkedin, "company/studio"],
+              ] as const
+            ).map(([label, value, set, placeholder]) => (
+              <label key={label} className="grid gap-2">
+                <span className="text-xs text-black/55">{label} handle</span>
+                <input
+                  value={value}
+                  onChange={(e) => set(e.target.value)}
+                  className="admin-input admin-mono"
+                  placeholder={placeholder}
+                  spellCheck={false}
+                />
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
         <label className="admin-check">
           <input type="checkbox" checked={isClaimed} onChange={(e) => setIsClaimed(e.target.checked)} />
           <span>
@@ -341,6 +389,30 @@ function CreatorRow({ creator }: { creator: Creator }) {
             ) : (
               "Nobody"
             )}
+          </dd>
+        </div>
+        <div>
+          <dt>Contact email</dt>
+          <dd>
+            {creator.contactEmail ? (
+              <a href={`mailto:${creator.contactEmail}`} className="underline underline-offset-4">
+                {creator.contactEmail}
+              </a>
+            ) : (
+              "—"
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>Social handles</dt>
+          <dd className="admin-mono">
+            {[
+              creator.socials.instagram && `IG ${creator.socials.instagram}`,
+              creator.socials.facebook && `FB ${creator.socials.facebook}`,
+              creator.socials.linkedin && `IN ${creator.socials.linkedin}`,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "—"}
           </dd>
         </div>
         <div>
