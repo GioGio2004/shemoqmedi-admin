@@ -352,8 +352,9 @@ export type PreviewAssets = {
   /** Glass backdrop and frost for the format, small (the browser stretches them; they are blurred anyway). */
   back: string;
   frost: string;
-  /** The screenshot, ready to draw. Empty when none was given or it could not be fetched. */
-  shot: string;
+  // No screenshot: it doesn't depend on the palette, so the browser loads it
+  // once by URL (lib/studio/create.ts previewShotUrl, the same 1600 px JPEG the
+  // server draws), instead of once more inside every palette's answer.
 };
 
 const previews = new Map<string, Promise<PreviewAssets>>();
@@ -370,10 +371,10 @@ export function previewAssets(o: { shot: string | null; palette: string; glass: 
     const { width, height } = FORMATS[o.format];
     const backdrop = await backdropFor(o.glass, palette, width, height, shot ? [{ pic: shot, from: 0, to: 1 }] : []);
     const full = { left: 0, top: 0, width, height };
-    const [back, frost, shotSrc] = await Promise.all([region(backdrop, "back", full, 0.25), region(backdrop, "frost", full, 0.25), asDataUri(shot, 1300)]);
+    const [back, frost] = await Promise.all([region(backdrop, "back", full, 0.25), region(backdrop, "frost", full, 0.25)]);
     t.mark("build");
     t.done();
-    return { palette: { base: palette.base, surface: palette.surface, accent: palette.accent }, light: backdrop.luminance > 0.55, back, frost, shot: shotSrc ?? "" };
+    return { palette: { base: palette.base, surface: palette.surface, accent: palette.accent }, light: backdrop.luminance > 0.55, back, frost };
   })();
   previews.set(key, made);
   made.catch(() => previews.delete(key));

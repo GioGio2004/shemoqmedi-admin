@@ -4,7 +4,7 @@ import { memo, useDeferredValue, useMemo } from "react";
 import { GraphicPreview, type GraphicPreviewProps, type PreviewAssets } from "@/lib/graphics/preview";
 import { FORMATS, STYLES, STYLE_INFO, type FormatId, type Style, type TemplateId } from "@/lib/graphics/spec";
 import { getPalette } from "@/lib/palettes";
-import { PALETTE_CHOICES, assetsUrl, type GlassId, type PaletteChoice } from "@/lib/studio/create";
+import { PALETTE_CHOICES, assetsUrl, miniFetchesAssets, previewShotUrl, type GlassId, type PaletteChoice } from "@/lib/studio/create";
 import { useWidth } from "../hooks";
 import { useAssets } from "./useAssets";
 
@@ -33,7 +33,8 @@ function props(look: Look, assets: PreviewAssets | null, scale: number): Graphic
     glass: look.glass,
     fields: look.fields,
     assets,
-    shotUrl: look.shot,
+    // The screenshot by URL (one download for every palette and style), not inside each palette's assets.
+    shotUrl: previewShotUrl(look.shot),
     scale,
   };
 }
@@ -58,9 +59,13 @@ export function PreviewStage({ look, sticky, note }: { look: Look; sticky?: bool
   );
 }
 
-/** One small copy of the design (memoized: it redraws only when its own look changes). */
-const Mini = memo(function Mini({ look, width }: { look: Look; width: number }) {
-  const assets = useAssets(assetsUrl(look));
+/**
+ * One small copy of the design (memoized: it redraws only when its own look
+ * changes). `fetchAssets: false` (the palette strip in glass) only shows
+ * assets already loaded, so the strip doesn't build a backdrop per palette.
+ */
+const Mini = memo(function Mini({ look, width, fetchAssets = true }: { look: Look; width: number; fetchAssets?: boolean }) {
+  const assets = useAssets(assetsUrl(look), { fetch: fetchAssets });
   const { width: fw, height: fh } = FORMATS[look.format];
   const scale = width / fw;
   return (
@@ -70,7 +75,11 @@ const Mini = memo(function Mini({ look, width }: { look: Look; width: number }) 
   );
 });
 
-/** The same design in every palette (and auto); a tap picks one. Drawn at low priority so typing stays instant. */
+/**
+ * The same design in every palette (and auto); a tap picks one. Drawn at low
+ * priority so typing stays instant. In glass, a palette shows its real
+ * backdrop once it has been previewed; until then the blurred stand-in.
+ */
 export function PaletteStrip({ look, onPick }: { look: Look; onPick: (p: PaletteChoice) => void }) {
   const deferred = useDeferredValue(look);
   // One stable look per palette, so each small copy redraws only when the design does.
@@ -82,7 +91,7 @@ export function PaletteStrip({ look, onPick }: { look: Look; onPick: (p: Palette
         const palette = p === "auto" ? null : getPalette(p);
         return (
           <button key={p} type="button" className="st-swatch" aria-pressed={look.palette === p} onClick={() => onPick(p)} aria-label={palette ? palette.name : "Auto (from the screenshot)"}>
-            <Mini look={looks[i]} width={width} />
+            <Mini look={looks[i]} width={width} fetchAssets={miniFetchesAssets(looks[i])} />
             {palette ? (
               <span className="st-swatch-bar" aria-hidden="true">
                 <span style={{ flex: 6, background: palette.base, boxShadow: "inset 0 0 0 1px rgb(0 0 0 / .08)" }} />

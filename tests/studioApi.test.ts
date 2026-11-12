@@ -7,10 +7,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "../convex/schema";
-import { api } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { mintServiceCredential } from "../convex/lib/tokens";
-import { storyProblem } from "../convex/lib/socialApi";
+import { cannotPublish, retryableNetworks, storyProblem, storyVideoProblem } from "../convex/lib/socialApi";
+import { publishState } from "../lib/socialPublishState";
+import { postActions } from "../lib/studio/queue";
 import { folderOf, roleOf } from "../convex/mcp";
 import {
   FORMAT_ENUM,
@@ -564,5 +566,140 @@ describe("MCP: catalogs", () => {
     for (const path of ["/social/graphics/a.jpg", "/social/carousels/x/a.jpg", "/listings/s/a.webp", "/x/y.png"]) {
       expect(MEDIA_ROLES).toContain(roleOf({ filePath: path, kind: "image" }));
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Review fixes: stories that can't be retried, story video length
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Pushes scheduled so far (push.notifyAdmins jobs), with their titles. */
+const pushes = (env: Env) =>
+  env.t.run(async (ctx) =>
+    (await ctx.db.system.query("_scheduled_functions").collect())
+      .filter((j) => j.name.includes("notifyAdmins"))
+      .map((j) => (j.args[0] as { title: string }).title),
+  );
+
+describe("a sent story is not retried for networks it can never reach", () => {
+  it("Threads and LinkedIn captions on a story: no Retry, no second push, sentAt kept", async () => {
+    fakeMeta();
+    const env = await setup();
+    // Over MCP, all four captions on a story are accepted (the caption only picks the network).
+    const post = await env.t.mutation(api.mcp.createPost, {
+      token: env.token,
+      kind: "custom",
+      placement: "story",
+      media: [storyImage],
+      captions: { instagram: "IG", facebook: "FB", threads: "Threads", linkedin: "LinkedIn" },
+    });
+    await env.admin.mutation(api.social.publish, { id: post.id });
+    await drain(env);
+    const sent = (await row(env, post.id))!;
+    expect(sent.status).toBe("sent");
+    expect(sent.results!.filter((r) => r.status === "skipped").map((r) => r.network).sort()).toEqual(["linkedin", "threads"]);
+    expect(await pushes(env)).toEqual(["Published: Story"]);
+
+    // The server refuses the retry, and the Studio shows no Retry button.
+    await expect(env.admin.mutation(api.social.retry, { id: post.id })).rejects.toThrow(/can go to is already sent/);
+    await expect(env.t.mutation(api.mcp.retryPost, { token: env.token, id: post.id })).rejects.toThrow(/can go to is already sent/);
+    const view = await env.admin.query(api.social.get, { id: post.id });
+    expect(publishState(view, Date.now()).canRetry).toBe(false);
+    expect(postActions(view, Date.now()).retry).toBe(false);
+
+    // A run that tries nothing new (an old job, say) keeps sentAt and pushes nothing.
+    vi.setSystemTime(Date.now() + HOUR);
+    expect(await env.t.mutation(internal.publish.finish, { postId: post.id, attempted: 0 })).toBe("sent");
+    expect((await row(env, post.id))!.sentAt).toBe(sent.sentAt);
+    expect(await pushes(env)).toEqual(["Published: Story"]);
+  });
+
+  it("Facebook with no media for it on a story is not retried either; a network without an account still is", async () => {
+    fakeMeta();
+    const env = await setup();
+    const post = await env.admin.mutation(api.social.create, {
+      kind: "custom",
+      placement: "story",
+      media: [{ ...storyImage, networks: ["instagram"] }],
+      captions: { instagram: "IG", facebook: "FB" },
+    });
+    await env.admin.mutation(api.social.publish, { id: post.id });
+    await drain(env);
+    const view = await env.admin.query(api.social.get, { id: post.id });
+    expect(view.status).toBe("sent");
+    expect(publishState(view, Date.now()).canRetry).toBe(false);
+    await expect(env.admin.mutation(api.social.retry, { id: post.id })).rejects.toThrow(/can go to is already sent/);
+
+    // The rule itself: what a story never reaches, and what a feed post can still get.
+    const media = [{ networks: ["instagram" as const] }];
+    expect(cannotPublish("threads", "story", media)).toBe(true);
+    expect(cannotPublish("facebook", "story", media)).toBe(true);
+    expect(cannotPublish("instagram", "story", media)).toBe(false);
+    expect(cannotPublish("threads", "feed", [])).toBe(false); // a text post
+    expect(cannotPublish("instagram", "feed", [])).toBe(true);
+    expect(cannotPublish("facebook", "story", undefined)).toBe(false); // media not known: only the stories rule
+    // A feed post's Threads that was skipped for want of an account is still retried.
+    expect(
+      retryableNetworks({
+        captions: { facebook: "a", threads: "b" },
+        placement: "feed",
+        media: [],
+        results: [
+          { network: "facebook", status: "sent" },
+          { network: "threads", status: "skipped" },
+        ],
+      }),
+    ).toEqual(["threads"]);
+  });
+});
+
+describe("story video length", () => {
+  it("storyVideoProblem and storyProblem: 3 to 60 seconds, unknown left to Meta", () => {
+    expect(storyVideoProblem(60.4, "this reel")).toMatch(/3 to 60 seconds.*this reel is 60\.4 s.*shorter/);
+    expect(storyVideoProblem(2, "this reel")).toMatch(/is 2\.0 s.*longer/);
+    for (const ok of [3, 30, 59.8, 60, undefined, null, Number.NaN]) expect(storyVideoProblem(ok)).toBeNull();
+    expect(storyProblem([{ kind: "video", url: REEL, width: 1080, height: 1920, durationSec: 61 }])).toMatch(/3 to 60 seconds/);
+    expect(storyProblem([{ kind: "video", url: REEL, width: 1080, height: 1920, durationSec: 45 }])).toBeNull();
+    // An image has no length.
+    expect(storyProblem([{ kind: "image", url: STORY_IMG, width: 1080, height: 1920, durationSec: 99 }])).toBeNull();
+  });
+
+  it("a registered reel keeps its length, and a story over 60 s is refused on edit and approval (also over MCP)", async () => {
+    const env = await setup();
+    const listingId = await listing(env);
+    const slug = (await env.t.run((ctx) => ctx.db.get(listingId)))!.slug;
+    const key = `social/${slug}/${slug}-reel-long000001.mp4`;
+    const { mediaId, url } = await env.admin.mutation(api.voiceover.registerReel, { key, size: 2_000_000, width: 1080, height: 1920, durationSec: 60.437 });
+    expect((await env.t.run((ctx) => ctx.db.get(mediaId)))!.durationSec).toBe(60.44);
+    const long = { kind: "video" as const, url, role: "reel" };
+
+    // The Studio (Reels → Post as story) and MCP both go through editPost.
+    await expect(env.admin.mutation(api.social.create, { kind: "custom", placement: "story", media: [long], captions: { instagram: "IG" } })).rejects.toThrow(
+      /3 to 60 seconds.*60\.4 s/,
+    );
+    const story = await env.t.mutation(api.mcp.createPost, { token: env.token, kind: "custom", placement: "story", captions: { instagram: "IG" } });
+    await expect(env.t.mutation(api.mcp.updatePost, { token: env.token, id: story.id, media: [long] })).rejects.toThrow(/3 to 60 seconds/);
+    // A feed reel of that length is fine, but it can't become a story.
+    const feed = await env.admin.mutation(api.social.create, { kind: "custom", media: [long], captions: { instagram: "IG" } });
+    expect(feed.media).toHaveLength(1);
+    await expect(env.admin.mutation(api.social.update, { id: feed.id, placement: "story" })).rejects.toThrow(/3 to 60 seconds/);
+    // Approval checks it too (a story whose media row learned its length later).
+    await env.t.run((ctx) => ctx.db.patch(story.id, { media: [long] }));
+    await expect(env.admin.mutation(api.social.publish, { id: story.id })).rejects.toThrow(/3 to 60 seconds/);
+
+    // A 45-second reel makes a story.
+    const short = await env.admin.mutation(api.voiceover.registerReel, { key: `social/${slug}/${slug}-reel-short00002.mp4`, size: 1_000_000, width: 1080, height: 1920, durationSec: 45 });
+    const ok = await env.admin.mutation(api.social.create, { kind: "custom", placement: "story", media: [{ kind: "video", url: short.url }], captions: { instagram: "IG" } });
+    expect(ok.placement).toBe("story");
+    // Nonsense lengths aren't stored.
+    const odd = await env.admin.mutation(api.voiceover.registerReel, { key: `social/${slug}/${slug}-reel-odd0000003.mp4`, size: 10, durationSec: -4 });
+    expect((await env.t.run((ctx) => ctx.db.get(odd.mediaId)))!.durationSec).toBeUndefined();
+  });
+
+  it("registerVideo keeps a preview video's length", async () => {
+    const env = await setup();
+    const key = "listings/paper-weather/paper-weather-website-preview-abc1234567.mp4";
+    const id = await env.admin.mutation(api.media.registerVideo, { key, contentType: "video/mp4", size: 1000, width: 720, height: 1280, durationSec: 58.2 });
+    expect((await env.t.run((ctx) => ctx.db.get(id)))!.durationSec).toBe(58.2);
   });
 });

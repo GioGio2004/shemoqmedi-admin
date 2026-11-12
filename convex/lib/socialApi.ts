@@ -39,7 +39,16 @@ export const NETWORK_NAME: Record<Network, string> = {
 export type Placement = "feed" | "story";
 
 /** width/height are filled in from the media table when known (publish.begin), for Instagram's ratio check. */
-export type MediaItem = { kind: "image" | "video"; url: string; role?: string; networks?: Network[]; width?: number; height?: number };
+export type MediaItem = {
+  kind: "image" | "video";
+  url: string;
+  role?: string;
+  networks?: Network[];
+  width?: number;
+  height?: number;
+  /** A video's length, from the media table (social.withSizes): a story video is 3 to 60 s. */
+  durationSec?: number;
+};
 
 /** What one network gets: its caption, its media, and the post's link. */
 export type Draft = {
@@ -138,7 +147,7 @@ export async function sha256Hex(text: string) {
 }
 
 /** The media a network gets: items without `networks`, or naming it. */
-export function mediaFor(media: MediaItem[], network: Network) {
+export function mediaFor<T extends { networks?: readonly string[] }>(media: T[], network: Network): T[] {
   return media.filter((m) => !m.networks || m.networks.length === 0 || m.networks.includes(network));
 }
 
@@ -222,19 +231,66 @@ export const STORY_RATIO = 9 / 16;
 const STORY_RATIO_TOLERANCE = 0.02;
 
 /**
- * Why a story can't go out with these media, or null. A story is exactly one
- * image or video at 9:16; a size we don't know (no media row) is left to Meta.
+ * A story video runs 3 to 60 seconds: the IG User Media reference (STORIES
+ * video: "60 seconds maximum, 3 seconds minimum") and the Page Stories API
+ * ("A video story can not exceed 60 seconds").
  */
-export function storyProblem(media: Pick<MediaItem, "kind" | "url" | "width" | "height">[]) {
+export const STORY_VIDEO_MIN_SEC = 3;
+export const STORY_VIDEO_MAX_SEC = 60;
+
+/** Why a video of this length can't be a story, or null (also when the length is unknown). */
+export function storyVideoProblem(durationSec: number | null | undefined, what = "This video") {
+  if (durationSec === null || durationSec === undefined || !Number.isFinite(durationSec) || durationSec <= 0) return null;
+  if (durationSec >= STORY_VIDEO_MIN_SEC && durationSec <= STORY_VIDEO_MAX_SEC) return null;
+  return `A story video runs ${STORY_VIDEO_MIN_SEC} to ${STORY_VIDEO_MAX_SEC} seconds on Instagram and Facebook, and ${what} is ${durationSec.toFixed(1)} s. Post it as a reel instead, or make it ${durationSec > STORY_VIDEO_MAX_SEC ? "shorter" : "longer"}.`;
+}
+
+/**
+ * Why a story can't go out with these media, or null. A story is exactly one
+ * image or video at 9:16, a video 3 to 60 seconds long; a size or length we
+ * don't know (no media row) is left to Meta.
+ */
+export function storyProblem(media: Pick<MediaItem, "kind" | "url" | "width" | "height" | "durationSec">[]) {
   if (media.length !== 1) {
     return `A story is exactly one image or video (this one has ${media.length}). Attach one 9:16 story graphic or reel.`;
   }
-  const { width, height, url } = media[0];
-  if (!width || !height) return null;
-  if (Math.abs(width / height - STORY_RATIO) > STORY_RATIO_TOLERANCE) {
+  const { width, height, url, kind, durationSec } = media[0];
+  if (width && height && Math.abs(width / height - STORY_RATIO) > STORY_RATIO_TOLERANCE) {
     return `A story must be 9:16 (1080x1920), and ${url} is ${width}x${height}. Render it in the story format.`;
   }
+  if (kind === "video") return storyVideoProblem(durationSec, url);
   return null;
+}
+
+/**
+ * Whether a network can never take this post as it stands, so publish.begin
+ * skips it on every run: a story on a network without stories (Threads,
+ * LinkedIn), a story none of whose media is for the network, or an Instagram
+ * post with no media for Instagram. Such a network never becomes sent, and
+ * a retry can't change that (a sent post's media can't be edited). Media
+ * not known (undefined) leaves only the stories rule.
+ */
+export function cannotPublish(network: Network, placement: string | null | undefined, media: { networks?: readonly string[] }[] | undefined) {
+  if (placement === "story" && NO_STORIES[network]) return true;
+  if (!media) return false;
+  const own = mediaFor(media, network).length;
+  if (placement === "story") return own === 0;
+  return network === "instagram" && own === 0;
+}
+
+/**
+ * The networks a retry would still publish: a caption, not sent yet, and
+ * able to take the post (cannotPublish). Shared by social.retryPost and the
+ * Retry buttons (lib/socialPublishState.ts).
+ */
+export function retryableNetworks(post: {
+  captions?: Partial<Record<Network, string | undefined>> | null;
+  placement?: string | null;
+  media?: { networks?: readonly string[] }[];
+  results?: { network: string; status: string }[] | null;
+}): Network[] {
+  const sent = new Set((post.results ?? []).filter((r) => r.status === "sent").map((r) => r.network));
+  return NETWORKS.filter((n) => !!post.captions?.[n]?.trim() && !sent.has(n) && !cannotPublish(n, post.placement, post.media));
 }
 
 type Json = Record<string, unknown>;

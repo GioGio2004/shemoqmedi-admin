@@ -4,7 +4,7 @@ import type { ActionCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { requireAdmin } from "./authHelpers";
-import { mediaRow, mediaUrl } from "./lib/media";
+import { cleanDuration, mediaRow, mediaUrl } from "./lib/media";
 import { R2_SOCIAL_KEY, deleteObject, headObject, presignPut, r2Configured, r2PublicUrl } from "./lib/r2";
 import {
   MAX_REEL_BYTES,
@@ -287,11 +287,17 @@ export const reelUploadUrl = action({
   },
 });
 
-/** Admin page: record an uploaded reel as a media row; returns its id and public URL. */
+/** Admin page: record an uploaded reel as a media row (size and length, for the story check); returns its id and public URL. */
 export const registerReel = mutation({
-  args: { key: v.string(), size: v.number(), width: v.optional(v.number()), height: v.optional(v.number()) },
+  args: {
+    key: v.string(),
+    size: v.number(),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+    durationSec: v.optional(v.number()),
+  },
   returns: v.object({ mediaId: v.id("media"), url: v.string() }),
-  handler: async (ctx, { key, size, width, height }) => {
+  handler: async (ctx, { key, size, width, height, durationSec }) => {
     const user = await requireAdmin(ctx);
     if (!R2_SOCIAL_KEY.test(key) || !key.endsWith(".mp4")) throw new ConvexError("That is not a reel upload.");
     if (!(size > 0) || size > MAX_REEL_BYTES) throw new ConvexError("The reel must be an MP4 of 100 MB or less.");
@@ -312,6 +318,7 @@ export const registerReel = mutation({
       size,
       width,
       height,
+      durationSec: cleanDuration(durationSec),
       uploadedBy: user._id,
       createdAt: Date.now(),
     });

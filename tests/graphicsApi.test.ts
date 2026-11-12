@@ -235,7 +235,7 @@ describe("routes", () => {
     expect((await graphicGET(req("/api/graphics?template=award&style=brutal", KEY))).status).toBe(400);
   });
 
-  it("assets: palette, glass layers and the screenshot, cached by the browser", async () => {
+  it("assets: palette and glass layers (not the screenshot), cached by the browser", async () => {
     const jpeg = await sharp({ create: { width: 1600, height: 900, channels: 3, background: "#D0202A" } }).jpeg().toBuffer();
     const fetched: string[] = [];
     vi.stubGlobal(
@@ -249,13 +249,15 @@ describe("routes", () => {
     const res = await assetsGET(req(`/api/graphics/assets?shot=${encodeURIComponent(shot)}&palette=auto&glass=frost&format=square`, KEY));
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toBe("private, max-age=600");
-    const body = (await res.json()) as { palette: { base: string }; light: boolean; back: string; frost: string; shot: string };
+    const body = (await res.json()) as { palette: { base: string }; light: boolean; back: string; frost: string; shot?: string };
     expect(body.palette.base).toMatch(/^#[0-9A-F]{6}$/);
     expect(typeof body.light).toBe("boolean");
     expect(body.back).toMatch(/^data:image\/jpeg;base64,/);
     expect(body.frost).toMatch(/^data:image\/jpeg;base64,/);
-    // A 1600 px JPEG is drawn as delivered: no re-encode.
-    expect(body.shot).toBe(`data:image/jpeg;base64,${jpeg.toString("base64")}`);
+    // The screenshot is the same for every palette: the browser loads it once by URL
+    // (previewShotUrl), so no palette's answer carries it again.
+    expect(body).not.toHaveProperty("shot");
+    expect(JSON.stringify(body)).not.toContain(jpeg.toString("base64").slice(0, 200));
     // ImageKit was asked for a 1600 px JPEG, not the stored WebP.
     expect(fetched).toHaveLength(1);
     expect(new URL(fetched[0]).searchParams.get("tr")).toBe("w-1600,f-jpg");

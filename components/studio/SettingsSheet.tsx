@@ -2,23 +2,31 @@
 
 import { useClerk, useUser } from "@clerk/nextjs";
 import { useState } from "react";
-import { showError } from "@/components/admin/Alerts";
 import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 import { ArrowIcon } from "./icons";
 import { PushSwitch } from "./PushSwitch";
-import { Sheet } from "./ui";
+import { Sheet, SheetError } from "./ui";
 
 /** Settings: notifications on this device, installing the app, the admin, signing out. */
 export function SettingsSheet({ open, onClose, adminOrigin }: { open: boolean; onClose: () => void; adminOrigin: string }) {
   const { signOut } = useClerk();
   const { user } = useUser();
   const [leaving, setLeaving] = useState(false);
+  // Shown in the sheet: the app's alerts sit under the open dialog's backdrop (inert, dimmed).
+  const [error, setError] = useState<unknown>(null);
 
   return (
-    <Sheet open={open} onClose={onClose} title="Settings">
+    <Sheet
+      open={open}
+      onClose={() => {
+        setError(null);
+        onClose();
+      }}
+      title="Settings"
+    >
       <section className="st-stack">
         <p className="st-eyebrow">This device</p>
-        <PushSwitch />
+        <PushSwitch inline />
         <InstallPrompt />
         <p className="st-note">
           Installed from the Home Screen, the Studio opens full screen and gets notifications. Already installed? You are using it now.
@@ -28,6 +36,7 @@ export function SettingsSheet({ open, onClose, adminOrigin }: { open: boolean; o
       <section className="st-stack">
         <p className="st-eyebrow">Account</p>
         {user?.primaryEmailAddress && <p className="st-note">Signed in as <strong>{user.primaryEmailAddress.emailAddress}</strong></p>}
+        <SheetError error={error} />
         <div className="st-sheet-foot">
           <a className="st-btn st-btn-ghost" href={`${adminOrigin}/dashboard`} target="_blank" rel="noopener noreferrer">
             Admin <ArrowIcon size={16} />
@@ -39,10 +48,11 @@ export function SettingsSheet({ open, onClose, adminOrigin }: { open: boolean; o
             disabled={leaving}
             onClick={async () => {
               setLeaving(true);
+              setError(null);
               try {
                 await signOut({ redirectUrl: "/sign-in" });
               } catch (err) {
-                showError(err);
+                setError(err);
                 setLeaving(false);
               }
             }}

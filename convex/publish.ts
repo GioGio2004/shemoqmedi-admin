@@ -198,11 +198,15 @@ export function postLink(id: Id<"socialPosts">) {
   return studioPostUrl(id);
 }
 
-/** The post's status from its results; releases the lease. Pushes sent / failed to the admins. */
+/**
+ * The post's status from its results; releases the lease. Pushes sent /
+ * failed to the admins (not again for a run that tried nothing new).
+ */
 export const finish = internalMutation({
-  args: { postId: v.id("socialPosts") },
+  // attempted: how many networks this run tried (absent: unknown, treated as some).
+  args: { postId: v.id("socialPosts"), attempted: v.optional(v.number()) },
   returns: v.union(v.literal("sent"), v.literal("failed"), v.literal("approved"), v.null()),
-  handler: async (ctx, { postId }) => {
+  handler: async (ctx, { postId, attempted }) => {
     const post = await ctx.db.get(postId);
     if (!post) return null;
     const now = Date.now();
@@ -226,6 +230,12 @@ export const finish = internalMutation({
       return "failed";
     }
     if (sent.length > 0) {
+      // A run that tried nothing on a post that already went out (every network it can reach was sent
+      // before) changes nothing: it keeps its sentAt and pushes no second "Published".
+      if (attempted === 0 && post.sentAt !== undefined) {
+        await ctx.db.patch(postId, { ...base, status: "sent", error: undefined });
+        return "sent";
+      }
       await ctx.db.patch(postId, { ...base, status: "sent", sentAt: now, error: undefined });
       await pushAdmins(ctx, {
         title: `Published: ${await postLabel(ctx, post)}`,
@@ -292,7 +302,7 @@ export const post = internalAction({
         }
       }),
     );
-    return await ctx.runMutation(internal.publish.finish, { postId });
+    return await ctx.runMutation(internal.publish.finish, { postId, attempted: claim.jobs.length });
   },
 });
 

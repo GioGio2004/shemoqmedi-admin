@@ -182,12 +182,14 @@ export default defineSchema({
     size: v.number(),
     width: v.optional(v.number()),
     height: v.optional(v.number()),
+    // Videos: length in seconds, as the browser measured it (a story video is 3 to 60 s).
+    durationSec: v.optional(v.number()),
     uploadedBy: v.optional(v.id("users")), // empty for server-side uploads (importer, migration)
     invalid: v.optional(v.boolean()), // failed the server-side check; not shown
     createdAt: v.number(),
   })
     .index("by_fileId", ["fileId"])
-    // Image sizes by URL, for Instagram's aspect-ratio rule (social.withSizes).
+    // Sizes (and video lengths) by URL, for Instagram's aspect-ratio rule and stories (social.withSizes).
     .index("by_url", ["url"]),
 
   // Created and kept in sync by the Clerk webhook (http.ts → users.upsertFromClerk).

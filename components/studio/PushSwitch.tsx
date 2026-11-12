@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { showAlert, showError } from "@/components/admin/Alerts";
+import { errorMessage } from "@/components/admin/format";
 import type { PushState } from "@/components/pwa/usePush";
 import { useStudioPush } from "./StudioShell";
 import { Skel, Switch } from "./ui";
@@ -27,11 +28,27 @@ export const PUSH_WORD: Record<PushState, string> = {
   on: "On",
 };
 
-/** Notifications on this device (the app's one usePush), with a test once it's on. */
-export function PushSwitch({ withTest = true }: { withTest?: boolean }) {
+type Outcome = { text: string; tone: "error" | "success" };
+
+/** What "Send a test" says, from push.test's answer. */
+export function testOutcome(result: { configured: boolean; sent: number }): Outcome {
+  if (!result.configured) return { text: "Push isn't set up on the server yet (the VAPID keys are missing on Convex).", tone: "error" };
+  if (result.sent === 0) return { text: "No device took the test. Turn notifications off and on again.", tone: "error" };
+  return { text: `Test sent to ${result.sent} device${result.sent === 1 ? "" : "s"}.`, tone: "success" };
+}
+
+/**
+ * Notifications on this device (the app's one usePush), with a test once
+ * it's on. `inline`: inside a sheet (a modal <dialog> in the top layer), where
+ * the app's alerts would sit dimmed and inert under the backdrop, so the
+ * outcome shows in the sheet itself and stays until the next action.
+ */
+export function PushSwitch({ withTest = true, inline = false }: { withTest?: boolean; inline?: boolean }) {
   const push = useStudioPush();
   const sendTest = useAction(api.push.test);
   const [testing, setTesting] = useState(false);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const report = (next: Outcome) => (inline ? setOutcome(next) : showAlert(next.text, next.tone));
 
   if (!push || push.state === "loading") return <Skel style={{ height: 52 }} />;
   const blocked = BLOCKED[push.state];
@@ -39,22 +56,23 @@ export function PushSwitch({ withTest = true }: { withTest?: boolean }) {
 
   const on = push.state === "on";
   async function toggle(next: boolean) {
+    setOutcome(null);
     try {
       if (next) await push!.enable();
       else await push!.disable();
     } catch (err) {
-      showError(err);
+      if (inline) setOutcome({ text: errorMessage(err), tone: "error" });
+      else showError(err);
     }
   }
   async function test() {
     setTesting(true);
+    setOutcome(null);
     try {
-      const result = await sendTest({});
-      if (!result.configured) showAlert("Push isn't set up on the server yet (the VAPID keys are missing on Convex).");
-      else if (result.sent === 0) showAlert("No device took the test. Turn notifications off and on again.");
-      else showAlert(`Test sent to ${result.sent} device${result.sent === 1 ? "" : "s"}.`, "success");
+      report(testOutcome(await sendTest({})));
     } catch (err) {
-      showError(err);
+      if (inline) setOutcome({ text: errorMessage(err), tone: "error" });
+      else showError(err);
     } finally {
       setTesting(false);
     }
@@ -66,6 +84,11 @@ export function PushSwitch({ withTest = true }: { withTest?: boolean }) {
         <button type="button" className="st-btn st-btn-ghost st-btn-sm" onClick={test} disabled={testing} data-busy={testing}>
           Send a test
         </button>
+      )}
+      {outcome && (
+        <p className="st-callout" data-tone={outcome.tone === "success" ? "blue" : undefined} role={outcome.tone === "error" ? "alert" : "status"}>
+          {outcome.text}
+        </p>
       )}
     </div>
   );

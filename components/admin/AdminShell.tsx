@@ -219,8 +219,22 @@ function MobileTabBar({
   const tab = (href: string) => (isCurrent(pathname, href) ? "page" : undefined);
   const studio = useStudioOrigin();
 
+  // The page under the open sheet doesn't scroll (globals.css .admin-sheet-open).
+  useEffect(() => {
+    if (!open) return;
+    const root = document.documentElement;
+    root.classList.add("admin-sheet-open");
+    return () => root.classList.remove("admin-sheet-open");
+  }, [open]);
+
   return (
     <div ref={wrap} className="admin-tabbar-wrap">
+      {open && (
+        // A real layer over the page: a tap on the dimmed area lands here and only closes the
+        // sheet, never reaching the link or button underneath. Inside `wrap`, so the
+        // outside-press listener leaves it alone.
+        <div className="admin-sheet-backdrop" aria-hidden="true" onClick={() => setOpen(false)} />
+      )}
       {open && (
         <div id="admin-more-sheet" className="admin-sheet" role="dialog" aria-label="All sections">
           <p className="admin-eyebrow">All sections</p>

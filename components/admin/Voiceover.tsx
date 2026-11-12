@@ -96,7 +96,7 @@ export function Voiceover() {
       setStage({ label: `Uploading ${mb(reel.blob.size)}…` });
       const { uploadUrl, key } = await reelUploadUrl({ listingId: listing.id, size: reel.blob.size });
       await uploadReel(reel.blob, uploadUrl);
-      const { url } = await registerReel({ key, size: reel.blob.size, width: reel.width, height: reel.height });
+      const { url } = await registerReel({ key, size: reel.blob.size, width: reel.width, height: reel.height, durationSec: reel.durationSec });
       setDone({ url, durationSec: reel.durationSec, heldSec: reel.heldSec, size: reel.blob.size });
       showAlert("Reel uploaded.", "success");
     } catch (err) {

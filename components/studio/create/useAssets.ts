@@ -6,7 +6,8 @@ import type { PreviewAssets } from "@/lib/graphics/preview";
 // Preview assets (GET /api/graphics/assets) by URL, fetched once per
 // screenshot + palette + glass + format and shared by every preview on the
 // page (the big one, the palette strip, the style cards). Typing never
-// refetches: text isn't part of the URL.
+// refetches: text isn't part of the URL. A copy that only reads the cache
+// (fetch: false) shows what is already here and asks for nothing.
 
 const MAX = 48;
 const cache = new Map<string, PreviewAssets | null>();
@@ -38,15 +39,15 @@ function load(url: string) {
     });
 }
 
-/** The assets for `url` (null while loading, or when the preview needs none). */
-export function useAssets(url: string | null): PreviewAssets | null {
+/** The assets for `url` (null while loading, or when the preview needs none). `fetch: false` reads only what is cached. */
+export function useAssets(url: string | null, { fetch: allowFetch = true }: { fetch?: boolean } = {}): PreviewAssets | null {
   const value = useSyncExternalStore(
     subscribe,
     () => (url ? (cache.get(url) ?? null) : null),
     () => null,
   );
   useEffect(() => {
-    if (url) load(url);
-  }, [url]);
+    if (url && allowFetch) load(url);
+  }, [url, allowFetch]);
   return value;
 }

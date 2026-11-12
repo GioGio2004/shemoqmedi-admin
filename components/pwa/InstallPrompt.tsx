@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { isIos, isStandalone } from "./browser";
-
-/** Chrome's install event (not in the DOM typings: it is Chromium-only). */
-type InstallEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
+import { installOffer } from "./installEvent";
 
 type Platform = "server" | "installed" | "ios" | "other";
 
@@ -20,25 +18,12 @@ const noSubscribe = () => () => {};
  * Install this app: Chrome and Edge get an "Install app" button (their own
  * prompt); iPhone and iPad, which have no prompt, get the Share → "Add to
  * Home Screen" steps, needed there for notifications. Nothing once installed.
+ * Chrome's offer is caught at page load (installEvent.ts), so a button that
+ * mounts later (a sheet, a page reached by a link) still has it.
  */
 export function InstallPrompt() {
   const where = useSyncExternalStore<Platform>(noSubscribe, platform, () => "server");
-  const [deferred, setDeferred] = useState<InstallEvent | null>(null);
-
-  useEffect(() => {
-    const onPrompt = (event: Event) => {
-      // Keep Chrome's mini-infobar from showing; our button opens the prompt.
-      event.preventDefault();
-      setDeferred(event as InstallEvent);
-    };
-    const onInstalled = () => setDeferred(null);
-    window.addEventListener("beforeinstallprompt", onPrompt);
-    window.addEventListener("appinstalled", onInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onPrompt);
-      window.removeEventListener("appinstalled", onInstalled);
-    };
-  }, []);
+  const deferred = useSyncExternalStore(installOffer.subscribe, installOffer.get, () => null);
 
   if (where === "server" || where === "installed") return null;
 
@@ -62,12 +47,8 @@ export function InstallPrompt() {
   }
 
   if (!deferred) return null;
-  const install = async () => {
-    await deferred.prompt();
-    await deferred.userChoice;
-    // The event can be used once; Chrome fires a new one if it's still installable.
-    setDeferred(null);
-  };
+  // The event can be used once; Chrome fires a new one if it's still installable.
+  const install = () => void installOffer.prompt();
   return (
     <div className="pwa-install">
       <p className="pwa-install-title">Install the app</p>

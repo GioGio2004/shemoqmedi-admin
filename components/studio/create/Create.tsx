@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -33,6 +33,7 @@ import {
   type Source,
 } from "@/lib/studio/create";
 import { draftCaptions, storyCaption, type DraftFacts } from "@/lib/studio/drafts";
+import { createDraftStore } from "@/lib/studio/persist";
 import { formatTbilisi } from "@/lib/studio/time";
 import { CaptionEditor, StoryNetworks } from "../CaptionEditor";
 import { useMedia } from "../hooks";
@@ -46,12 +47,56 @@ import { ShotPicker, TextField } from "./TextFields";
 // Create: one screen, top to bottom. Source → style → output → the live
 // preview with every palette beside it and the text → Render final (the
 // exact JPEGs from the server) → captions → publish, schedule or keep as a
-// draft. Nothing is sent to the server while designing.
+// draft. Nothing is sent to the server while designing. The work so far is
+// kept on this device (lib/studio/persist.ts) until it becomes a post, so
+// leaving Create, a reload or iOS discarding the app loses nothing.
 
 /** Fields that come from the chosen listing (a new pick replaces any typed over them). */
 const LISTING_KEYS = ["title", "studio", "tagline", "url", "site", "quote", "score"];
 
 type Edits = Partial<Record<TemplateId, Fields>>;
+
+/** Everything chosen, typed and rendered on this page, as kept between visits. */
+type CreateDraft = {
+  source: Source;
+  output: Output;
+  template: TemplateId;
+  format: FormatId;
+  style: Style;
+  palette: PaletteChoice;
+  glass: GlassId;
+  edits: Edits;
+  carouselEdits: Fields;
+  listingId: Id<"listings"> | null;
+  award: AwardRow | null;
+  shot: string | null;
+  rendered: Rendered | null;
+  captions: Captions | null;
+  storyCaps: Captions | null;
+};
+
+/** One kept draft per way into Create (?output=story starts its own). */
+const createDrafts = createDraftStore<CreateDraft>("create");
+
+function freshDraft(output: Output): CreateDraft {
+  return {
+    source: "listing",
+    output,
+    template: DEFAULT_TEMPLATE.listing,
+    format: "ig_portrait",
+    style: "swiss",
+    palette: "house",
+    glass: "frost",
+    edits: {},
+    carouselEdits: {},
+    listingId: null,
+    award: null,
+    shot: null,
+    rendered: null,
+    captions: null,
+    storyCaps: null,
+  };
+}
 
 function Step({ n, title, aside, children }: { n: string; title: string; aside?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -72,24 +117,55 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
   const router = useRouter();
   const wide = useMedia("(min-width: 1000px)");
 
-  const [source, setSource] = useState<Source>("listing");
-  const [output, setOutput] = useState<Output>(initialOutput);
-  const [template, setTemplate] = useState<TemplateId>(DEFAULT_TEMPLATE.listing);
-  const [format, setFormat] = useState<FormatId>("ig_portrait");
-  const [style, setStyle] = useState<Style>("swiss");
-  const [palette, setPalette] = useState<PaletteChoice>("house");
-  const [glass, setGlass] = useState<GlassId>("frost");
-  const [edits, setEdits] = useState<Edits>({});
-  const [carouselEdits, setCarouselEdits] = useState<Fields>({});
-  const [listingId, setListingId] = useState<Id<"listings"> | null>(null);
-  const [award, setAward] = useState<AwardRow | null>(null);
-  const [shot, setShot] = useState<string | null>(null);
-  const [rendered, setRendered] = useState<Rendered | null>(null);
+  // Where the last visit left off (the page mounts after the admin gate, so this is read on the client only).
+  const [kept] = useState(() => createDrafts.get(initialOutput));
+  const [restored, setRestored] = useState(kept !== null);
+  const start = { ...freshDraft(initialOutput), ...kept };
+  const [source, setSource] = useState<Source>(start.source);
+  const [output, setOutput] = useState<Output>(start.output);
+  const [template, setTemplate] = useState<TemplateId>(start.template);
+  const [format, setFormat] = useState<FormatId>(start.format);
+  const [style, setStyle] = useState<Style>(start.style);
+  const [palette, setPalette] = useState<PaletteChoice>(start.palette);
+  const [glass, setGlass] = useState<GlassId>(start.glass);
+  const [edits, setEdits] = useState<Edits>(start.edits);
+  const [carouselEdits, setCarouselEdits] = useState<Fields>(start.carouselEdits);
+  const [listingId, setListingId] = useState<Id<"listings"> | null>(start.listingId);
+  const [award, setAward] = useState<AwardRow | null>(start.award);
+  const [shot, setShot] = useState<string | null>(start.shot);
+  const [rendered, setRendered] = useState<Rendered | null>(start.rendered);
   const [rendering, setRendering] = useState<number | null>(null);
-  const [captions, setCaptions] = useState<Captions | null>(null);
-  const [storyCaps, setStoryCaps] = useState<Captions | null>(null);
+  const [captions, setCaptions] = useState<Captions | null>(start.captions);
+  const [storyCaps, setStoryCaps] = useState<Captions | null>(start.storyCaps);
   const [sheet, setSheet] = useState<"publish" | "schedule" | null>(null);
   const [saving, setSaving] = useState<"now" | "schedule" | "draft" | null>(null);
+
+  // Kept on this device as it changes, until it becomes a post (finish clears it).
+  const finished = useRef(false);
+  const snapshot = JSON.stringify({ source, output, template, format, style, palette, glass, edits, carouselEdits, listingId, award, shot, rendered, captions, storyCaps } satisfies CreateDraft);
+  useEffect(() => {
+    if (!finished.current) createDrafts.set(initialOutput, JSON.parse(snapshot) as CreateDraft);
+  }, [initialOutput, snapshot]);
+
+  function startOver() {
+    const d = freshDraft(initialOutput);
+    setSource(d.source);
+    setOutput(d.output);
+    setTemplate(d.template);
+    setFormat(d.format);
+    setStyle(d.style);
+    setPalette(d.palette);
+    setGlass(d.glass);
+    setEdits(d.edits);
+    setCarouselEdits(d.carouselEdits);
+    setListingId(d.listingId);
+    setAward(d.award);
+    setShot(d.shot);
+    setRendered(d.rendered);
+    setCaptions(d.captions);
+    setStoryCaps(d.storyCaps);
+    setRestored(false);
+  }
 
   const detail = useQuery(api.listings.reviewDetail, listingId ? { id: listingId } : "skip");
   const renderForPost = useAction(api.graphics.renderForPost);
@@ -227,6 +303,9 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
         placement: story ? "story" : "feed",
       });
       id = post.id;
+      // It is a post now: the queue holds it, so the kept draft goes.
+      finished.current = true;
+      createDrafts.set(initialOutput, null);
       if (mode !== "draft") await publishPost({ id, at });
       showAlert(mode === "draft" ? "Saved to the queue." : mode === "now" ? "Publishing." : `Scheduled for ${formatTbilisi(at!)}.`, "success");
       router.push(`/queue?${mode === "schedule" ? "status=scheduled&" : mode === "draft" ? "" : "status=all&"}post=${id}`);
@@ -389,6 +468,14 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
     <>
       <style>{previewFontFaces}</style>
       <PageHead index="03" section="Create" title="Create." />
+      {restored && (
+        <div className="st-callout" data-tone="blue" style={{ marginBottom: 16 }}>
+          <span style={{ flex: 1 }}>Picked up where you left off.</span>
+          <button type="button" className="st-btn st-btn-quiet st-btn-sm" onClick={startOver} disabled={saving !== null || rendering !== null}>
+            Start over
+          </button>
+        </div>
+      )}
       {wide ? (
         <div className="st-create">
           <div>{steps}</div>

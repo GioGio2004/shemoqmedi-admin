@@ -4,6 +4,7 @@
 // rules are unit tested (tests/studioHelpers.test.ts).
 
 import { FORMATS, STYLES, TEMPLATES, TEMPLATE_IDS, type FormatId, type Style, type TemplateId } from "@/lib/graphics/spec";
+import { deliveryUrl } from "@/lib/graphics/delivery";
 import { PALETTE_IDS } from "@/lib/palettes";
 import type { DraftSource } from "./drafts";
 
@@ -96,14 +97,42 @@ export function needsAssets(style: Style, palette: string) {
   return style === "glass" || palette === "auto";
 }
 
-/** GET /api/graphics/assets for one preview, or null when it needs none. */
+/**
+ * GET /api/graphics/assets for one preview (palette colours and glass
+ * layers; never the screenshot itself), or null when it needs none.
+ */
 export function assetsUrl(o: { style: Style; palette: string; glass: GlassId; format: FormatId; shot: string | null }) {
   if (!needsAssets(o.style, o.palette)) return null;
   // "auto" without a screenshot has nothing to pick colours from (the preview falls back), and flat styles need nothing else.
   if (o.style !== "glass" && !o.shot) return null;
-  const q = new URLSearchParams({ palette: o.palette, glass: o.glass, format: o.format });
+  // A flat style's "auto" only needs the colours: one answer whatever glass variant was last picked.
+  const q = new URLSearchParams({ palette: o.palette, glass: o.style === "glass" ? o.glass : "frost", format: o.format });
   if (o.shot) q.set("shot", o.shot);
   return `/api/graphics/assets?${q.toString()}`;
+}
+
+/**
+ * Whether a small copy of the design (the palette strip) may fetch its own
+ * assets. Not for glass: that would be one server backdrop build per palette
+ * at every change of glass, format or screenshot; the strip shows the blurred
+ * stand-in, or the real glass once that palette has been previewed (cached).
+ */
+export function miniFetchesAssets(o: { style: Style }) {
+  return o.style !== "glass";
+}
+
+/**
+ * The screenshot as the preview draws it: for ImageKit, the 1600 px JPEG the
+ * server's render fetches (lib/graphics/delivery.ts), loaded once by the
+ * browser and shared by every palette and style.
+ */
+export function previewShotUrl(shot: string | null) {
+  if (!shot) return null;
+  try {
+    return deliveryUrl(shot).toString();
+  } catch {
+    return shot;
+  }
 }
 
 /** The carousel's own text (the rest comes from the listing). */

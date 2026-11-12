@@ -12,6 +12,7 @@ import type { Id } from "../convex/_generated/dataModel";
 import { mintServiceCredential } from "../convex/lib/tokens";
 import { escapeLittle, instagramImageUrl, jpegUrl, publishFacebook, publishThreads, sha256Hex, threadsLength } from "../convex/lib/socialApi";
 import { publishState } from "../lib/socialPublishState";
+import { postActions } from "../lib/studio/queue";
 import { mapLimit } from "../convex/graphics";
 import { threadsRefreshDue } from "../convex/channels";
 import * as channelsModule from "../convex/channels";
@@ -969,5 +970,47 @@ describe("render_carousel runs slides side by side", () => {
     expect(peak).toBe(3);
     const route = readFileSync(new URL("../app/api/mcp/route.ts", import.meta.url), "utf8");
     expect(route).toMatch(/export const maxDuration = 300;/);
+  });
+});
+
+describe("a new schedule after a run that died", () => {
+  it("editing (MCP update_post) and publishing again clears the dead run's lease, so the post isn't shown as stalled", async () => {
+    fakeNetworks();
+    const env = await setup();
+    const id = await newPost(env, { facebook: "Crash" }, []);
+    await env.t.mutation(api.mcp.approvePost, { token: env.token, id });
+    // The run claimed the post, then died: the job is gone, the lease stays and runs out.
+    await env.t.run(async (ctx) => {
+      const post = (await ctx.db.get(id))!;
+      await ctx.scheduler.cancel(post.publishJobId!);
+      await ctx.db.patch(id, { publishingUntil: Date.now() + 9.5 * 60_000 });
+    });
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+    const token = (await mintServiceCredential("admin"))!; // the agent's credential lives a minute
+
+    // Fix the caption over MCP: back to waiting, without the old lease.
+    expect((await env.t.mutation(api.mcp.updatePost, { token, id, captions: { facebook: "Fixed" } })).status).toBe("waiting");
+    expect((await getPost(env, id))!.publishingUntil).toBeUndefined();
+
+    // Schedule it for tomorrow: a normal schedule (unschedule, move time, edit), not a stalled run.
+    const tomorrow = Date.now() + DAY;
+    await env.t.mutation(api.mcp.publishPost, { token, id, at: tomorrow });
+    const view = (await env.admin.query(api.social.queue, { status: "scheduled" })).find((p) => p.id === id)!;
+    expect(view.publishingUntil).toBeNull();
+    expect(publishState(view, Date.now())).toMatchObject({ publishing: false, stalled: false, canRetry: false });
+    expect(postActions(view, Date.now())).toMatchObject({ unschedule: true, schedule: true, edit: true, retry: false });
+    await expect(env.admin.mutation(api.social.retry, { id })).rejects.toThrow(/already scheduled/);
+  });
+
+  it("approving a waiting post that still carries an old lease clears it", async () => {
+    fakeNetworks();
+    const env = await setup();
+    const id = await newPost(env, { facebook: "Old lease" }, []);
+    // A row from before the fix: waiting, with a dead run's lease.
+    await env.t.run((ctx) => ctx.db.patch(id, { publishingUntil: Date.now() - 60_000 }));
+    await env.t.mutation(api.mcp.publishPost, { token: env.token, id, at: Date.now() + DAY });
+    const post = (await getPost(env, id))!;
+    expect(post.status).toBe("scheduled");
+    expect(post.publishingUntil).toBeUndefined();
   });
 });

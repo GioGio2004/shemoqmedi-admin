@@ -32,6 +32,7 @@ import {
   NETWORK_NAME,
   PlatformError,
   STORY_NETWORKS,
+  retryableNetworks,
   THREADS_MAX,
   instagramImageUrl,
   mediaFor,
@@ -488,18 +489,24 @@ export function isPublishing(post: Doc<"socialPosts">) {
 }
 
 /**
- * Media with the width and height of the files we uploaded (the media table):
- * images for Instagram's ratio rule, images and videos for a story's 9:16.
+ * Media with the width and height (and a video's length) of the files we
+ * uploaded (the media table): images for Instagram's ratio rule, images and
+ * videos for a story's 9:16, videos for a story's 3 to 60 seconds.
  */
 export async function withSizes(ctx: QueryCtx, media: MediaItem[]): Promise<MediaItem[]> {
   return await Promise.all(
     media.map(async (m) => {
-      if (m.width && m.height) return m;
+      if (m.width && m.height && (m.kind !== "video" || m.durationSec)) return m;
       const row = await ctx.db
         .query("media")
         .withIndex("by_url", (q) => q.eq("url", m.url))
         .first();
-      return row?.width && row.height ? { ...m, width: row.width, height: row.height } : m;
+      if (!row) return m;
+      return {
+        ...m,
+        ...(!(m.width && m.height) && row.width && row.height ? { width: row.width, height: row.height } : {}),
+        ...(m.kind === "video" && !m.durationSec && row.durationSec ? { durationSec: row.durationSec } : {}),
+      };
     }),
   );
 }
@@ -519,7 +526,7 @@ async function instagramMediaProblem(ctx: QueryCtx, post: Doc<"socialPosts">) {
   return null;
 }
 
-/** Why these media can't make a story (count, or a known size that isn't 9:16), or null. */
+/** Why these media can't make a story (count, a known size that isn't 9:16, a known video length outside 3-60 s), or null. */
 async function storyMediaProblem(ctx: QueryCtx, media: MediaItem[]) {
   return storyProblem(await withSizes(ctx, media));
 }
@@ -595,8 +602,9 @@ export async function editPost(
     // Absent means feed, so older rows and feed posts read the same.
     ...(edit.placement !== undefined ? { placement: edit.placement === "story" ? ("story" as const) : undefined } : {}),
     // Editing an approved, scheduled or failed post sends it back for another look.
+    // A run that died leaves its expired lease (publishingUntil): cleared too, or the next schedule would read as stalled.
     ...(backToWaiting
-      ? { status: "waiting" as const, approvedAt: undefined, approvedBy: undefined, publishJobId: undefined, error: undefined }
+      ? { status: "waiting" as const, approvedAt: undefined, approvedBy: undefined, publishJobId: undefined, publishingUntil: undefined, error: undefined }
       : {}),
     updatedAt: Date.now(),
   });
@@ -659,6 +667,8 @@ export async function approvePost(ctx: MutationCtx, id: Id<"socialPosts">, by: I
     approvedBy: by,
     publishJobId,
     publishRun,
+    // No lease from an earlier run that died: the new schedule must not read as stalled (retryPost, socialPublishState).
+    publishingUntil: undefined,
     // Older award rows keep their screenshot in `payload`: publishing reads `media`.
     ...(post.media ? {} : { media: postMedia(post) }),
     error: undefined,
@@ -692,8 +702,11 @@ export function isLegacyApproved(post: Doc<"socialPosts">) {
 /**
  * Publish a post again: only the networks that aren't sent yet (failed ones,
  * and ones skipped because no account was connected). For failed posts,
- * approved posts that found no account, sent posts with skipped networks, and
- * scheduled posts whose publish run died. A future publish time is kept.
+ * approved posts that found no account, sent posts with networks skipped for
+ * want of an account, and scheduled posts whose publish run died. Networks
+ * the post can never reach (a story's Threads and LinkedIn, a network with no
+ * media for it: socialApi.cannotPublish) don't count. A future publish time
+ * is kept.
  */
 export async function retryPost(ctx: MutationCtx, id: Id<"socialPosts">) {
   const post = await ctx.db.get(id);
@@ -709,8 +722,15 @@ export async function retryPost(ctx: MutationCtx, id: Id<"socialPosts">) {
       "This post was approved before publishing was connected: nothing was published from here, but it may have been posted by hand. To publish it now, edit it (it goes back to waiting) and approve it again.",
     );
   }
-  const sent = new Set((post.results ?? []).filter((r) => r.status === "sent").map((r) => r.network));
-  if (captionedNetworks(post).every((n) => sent.has(n))) fail("Every network of this post is already sent.");
+  // Networks a story never reaches (Threads, LinkedIn) or that have no media for them stay skipped on every run: not retried.
+  if (retryableNetworks({ ...post, media: postMedia(post) }).length === 0) {
+    const sent = new Set((post.results ?? []).filter((r) => r.status === "sent").map((r) => r.network));
+    fail(
+      captionedNetworks(post).every((n) => sent.has(n))
+        ? "Every network of this post is already sent."
+        : "Every network this post can go to is already sent; the others can't take it (a story goes to Instagram and Facebook only, and a network needs media meant for it).",
+    );
+  }
   const { publishJobId, publishRun } = await schedulePublish(ctx, post);
   await ctx.db.patch(id, {
     status: "scheduled",

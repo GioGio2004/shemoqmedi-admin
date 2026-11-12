@@ -3,6 +3,7 @@ import sharp from "sharp";
 import { STOREFRONT_URL } from "@/lib/storefront";
 import { alpha, type Palette } from "@/lib/palettes";
 import type { Gradient, PanelShape } from "./glass";
+import { deliveryUrl } from "./delivery";
 
 // Raster work for the social graphics, done with sharp before and after
 // satori (which can't blur, crop or read WebP):
@@ -70,27 +71,7 @@ async function download(url: URL): Promise<Buffer | null> {
   }
 }
 
-function isImageKit(url: URL) {
-  return url.hostname === "ik.imagekit.io" || url.hostname === hostOf(process.env.NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT);
-}
-
-/** Widest a screenshot is ever drawn (the carousel's browser window, at 1.2x). */
-export const FETCH_WIDTH = 1600;
-
-/**
- * ImageKit screenshots are stored as big WebPs. Asking for a 1600 px JPEG
- * instead is a smaller download, a faster decode, and a format satori draws
- * as it is. Only for screenshots: a badge or logo may be a transparent PNG,
- * which a JPEG would flatten onto a box. Images that already carry a
- * transform are left alone.
- */
-export function deliveryUrl(raw: string, screenshot = true) {
-  const url = new URL(raw);
-  if (screenshot && isImageKit(url) && !url.searchParams.has("tr") && !url.pathname.includes("/tr:")) {
-    url.searchParams.set("tr", `w-${FETCH_WIDTH},f-jpg`);
-  }
-  return url;
-}
+export { FETCH_WIDTH, deliveryUrl } from "./delivery";
 
 /**
  * An image's bytes, or null when it is missing, too big or not on our hosts.

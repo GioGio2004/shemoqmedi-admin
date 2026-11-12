@@ -37,6 +37,8 @@ export type RegisterVideoArgs = {
   size: number;
   width?: number;
   height?: number;
+  /** Seconds, as measured here (Convex keeps it for the story check: 3 to 60 s). */
+  durationSec?: number;
 };
 
 export type VideoUploadUrl = (args: {
@@ -56,10 +58,11 @@ const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
 export async function compressVideo(
   file: File,
   onProgress?: (fraction: number) => void,
-): Promise<{ blob: Blob; width?: number; height?: number }> {
+): Promise<{ blob: Blob; width?: number; height?: number; durationSec?: number }> {
+  let durationSec: number | undefined;
   const asIs = () => {
     if (file.size <= MAX_VIDEO_BYTES && (file.type === "video/mp4" || file.type === "video/webm")) {
-      return { blob: file as Blob };
+      return { blob: file as Blob, durationSec };
     }
     throw new UploadError(
       "This browser cannot compress videos. Use a recent Chrome, Edge or Safari, or pick a file of 15 MB or less.",
@@ -77,6 +80,7 @@ export async function compressVideo(
       throw new UploadError("This video could not be read. Export it again as an MP4 and retry.");
     }
     if (!track) throw new UploadError("This file has no video in it.");
+    durationSec = Number.isFinite(duration) && duration > 0 ? duration : undefined;
     if (duration > MAX_VIDEO_SECONDS + 0.5) {
       throw new UploadError(
         `The preview video must be ${MAX_VIDEO_SECONDS} seconds or shorter (this one is ${Math.round(duration)} s).`,
@@ -128,11 +132,11 @@ export async function compressVideo(
     if (!buffer) return asIs();
     const blob = new Blob([buffer], { type: "video/mp4" });
     // Already-tiny originals can beat our settings; keep the smaller one.
-    if (blob.size > file.size && file.type === "video/mp4" && file.size <= MAX_VIDEO_BYTES) return { blob: file };
+    if (blob.size > file.size && file.type === "video/mp4" && file.size <= MAX_VIDEO_BYTES) return { blob: file, durationSec };
     if (blob.size > MAX_VIDEO_BYTES) {
       throw new UploadError("This video is still over 15 MB after compression. Trim it and try again.");
     }
-    return { blob, width, height };
+    return { blob, width, height, durationSec };
   } finally {
     input.dispose();
   }
@@ -152,7 +156,7 @@ export async function uploadVideoToR2(
   onProgress?: (fraction: number) => void,
 ): Promise<RegisterVideoArgs> {
   if (file.size > MAX_VIDEO_INPUT_BYTES) throw new UploadError("Pick a video file of 500 MB or less.");
-  const { blob, width, height } = await compressVideo(file, onProgress);
+  const { blob, width, height, durationSec } = await compressVideo(file, onProgress);
   const contentType = blob.type || file.type;
   const { uploadUrl, key } = await getUploadUrl({
     site: seoSlug(site),
@@ -162,5 +166,5 @@ export async function uploadVideoToR2(
   });
   const res = await fetch(uploadUrl, { method: "PUT", body: blob, headers: { "Content-Type": contentType } });
   if (!res.ok) throw new UploadError(`Video upload failed (HTTP ${res.status}). Please try again.`);
-  return { key, contentType, size: blob.size, width, height };
+  return { key, contentType, size: blob.size, width, height, durationSec };
 }

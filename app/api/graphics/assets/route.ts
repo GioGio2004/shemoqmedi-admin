@@ -12,7 +12,10 @@ import { PALETTE_CHOICES, authorized, bad, parseGlass } from "@/lib/graphics/ser
 //   light    glass: the backdrop is light (dark text, milkier panels)
 //   back     glass backdrop for the format (a small JPEG data: URI; it is
 //   frost    blurred, so the browser can stretch it)
-//   shot     the screenshot as a data: URI ("" without one)
+//
+// Not the screenshot itself: it is the same for every palette, so the
+// browser loads it once by URL (lib/studio/create.ts previewShotUrl), and a
+// palette strip doesn't download it once per palette.
 //
 // Built once per input and kept in memory (render.ts), and cached by the
 // browser for ten minutes, so typing into the preview never asks again.

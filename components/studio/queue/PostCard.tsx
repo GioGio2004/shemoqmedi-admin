@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
 import { showAlert, showError } from "@/components/admin/Alerts";
 import { NETWORK_LABEL, captionedNetworks, captionsDiffer, captionsFit, captionsForSave, type Captions, type Network } from "@/lib/studio/captions";
-import { KIND_LABEL, STATUS_LABEL, postActions } from "@/lib/studio/queue";
+import { KIND_LABEL, STATUS_LABEL, captionDrafts, postActions, staleCaptionDraft } from "@/lib/studio/queue";
 import { formatTbilisi, relativeTime } from "@/lib/studio/time";
 import { CaptionEditor, StoryNetworks } from "../CaptionEditor";
+import { useDraft } from "../hooks";
 import { ArrowIcon } from "../icons";
 import { RejectSheet, TimeSheet } from "../TimeSheet";
 import { ConfirmSheet } from "../ui";
@@ -33,7 +34,15 @@ export function PostCard({ post, now, pinned, onClosePin }: { post: Post; now: n
   const reject = useMutation(api.social.reject).withOptimisticUpdate((store, { id }) => dropFromQueues(store, id, ["all", "rejected"]));
   const retry = useMutation(api.social.retry).withOptimisticUpdate((store, { id }) => dropFromQueues(store, id, ["all", "scheduled", "sent"]));
 
-  const [draft, setDraft] = useState<Captions | null>(null);
+  // Unsaved caption edits live outside the card (lib/studio/queue.ts captionDrafts): a tab switch, closing a
+  // pinned post or the post moving tabs remounts the card, and the edits are still there.
+  const kept = useDraft(captionDrafts, post.id);
+  const setDraft = (next: Captions | null) => captionDrafts.set(post.id, next);
+  const stale = staleCaptionDraft(kept, post);
+  const draft = stale ? null : kept;
+  useEffect(() => {
+    if (stale) captionDrafts.set(post.id, null);
+  }, [stale, post.id]);
   const [sheet, setSheet] = useState<"publish" | "schedule" | "reject" | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -89,7 +98,7 @@ export function PostCard({ post, now, pinned, onClosePin }: { post: Post; now: n
             </span>
           )}
           {pinned && onClosePin && (
-            <button type="button" className="st-icon-btn" aria-label="Close this post" onClick={onClosePin} style={{ width: 36, height: 36 }}>
+            <button type="button" className="st-icon-btn" aria-label="Close this post" onClick={onClosePin}>
               ×
             </button>
           )}

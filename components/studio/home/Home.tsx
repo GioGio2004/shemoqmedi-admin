@@ -204,9 +204,9 @@ function RecentTile({ now }: { now: number }) {
                     {p.sentAt ? ` · ${formatTbilisi(p.sentAt, now)}` : ""}
                   </span>
                 </Link>
-                <span className="st-row" style={{ gap: 4, flexWrap: "nowrap" }}>
+                <span className="st-badge-links">
                   {sentLinks(p).map((r) => (
-                    <a key={r.network} href={r.url} target="_blank" rel="noopener noreferrer" className="st-badge" aria-label={`View on ${NETWORK_LABEL[r.network as Network]}`}>
+                    <a key={r.network} href={r.url} target="_blank" rel="noopener noreferrer" className="st-badge st-badge-link" aria-label={`View on ${NETWORK_LABEL[r.network as Network]}`}>
                       {NETWORK_SHORT[r.network as Network]}
                     </a>
                   ))}

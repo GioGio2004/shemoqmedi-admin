@@ -6,7 +6,7 @@ import { internal } from "./_generated/api";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { LIMITS } from "./lib/taxonomy";
 import { assertMedia, fail, slugify } from "./lib/listingHelpers";
-import { deleteMedia, mediaUrl, vMediaId, type MediaId } from "./lib/media";
+import { cleanDuration, deleteMedia, mediaUrl, vMediaId, type MediaId } from "./lib/media";
 import { R2_LISTING_KEY, deleteObject, headObject, presignPut, r2Configured, r2PublicUrl } from "./lib/r2";
 
 // Media pipeline. Screenshots go to ImageKit, preview videos to Cloudflare R2.
@@ -241,9 +241,10 @@ export const registerVideo = mutation({
     size: v.number(),
     width: v.optional(v.number()),
     height: v.optional(v.number()),
+    durationSec: v.optional(v.number()),
   },
   returns: v.id("media"),
-  handler: async (ctx, { key, contentType, size, width, height }) => {
+  handler: async (ctx, { key, contentType, size, width, height, durationSec }) => {
     const user = await requireUser(ctx);
     if (!R2_LISTING_KEY.test(key)) throw new ConvexError("That upload did not come from this site. Please upload it again.");
     checkLimits("video", contentType, size);
@@ -264,6 +265,7 @@ export const registerVideo = mutation({
       size,
       width,
       height,
+      durationSec: cleanDuration(durationSec),
       uploadedBy: user._id,
       createdAt: Date.now(),
     });

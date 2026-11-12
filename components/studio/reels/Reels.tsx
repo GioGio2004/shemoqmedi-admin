@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -11,18 +11,25 @@ import { storefrontSiteUrl } from "@/lib/storefront";
 import { buildReel, uploadReel } from "@/lib/voiceoverMux";
 import { captionsForSave } from "@/lib/studio/captions";
 import { draftCaptions } from "@/lib/studio/drafts";
+import { createDraftStore } from "@/lib/studio/persist";
+import { reelBuilds, type BuildStage, type ReelBuildState } from "@/lib/studio/reelBuild";
+import { storyVideoProblem } from "@/convex/lib/socialApi";
 import { useCanEncode } from "../hooks";
 import { ConfirmSheet, PageHead, Skel } from "../ui";
 
 // Reels: a listing's preview video with a spoken narration (ElevenLabs),
 // built into an Instagram-safe MP4 in this browser (lib/voiceoverMux.ts,
-// WebCodecs) and uploaded to R2. One tap turns it into a post.
+// WebCodecs) and uploaded to R2. One tap turns it into a post. The build runs
+// outside the page (lib/studio/reelBuild.ts) and the form is kept on this
+// device, so leaving Reels mid-build loses nothing.
 
 const WORDS_PER_SECOND = 2.5;
 
 type Voice = { name: string; voiceId: string; description?: string; previewUrl?: string };
-type Stage = { label: string; fraction?: number } | null;
-type Done = { url: string; width: number; height: number; durationSec: number; heldSec: number; size: number };
+type Form = { listingId: string; voice: string; script: string; audioUrl: string };
+
+const forms = createDraftStore<Form>("reels");
+const IDLE: ReelBuildState = { stage: null, done: null };
 
 const words = (text: string) => text.split(/\s+/).filter(Boolean).length;
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -43,15 +50,17 @@ export function Reels() {
   const createPost = useMutation(api.social.create);
 
   const ids = { listing: useId(), voice: useId(), script: useId(), audio: useId() };
-  const [listingId, setListingId] = useState("");
+  // The form as it was left on this device (the page mounts after the admin gate: client only).
+  const [saved] = useState(() => forms.get("form"));
+  const [listingId, setListingId] = useState(saved?.listingId ?? "");
   const [voices, setVoices] = useState<Voice[] | null>(null);
   const [voicesError, setVoicesError] = useState<string | null>(null);
-  const [voice, setVoice] = useState("");
-  const [script, setScript] = useState("");
+  const [voice, setVoice] = useState(saved?.voice ?? "");
+  const [script, setScript] = useState(saved?.script ?? "");
   const [videoSec, setVideoSec] = useState<number | null>(null);
-  const [audioUrl, setAudioUrl] = useState("");
-  const [stage, setStage] = useState<Stage>(null);
-  const [done, setDone] = useState<Done | null>(null);
+  const [audioUrl, setAudioUrl] = useState(saved?.audioUrl ?? "");
+  const [voicing, setVoicing] = useState(false);
+  const build = useSyncExternalStore(reelBuilds.subscribe, reelBuilds.get, () => IDLE);
   const [confirmVoice, setConfirmVoice] = useState(false);
   const [posting, setPosting] = useState<"feed" | "story" | null>(null);
 
@@ -73,48 +82,54 @@ export function Reels() {
   const chosenVoice = voices?.find((v) => v.name === voice);
   const scriptWords = words(script);
   const targetWords = videoSec ? Math.max(1, Math.round(videoSec * WORDS_PER_SECOND)) : null;
+  const stage: BuildStage | null = voicing ? { label: "Voicing the script…" } : build.stage;
   const busy = stage !== null;
+  // The finished reel, while it still matches the listing and narration chosen here.
+  const done = build.done && build.done.listingId === listingId && build.done.audioUrl === audioUrl ? build.done : null;
   const credits = script.replace(/\s+/g, " ").trim().length;
+
+  // Kept on this device as it is typed, so coming back (or a reload) finds it.
+  useEffect(() => {
+    forms.set("form", { listingId, voice, script, audioUrl });
+  }, [listingId, voice, script, audioUrl]);
 
   function pickListing(id: string) {
     setListingId(id);
     setVideoSec(null);
     setAudioUrl("");
-    setDone(null);
   }
 
   async function onGenerate() {
     if (!listing) return;
-    setStage({ label: "Voicing the script…" });
+    setVoicing(true);
     try {
       const out = await generate({ listingId: listing.id, script, voice });
       setAudioUrl(out.audioUrl);
-      setDone(null);
       showAlert(`Narration ready (about ${out.durationSec} s).`, "success");
     } catch (err) {
       showError(err);
       throw err;
     } finally {
-      setStage(null);
+      setVoicing(false);
     }
   }
 
   async function onBuild() {
     if (!listing || !audioUrl || busy) return;
-    setDone(null);
+    const { id, videoUrl } = listing;
     try {
-      setStage({ label: "Building the reel", fraction: 0 });
-      const reel = await buildReel({ videoUrl: listing.videoUrl, audioUrl }, (fraction) => setStage({ label: "Building the reel", fraction }));
-      setStage({ label: `Uploading ${mb(reel.blob.size)}` });
-      const { uploadUrl, key } = await reelUploadUrl({ listingId: listing.id, size: reel.blob.size });
-      await uploadReel(reel.blob, uploadUrl);
-      const { url } = await registerReel({ key, size: reel.blob.size, width: reel.width, height: reel.height });
-      setDone({ url, width: reel.width, height: reel.height, durationSec: reel.durationSec, heldSec: reel.heldSec, size: reel.blob.size });
-      showAlert("Reel uploaded.", "success");
+      // Runs outside this page: leaving Reels mid-build doesn't stop it, and the result is here on return.
+      const built = await reelBuilds.run({ listingId: id, audioUrl }, async (report) => {
+        const reel = await buildReel({ videoUrl, audioUrl }, (fraction) => report({ label: "Building the reel", fraction }));
+        report({ label: `Uploading ${mb(reel.blob.size)}` });
+        const { uploadUrl, key } = await reelUploadUrl({ listingId: id, size: reel.blob.size });
+        await uploadReel(reel.blob, uploadUrl);
+        const { url } = await registerReel({ key, size: reel.blob.size, width: reel.width, height: reel.height, durationSec: reel.durationSec });
+        return { url, width: reel.width, height: reel.height, durationSec: reel.durationSec, heldSec: reel.heldSec, size: reel.blob.size };
+      });
+      if (built) showAlert("Reel uploaded.", "success");
     } catch (err) {
       showError(err);
-    } finally {
-      setStage(null);
     }
   }
 
@@ -132,6 +147,7 @@ export function Reels() {
         media: [{ kind: "video", url: done.url, role: "voiceover" }],
         placement,
       });
+      reelBuilds.clear();
       router.push(`/queue?post=${created.id}`);
     } catch (err) {
       showError(err);
@@ -140,6 +156,9 @@ export function Reels() {
   }
 
   const vertical = done ? isVertical(done.width, done.height) : false;
+  // Instagram and Facebook stories take 3 to 60 s of video (socialApi.storyVideoProblem).
+  const lengthProblem = done ? storyVideoProblem(done.durationSec, "this reel") : null;
+  const storyOk = vertical && !lengthProblem;
 
   return (
     <>
@@ -249,10 +268,7 @@ export function Reels() {
               <input
                 id={ids.audio}
                 value={audioUrl}
-                onChange={(e) => {
-                  setAudioUrl(e.target.value.trim());
-                  setDone(null);
-                }}
+                onChange={(e) => setAudioUrl(e.target.value.trim())}
                 className="st-input"
                 inputMode="url"
                 placeholder="Generate the voice, or paste an audioUrl"
@@ -287,11 +303,12 @@ export function Reels() {
                   <button type="button" className="st-btn" onClick={() => post("feed")} disabled={posting !== null} data-busy={posting === "feed"}>
                     Post as reel
                   </button>
-                  <button type="button" className="st-btn st-btn-ghost" onClick={() => post("story")} disabled={posting !== null || !vertical} data-busy={posting === "story"}>
+                  <button type="button" className="st-btn st-btn-ghost" onClick={() => post("story")} disabled={posting !== null || !storyOk} data-busy={posting === "story"}>
                     Post as story
                   </button>
                 </div>
                 {!vertical && <p className="st-note">Stories need a 9:16 video; this one is {done.width}×{done.height}, so it goes to the feed as a reel.</p>}
+                {vertical && lengthProblem && <p className="st-note">{lengthProblem}</p>}
                 <p className="st-note">It opens in the queue as a waiting post with draft captions, ready to edit and publish.</p>
               </div>
             ) : (

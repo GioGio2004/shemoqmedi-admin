@@ -63,3 +63,13 @@ export async function deleteMedia(ctx: MutationCtx, id: MediaId) {
   const storageId = ctx.db.system.normalizeId("_storage", id);
   if (storageId) await ctx.storage.delete(storageId);
 }
+
+/**
+ * A video length the browser reported, in seconds (2 decimals), or undefined
+ * when it isn't a usable number. Stored on media rows for the story check
+ * (socialApi.storyProblem).
+ */
+export function cleanDuration(seconds: number | undefined) {
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0 || seconds > 24 * 60 * 60) return undefined;
+  return Math.round(seconds * 100) / 100;
+}

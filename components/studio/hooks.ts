@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import type { DraftStore } from "@/lib/studio/persist";
 
 /** The time, ticking every `everyMs` (a query is not re-run as time passes). */
 export function useNow(everyMs = 15_000) {
@@ -47,6 +48,15 @@ export function useCanEncode() {
   return useSyncExternalStore(
     () => () => {},
     () => typeof window !== "undefined" && "VideoEncoder" in window && "AudioEncoder" in window,
+    () => null,
+  );
+}
+
+/** One draft from a draft store (lib/studio/persist.ts), kept current; null on the server. */
+export function useDraft<T>(store: DraftStore<T>, id: string): T | null {
+  return useSyncExternalStore(
+    store.subscribe,
+    () => store.get(id),
     () => null,
   );
 }

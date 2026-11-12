@@ -3,7 +3,8 @@
 // server's (convex/social.ts publishPost, unschedulePost, rejectPost, retryPost).
 
 import { publishState } from "@/lib/socialPublishState";
-import type { Captions } from "./captions";
+import { captionsDiffer, type Captions } from "./captions";
+import { createDraftStore } from "./persist";
 
 export type QueueTab = "waiting" | "scheduled" | "sent" | "failed" | "approved" | "rejected" | "all";
 
@@ -107,4 +108,22 @@ export function nextScheduled<T extends { status: string; scheduledFor: number |
   const scheduled = posts.filter((p) => p.status === "scheduled");
   if (scheduled.length === 0) return null;
   return [...scheduled].sort((a, b) => (a.scheduledFor ?? 0) - (b.scheduledFor ?? 0))[0];
+}
+
+/**
+ * Caption edits not saved yet, by post id, kept outside the cards: a card
+ * unmounts on a tab switch, when a pinned post is closed back into the list,
+ * or when its post moves to another tab, and its edits must still be there
+ * when it shows again (also after a reload).
+ */
+export const captionDrafts = createDraftStore<Captions>("captions");
+
+/**
+ * Whether a kept caption draft no longer applies: its post went out or was
+ * rejected (it can't be edited any more), or the draft says what the post
+ * already says.
+ */
+export function staleCaptionDraft(draft: Captions | null, post: { status: string; captions: Captions }) {
+  if (!draft) return false;
+  return post.status === "sent" || post.status === "rejected" || !captionsDiffer(draft, post.captions);
 }
