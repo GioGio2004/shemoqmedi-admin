@@ -23,7 +23,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { socialPostKind, socialPostStatus } from "./schema";
 import { requireAdmin } from "./authHelpers";
-import { categoryName, fail, listingCategories, mediaUrls } from "./lib/listingHelpers";
+import { categoryName, fail, isPublicStatus, listingCategories, mediaUrls } from "./lib/listingHelpers";
 import { TIER_NAMES } from "./lib/awards";
 import { DAY_MS, tbilisiDay, weekOf } from "./lib/time";
 import { emailHtml, escapeHtml, sendEmail } from "./lib/email";
@@ -297,6 +297,7 @@ export const studioContact = internalMutation({
       claimUrl: v.union(v.string(), v.null()),
       creatorId: v.union(v.id("creators"), v.null()),
       isOwner: v.boolean(),
+      isPublic: v.boolean(),
     }),
     v.null(),
   ),
@@ -316,6 +317,7 @@ export const studioContact = internalMutation({
       claimUrl: listing.isClaimed ? null : await ensureListingClaimUrl(ctx, listingId, freshToken),
       creatorId: creator?._id ?? null,
       isOwner: Boolean(owner),
+      isPublic: isPublicStatus(listing.status),
     };
   },
 });
@@ -348,6 +350,12 @@ export const postView = v.object({
   approvedAt: v.union(v.number(), v.null()),
 });
 
+/** A post's media; older award rows only have the screenshot in their payload. */
+export function postMedia(post: Doc<"socialPosts">): MediaItem[] {
+  if (post.media) return post.media;
+  return post.payload?.screenshotUrl ? [{ kind: "image", url: post.payload.screenshotUrl, role: "screenshot" }] : [];
+}
+
 export async function viewPost(ctx: QueryCtx, post: Doc<"socialPosts">) {
   const listing = post.listingId ? await ctx.db.get(post.listingId) : null;
   return {
@@ -358,9 +366,7 @@ export async function viewPost(ctx: QueryCtx, post: Doc<"socialPosts">) {
     // Older award rows have only the one-line payload.
     facts: post.facts ?? (post.payload ? { legacy: post.payload } : null),
     captions: post.captions ?? {},
-    media:
-      post.media ??
-      (post.payload?.screenshotUrl ? [{ kind: "image" as const, url: post.payload.screenshotUrl, role: "screenshot" }] : []),
+    media: postMedia(post),
     scheduledFor: post.scheduledFor ?? null,
     note: post.note ?? null,
     error: post.error ?? null,
@@ -369,9 +375,45 @@ export async function viewPost(ctx: QueryCtx, post: Doc<"socialPosts">) {
   };
 }
 
+/** The stored statuses behind a view ("waiting" includes the older "pending"/"skipped"). */
+const STORED: Record<PostStatus, Doc<"socialPosts">["status"][]> = {
+  waiting: ["waiting", "pending", "skipped"],
+  approved: ["approved"],
+  scheduled: ["scheduled"],
+  sent: ["sent"],
+  failed: ["failed"],
+  rejected: ["rejected"],
+};
+
+/** Newest first, through the status index, so no post ever falls out of view. */
+export async function postsWithStatus(ctx: QueryCtx, status: PostStatus | "all", limit: number) {
+  if (status === "all") return await ctx.db.query("socialPosts").order("desc").take(limit);
+  const lists = await Promise.all(
+    STORED[status].map((s) =>
+      ctx.db
+        .query("socialPosts")
+        .withIndex("by_status", (q) => q.eq("status", s))
+        .order("desc")
+        .take(limit),
+    ),
+  );
+  return lists
+    .flat()
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, limit);
+}
+
+/** How many posts have a status (exact up to `max` per stored status). */
+export async function countPosts(ctx: QueryCtx, status: PostStatus, max = 5000) {
+  let n = 0;
+  for (const s of STORED[status]) {
+    n += (await ctx.db.query("socialPosts").withIndex("by_status", (q) => q.eq("status", s)).take(max)).length;
+  }
+  return n;
+}
+
 export async function listPosts(ctx: QueryCtx, status: PostStatus | "all", limit: number) {
-  const rows = await ctx.db.query("socialPosts").order("desc").take(500);
-  const picked = rows.filter((p) => status === "all" || readStatus(p.status) === status).slice(0, limit);
+  const picked = await postsWithStatus(ctx, status, limit);
   return Promise.all(picked.map((p) => viewPost(ctx, p)));
 }
 
@@ -401,7 +443,8 @@ export async function editPost(
   if (edit.scheduledFor != null && edit.scheduledFor < Date.now() - 60_000) fail("The publish time is in the past.");
   await ctx.db.patch(id, {
     captions,
-    ...(edit.media ? { media: edit.media } : {}),
+    // Older award rows keep their screenshot in `payload`: store it as media on the first edit.
+    ...(edit.media ? { media: edit.media } : post.media ? {} : { media: postMedia(post) }),
     ...(edit.scheduledFor !== undefined ? { scheduledFor: edit.scheduledFor ?? undefined } : {}),
     ...(edit.note !== undefined ? { note: edit.note.trim() || undefined } : {}),
     // Editing an approved post sends it back for another look.
@@ -422,7 +465,16 @@ export async function approvePost(ctx: MutationCtx, id: Id<"socialPosts">, by: I
   if (status !== "waiting") fail(`This post is ${status}, not waiting.`);
   const captions = post.captions ?? {};
   if (!captions.facebook && !captions.instagram && !captions.linkedin) fail("Write at least one caption first.");
-  if (captions.instagram && !(post.media ?? []).length) fail("Instagram needs an image or a video.");
+  if (captions.instagram && !postMedia(post).length) fail("Instagram needs an image or a video.");
+  // The award or the listing may have changed since the post was queued.
+  if (post.awardId) {
+    const award = await ctx.db.get(post.awardId);
+    if (!award || award.status !== "active") fail("This award was revoked: reject the post instead.");
+  }
+  if (post.listingId) {
+    const listing = await ctx.db.get(post.listingId);
+    if (!listing || !isPublicStatus(listing.status)) fail("This site isn't public any more: reject the post instead.");
+  }
   const now = Date.now();
   await ctx.db.patch(id, { status: "approved", approvedAt: now, approvedBy: by, error: undefined, updatedAt: now });
   if (post.kind === "new_listing" && post.listingId) {
@@ -455,7 +507,7 @@ export const waitingCount = query({
   returns: v.number(),
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    return (await listPosts(ctx, "waiting", 100)).length;
+    return await countPosts(ctx, "waiting");
   },
 });
 
@@ -485,10 +537,16 @@ export const reject = mutation({
 
 export const waitingSummary = internalQuery({
   args: {},
-  returns: v.array(v.object({ kind: v.string(), title: v.union(v.string(), v.null()) })),
+  returns: v.object({
+    total: v.number(),
+    items: v.array(v.object({ kind: v.string(), title: v.union(v.string(), v.null()) })),
+  }),
   handler: async (ctx) => {
-    const posts = await listPosts(ctx, "waiting", 50);
-    return posts.map((p) => ({ kind: p.kind, title: p.listing?.title ?? null }));
+    const posts = await listPosts(ctx, "waiting", 30);
+    return {
+      total: await countPosts(ctx, "waiting"),
+      items: posts.map((p) => ({ kind: p.kind, title: p.listing?.title ?? null })),
+    };
   },
 });
 
@@ -507,11 +565,16 @@ export const waitingPing = internalAction({
   args: {},
   returns: v.null(),
   handler: async (ctx) => {
-    const waiting: { kind: string; title: string | null }[] = await ctx.runQuery(internal.social.waitingSummary, {});
-    if (waiting.length === 0) return null;
+    const summary: { total: number; items: { kind: string; title: string | null }[] } = await ctx.runQuery(
+      internal.social.waitingSummary,
+      {},
+    );
+    const waiting = summary.items;
+    if (summary.total === 0) return null;
     const to: string[] = await ctx.runQuery(internal.notify.adminEmails, {});
     const items = waiting.map((w) => `${KIND_LABEL[w.kind] ?? w.kind}${w.title ? `: ${w.title}` : ""}`);
-    const n = waiting.length;
+    if (summary.total > waiting.length) items.push(`…and ${summary.total - waiting.length} more`);
+    const n = summary.total;
     const error = await sendEmail({
       to,
       subject: `${n} post${n === 1 ? "" : "s"} waiting on the social desk`,

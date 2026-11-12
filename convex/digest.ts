@@ -85,6 +85,12 @@ export const run = internalMutation({
       if (mine.length + rest.length === 0) continue;
       const user = await ctx.db.get(juror.userId!);
       if (!user?.email) continue;
+      // "Unsubscribe" in any studio or broadcast email stops this one too.
+      const optedOut = await ctx.db
+        .query("emailOptOuts")
+        .withIndex("by_email", (q) => q.eq("email", user.email.trim().toLowerCase()))
+        .first();
+      if (optedOut) continue;
       await ctx.scheduler.runAfter(0, internal.digest.send, {
         to: user.email,
         name: juror.name,

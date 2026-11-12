@@ -93,7 +93,7 @@ async function render(to: string, message: Message) {
   const headers: Record<string, string> = unsubscribe
     ? { "List-Unsubscribe": `<${unsubscribe}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" }
     : {};
-  return { html, text, headers };
+  return { html, text, headers, unsubscribe };
 }
 
 /** Sends one email to one person, unless they opted out. Always logged. */
@@ -106,7 +106,9 @@ export async function deliver(ctx: ActionCtx, toInput: string, message: Message,
   if (!isEmail(to)) return log("skipped", "Not an email address.");
   const optedOut: string[] = await ctx.runQuery(internal.emails.optedOut, { emails: [to] });
   if (optedOut.length) return log("skipped", "Unsubscribed.");
-  const { html, text, headers } = await render(to, message);
+  const { html, text, headers, unsubscribe } = await render(to, message);
+  // Never email a studio without a working way to opt out.
+  if (!unsubscribe) return log("skipped", "No unsubscribe link: set EMAIL_UNSUBSCRIBE_SECRET on Convex.");
   const error = await sendEmail({ to: [to], subject: message.subject, text, html, headers });
   return log(error ? "failed" : "sent", error ?? undefined);
 }
@@ -243,6 +245,9 @@ export const broadcast = internalAction({
     const key = process.env.RESEND_API_KEY?.trim();
     const from = process.env.RESEND_FROM?.trim() || "Shemoqmedi <awards@shemoqmedi.space>";
     const emails: string[] = await ctx.runQuery(internal.emails.audienceEmails, { audience });
+    if (emails.length && !(await unsubscribeUrl(emails[0]))) {
+      throw new Error("No unsubscribe link: set EMAIL_UNSUBSCRIBE_SECRET on Convex before broadcasting.");
+    }
     let sent = 0;
     let failed = 0;
     for (let i = 0; i < emails.length; i += BATCH_SIZE) {
@@ -291,7 +296,8 @@ export const featured = internalAction({
   handler: async (ctx, { listingId, postId }) => {
     if (await ctx.runQuery(internal.emails.alreadySent, { listingId, kind: "featured" })) return null;
     const contact = await ctx.runMutation(internal.social.studioContact, { listingId, freshToken: newClaimToken() });
-    if (!contact) return null;
+    // Unpublished since the post was queued: there is nothing to feature.
+    if (!contact || !contact.isPublic) return null;
     const first = contact.name.split(" ")[0] || "there";
     const lines = [
       `Hi ${first},`,

@@ -220,6 +220,58 @@ describe("emails", () => {
   });
 });
 
+describe("review fixes", () => {
+  it("older award rows keep their screenshot through approval", async () => {
+    const env = await setup();
+    const s = await site(env);
+    const id = await env.t.run(async (ctx) => {
+      const awardId = await ctx.db.insert("awards", {
+        listingId: s.id, tier: "HM", period: "2026-11-02", date: "2026-11-12", score: 6.8,
+        slug: `${s.slug}-hm-2026-11-02`, status: "active", source: "manual", reason: "test", createdAt: Date.now(),
+      });
+      return ctx.db.insert("socialPosts", {
+        awardId, status: "skipped", createdAt: Date.now() - 1000,
+        payload: { text: "HM", url: "https://x.example", screenshotUrl: "https://img.example/a.jpg", studioName: "S", studioTag: null },
+      });
+    });
+    const queue = await env.t.query(api.mcp.socialQueue, { token: env.token });
+    expect(queue.map((p) => p.id)).toContain(id);
+    await env.t.mutation(api.mcp.updatePost, { token: env.token, id, captions: { instagram: "Honorable Mention" } });
+    const approved = await env.t.mutation(api.mcp.approvePost, { token: env.token, id });
+    expect(approved).toMatchObject({ status: "approved", media: [{ url: "https://img.example/a.jpg" }] });
+  });
+
+  it("refuses to approve a post whose site was unpublished, and sends no featured email", async () => {
+    const env = await setup();
+    const s = await site(env);
+    await env.t.mutation(internal.social.queueNewListings, {});
+    const [post] = await posts(env);
+    await env.t.mutation(api.mcp.updatePost, { token: env.token, id: post._id, captions: { facebook: "New" } });
+    await env.t.run((ctx) => ctx.db.patch(s.id, { status: "rejected" }));
+    await expect(env.t.mutation(api.mcp.approvePost, { token: env.token, id: post._id })).rejects.toThrow(/isn't public/);
+  });
+
+  it("sends nothing to studios without an unsubscribe secret", async () => {
+    const env = await setup();
+    const s = await site(env);
+    vi.stubEnv("MCP_SERVICE_SECRET", "");
+    vi.stubEnv("EMAIL_UNSUBSCRIBE_SECRET", "");
+    await env.t.action(internal.emails.featured, { listingId: s.id });
+    expect((await emails(env))[0]).toMatchObject({ status: "skipped", error: expect.stringMatching(/unsubscribe/) });
+  });
+
+  it("counts every waiting post, not just the newest ones", async () => {
+    const env = await setup();
+    await env.t.run(async (ctx) => {
+      for (let i = 0; i < 520; i++) {
+        await ctx.db.insert("socialPosts", { kind: "custom", status: i < 3 ? "waiting" : "rejected", createdAt: i, facts: {} });
+      }
+    });
+    expect(await env.admin.query(api.social.waitingCount, {})).toBe(3);
+    expect((await env.t.query(api.mcp.socialQueue, { token: env.token })).length).toBe(3);
+  });
+});
+
 describe("contact helpers", () => {
   it("cleans handles from URLs and @-names", () => {
     expect(cleanHandle("instagram", "https://www.instagram.com/studio.x/")).toBe("studio.x");

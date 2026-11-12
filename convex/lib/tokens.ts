@@ -10,6 +10,16 @@ function serviceSecret(): string | null {
   return secret ? secret : null;
 }
 
+/**
+ * Unsubscribe links must keep working for years, so they are signed with
+ * their own secret, EMAIL_UNSUBSCRIBE_SECRET: rotating the MCP secret (say,
+ * after a leaked credential) must not break links already sent. Falls back to
+ * MCP_SERVICE_SECRET while the dedicated one isn't set.
+ */
+function unsubscribeSecret(): string | null {
+  return process.env.EMAIL_UNSUBSCRIBE_SECRET || serviceSecret();
+}
+
 function toBase64url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -29,16 +39,14 @@ async function hmacKey(secret: string, usage: "sign" | "verify") {
 }
 
 /** HMAC-SHA256 of `message`, base64url. Null without a secret. */
-export async function sign(message: string): Promise<string | null> {
-  const secret = serviceSecret();
+export async function sign(message: string, secret: string | null = serviceSecret()): Promise<string | null> {
   if (secret === null) return null;
   const key = await hmacKey(secret, "sign");
   return toBase64url(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message))));
 }
 
 /** Constant-time check of a base64url signature over `message`. False without a secret or on malformed input. */
-export async function verify(message: string, signature: string): Promise<boolean> {
-  const secret = serviceSecret();
+export async function verify(message: string, signature: string, secret: string | null = serviceSecret()): Promise<boolean> {
   if (secret === null || signature === "") return false;
   try {
     const key = await hmacKey(secret, "verify");
@@ -91,9 +99,9 @@ export async function mintServiceCredential(clerkUserId: string, lifeMs = 60_000
 
 /** A token that lets whoever holds the email switch that address's emails off. */
 export async function unsubscribeToken(email: string): Promise<string | null> {
-  return await sign(`unsubscribe:${email.trim().toLowerCase()}`);
+  return await sign(`unsubscribe:${email.trim().toLowerCase()}`, unsubscribeSecret());
 }
 
 export async function verifyUnsubscribeToken(email: string, token: string): Promise<boolean> {
-  return await verify(`unsubscribe:${email.trim().toLowerCase()}`, token);
+  return await verify(`unsubscribe:${email.trim().toLowerCase()}`, token, unsubscribeSecret());
 }

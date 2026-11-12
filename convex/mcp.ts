@@ -17,6 +17,7 @@ import { TIER_NAMES } from "./lib/awards";
 import { socialPostKind } from "./schema";
 import {
   approvePost as approve,
+  countPosts,
   captionsValidator,
   editPost,
   listingFacts,
@@ -271,9 +272,10 @@ export const stats = query({
   returns: v.any(),
   handler: async (ctx, { token }) => {
     await requireTokenAdmin(ctx, token);
-    const posts = await ctx.db.query("socialPosts").order("desc").take(500);
     const byStatus: Record<string, number> = {};
-    for (const p of posts) byStatus[readStatus(p.status)] = (byStatus[readStatus(p.status)] ?? 0) + 1;
+    for (const s of ["waiting", "approved", "scheduled", "sent", "failed", "rejected"] as const) {
+      byStatus[s] = await countPosts(ctx, s);
+    }
     const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
     const emails = await ctx.db
       .query("emailLog")
