@@ -3,7 +3,7 @@
 import { useId, useState } from "react";
 import { deviceTimeNote, formatTbilisi, parseTbilisiInput, quickTimes, relativeTime, suggestedTime, toTbilisiInput } from "@/lib/studio/time";
 import { useNow } from "./hooks";
-import { Sheet } from "./ui";
+import { Sheet, SheetError } from "./ui";
 
 /**
  * Pick a moment in Tbilisi time (schedule a post, or a reminder's time):
@@ -42,6 +42,7 @@ function TimeForm({ initial, confirmLabel, onPick, onDone, intro }: { initial?: 
     return toTbilisiInput(initial && initial > start ? initial : suggestedTime(start));
   });
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
   const at = parseTbilisiInput(value);
   const past = at !== null && at < now - 60_000;
   const device = at !== null ? deviceTimeNote(at) : null;
@@ -50,11 +51,13 @@ function TimeForm({ initial, confirmLabel, onPick, onDone, intro }: { initial?: 
     e.preventDefault();
     if (at === null || past) return;
     setBusy(true);
+    setError(null);
     try {
       await onPick(at);
       onDone();
-    } catch {
-      // The caller showed the error; stay open.
+    } catch (err) {
+      // Stay open, with the reason in the sheet.
+      setError(err);
     } finally {
       setBusy(false);
     }
@@ -79,6 +82,7 @@ function TimeForm({ initial, confirmLabel, onPick, onDone, intro }: { initial?: 
       <p className="st-note st-tnum" aria-live="polite">
         {at === null ? "Pick a date and time." : past ? "That time has passed." : `${formatTbilisi(at, now)} · ${relativeTime(at, now)}${device ? ` · ${device}` : ""}`}
       </p>
+      <SheetError error={error} />
       <div className="st-sheet-foot">
         <button type="button" className="st-btn st-btn-ghost" onClick={onDone} disabled={busy}>
           Cancel
@@ -104,17 +108,19 @@ function RejectForm({ onReject, onDone }: { onReject: (note: string) => Promise<
   const id = useId();
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
   return (
     <form
       className="st-stack"
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
+        setError(null);
         try {
           await onReject(note);
           onDone();
-        } catch {
-          // Shown by the caller.
+        } catch (err) {
+          setError(err);
         } finally {
           setBusy(false);
         }
@@ -127,6 +133,7 @@ function RejectForm({ onReject, onDone }: { onReject: (note: string) => Promise<
         </label>
         <textarea id={id} className="st-input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Duplicate, off-brand, wrong site…" maxLength={500} />
       </div>
+      <SheetError error={error} />
       <div className="st-sheet-foot">
         <button type="button" className="st-btn st-btn-ghost" onClick={onDone} disabled={busy}>
           Keep it

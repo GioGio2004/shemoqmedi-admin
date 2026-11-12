@@ -178,7 +178,7 @@ async function pushQueued(ctx: MutationCtx, titles: string[]) {
   });
 }
 
-/** An announced award → a waiting post (once per award). Not for the honorary First 100. */
+/** An announced award → a waiting post (once per award; its id, or null). Not for the honorary First 100. */
 export const queueAward = internalMutation({
   args: { awardId: v.id("awards") },
   returns: v.union(v.id("socialPosts"), v.null()),
@@ -212,7 +212,7 @@ export const queueAward = internalMutation({
       },
       media: listingMedia(facts),
     });
-    await pushQueued(ctx, [`${TIER_NAMES[award.tier]}: ${listing.title}`]);
+    // No push here: notify.awardAnnounced sends one for the award and this post together.
     return id;
   },
 });

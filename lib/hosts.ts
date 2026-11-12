@@ -32,3 +32,8 @@ export function adminUrl(path: string) {
 export function studioUrl(path = "/") {
   return `${STUDIO_ORIGIN}${path.startsWith("/") ? path : `/${path}`}`;
 }
+
+/** A post in the Studio queue (opened on top): where post pushes link. */
+export function studioPostUrl(id: string) {
+  return studioUrl(`/queue?post=${encodeURIComponent(id)}`);
+}

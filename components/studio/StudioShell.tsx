@@ -54,8 +54,9 @@ function WaitingCount() {
   const n = useQuery(api.social.waitingCount, {});
   if (!n) return null;
   return (
-    <span className="st-tab-count" aria-label={`${n} waiting`}>
-      {n > 99 ? "99+" : n}
+    <span className="st-tab-count">
+      <span aria-hidden="true">{n > 99 ? "99+" : n}</span>
+      <span className="sr-only">, {n} waiting</span>
     </span>
   );
 }

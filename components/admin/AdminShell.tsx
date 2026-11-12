@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { UserButton } from "@clerk/nextjs";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -67,6 +67,19 @@ function isCurrent(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+const noSubscribe = () => () => {};
+
+/** The Studio's address from here: studio.localhost next to a local admin, else production. */
+function studioOriginHere() {
+  const { hostname, port } = window.location;
+  const local = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  return local ? `http://studio.localhost${port ? `:${port}` : ""}` : STUDIO_ORIGIN;
+}
+
+function useStudioOrigin() {
+  return useSyncExternalStore(noSubscribe, studioOriginHere, () => STUDIO_ORIGIN);
+}
+
 /** The Studio (social queue, design, reels) opens as its own app in a new tab, with the waiting posts count. */
 function StudioLink({
   className,
@@ -77,8 +90,9 @@ function StudioLink({
   showCounts: boolean;
   onNavigate?: () => void;
 }) {
+  const studio = useStudioOrigin();
   return (
-    <a href={STUDIO_ORIGIN} className={className} target="_blank" rel="noopener noreferrer" onClick={onNavigate}>
+    <a href={studio} className={className} target="_blank" rel="noopener noreferrer" onClick={onNavigate}>
       Studio <span aria-hidden="true">↗</span>
       <span className="sr-only"> (opens in a new tab)</span>
       {showCounts && <SocialCount />}
@@ -203,6 +217,7 @@ function MobileTabBar({
 }) {
   const { open, wrap, setOpen } = usePageMenu(pathname);
   const tab = (href: string) => (isCurrent(pathname, href) ? "page" : undefined);
+  const studio = useStudioOrigin();
 
   return (
     <div ref={wrap} className="admin-tabbar-wrap">
@@ -227,7 +242,7 @@ function MobileTabBar({
           Review
           {showCounts && <ReviewCount />}
         </Link>
-        <a href={STUDIO_ORIGIN} target="_blank" rel="noopener noreferrer">
+        <a href={studio} target="_blank" rel="noopener noreferrer">
           <TabIcon d="M5 15 15 5M8 5h7v7" />
           Studio
           <span className="sr-only"> (opens in a new tab)</span>

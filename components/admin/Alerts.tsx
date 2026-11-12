@@ -47,7 +47,9 @@ export function AlertViewport() {
   return (
     <div
       aria-live="assertive"
-      className="pointer-events-none fixed top-4 right-4 z-[1000] grid w-[min(92vw,380px)] gap-2"
+      className="pointer-events-none fixed right-4 z-[1000] grid w-[min(92vw,380px)] gap-2"
+      // Below the notch / status bar in an installed app (viewport-fit: cover).
+      style={{ top: "max(1rem, env(safe-area-inset-top))" }}
     >
       {list.map((alert) => (
         <div

@@ -1,6 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
-import { studioRouting } from "@/lib/studioRouting";
+import { studioRouting, studioSignInUrl } from "@/lib/studioRouting";
 
 // Everything except these (dashboard, /api/*) requires a Clerk session. The
 // MCP connector checks its own OAuth tokens (lib/mcp), and MCP clients probing
@@ -18,17 +18,10 @@ const isApiRoute = createRouteMatcher(["/api/(.*)", "/trpc/(.*)"]);
 // API routes that check access themselves (an admin session or a server key).
 const isSelfCheckedApi = createRouteMatcher(["/api/graphics", "/api/graphics/(.*)"]);
 
-/**
- * Our own sign-in page (not Clerk's hosted one) on the request's host, then
- * back to where it was. On the Studio the way back is a path: the request
- * URL's host is not always the Studio's (local servers report localhost), and
- * a path always stays on the host the browser is on.
- */
-function signIn(req: NextRequest, studio = false) {
+/** Our own sign-in page (not Clerk's hosted one), then back to where it was. */
+function signIn(req: NextRequest) {
   const url = new URL("/sign-in", req.url);
-  // One leading slash: "//host" would read as another site.
-  const back = `${req.nextUrl.pathname.replace(/^\/+/, "/")}${req.nextUrl.search}`;
-  url.searchParams.set("redirect_url", studio ? back : req.nextUrl.href);
+  url.searchParams.set("redirect_url", req.nextUrl.href);
   return NextResponse.redirect(url);
 }
 
@@ -38,8 +31,9 @@ export default clerkMiddleware(async (auth, req) => {
   if (route.type === "redirect") return NextResponse.redirect(route.url);
   if (route.type === "rewrite") {
     // Studio pages need a session like every admin page; the pages themselves check the admin role.
+    // Sign-in on the Studio host itself (lib/studioRouting: never the request URL's origin, which is localhost locally).
     const { userId } = await auth();
-    if (!userId) return signIn(req, true);
+    if (!userId) return NextResponse.redirect(studioSignInUrl(req.headers.get("host") ?? "", req.nextUrl));
     return NextResponse.rewrite(new URL(route.path, req.url));
   }
 

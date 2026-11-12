@@ -9,7 +9,7 @@ export function Counter({ network, text }: { network: Network; text: string }) {
   const c = captionCounter(network, text);
   const state = c.over ? "over" : c.near ? "near" : undefined;
   return (
-    <span className="st-counter" data-state={state} aria-live="polite">
+    <span className="st-counter" data-state={state}>
       {c.over ? `${c.length - c.max} over · ` : ""}
       {c.length} / {c.max}
       {c.bytes && network === "threads" ? " (emoji count 2–4)" : ""}

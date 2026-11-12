@@ -30,7 +30,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { socialNetwork, socialPlacement } from "./schema";
 import { KIND_LABEL, captionedNetworks, postMedia, readStatus, withSizes } from "./social";
 import { pushAdmins } from "./push";
-import { studioUrl } from "../lib/hosts";
+import { studioPostUrl } from "../lib/hosts";
 import { accountOf, ENV_VARS } from "./channels";
 import {
   NETWORK_NAME,
@@ -195,7 +195,7 @@ async function postLabel(ctx: MutationCtx, post: Doc<"socialPosts">) {
 
 /** Where a post's push opens: the post in the Studio queue. */
 export function postLink(id: Id<"socialPosts">) {
-  return studioUrl(`/queue?post=${encodeURIComponent(id)}`);
+  return studioPostUrl(id);
 }
 
 /** The post's status from its results; releases the lease. Pushes sent / failed to the admins. */

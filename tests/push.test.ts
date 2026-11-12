@@ -366,7 +366,7 @@ describe("hooks", () => {
     ]);
   });
 
-  it("an award pushes the admins' copy, except for the honorary First 100", async () => {
+  it("an award pushes one admins' copy (with its queued post), except for the honorary First 100", async () => {
     const env = await setup();
     await env.admin.mutation(api.push.subscribe, device("https://admin.shemoqmedi.space"));
     const { slug } = await env.admin.mutation(api.admin.createListing, {
@@ -409,24 +409,25 @@ describe("hooks", () => {
     await env.t.action(internal.notify.awardAnnounced, { awardId: await award("F100", "7") });
     await drain(env);
     warn.mockRestore();
-    // The admins' copy, and the award's queued post (social.queueAward); nothing for the First 100.
-    expect(sent()).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          title: "Site of the Day: Paper Weather",
-          body: "Paper Weather by Fold & Co. won Site of the Day · 12 Nov 2026.",
-          url: "https://admin.shemoqmedi.space/awards",
-          tag: `award-${sotd}`,
-        }),
-        expect.objectContaining({
-          title: "A post is waiting",
-          body: "Site of the Day: Paper Weather",
-          url: "https://studio.shemoqmedi.space/queue",
-          tag: "social-queue",
-        }),
-      ]),
-    );
-    expect(sent()).toHaveLength(2);
+    // One push for the award and its queued post (social.queueAward), opening that post in the Studio; nothing for the First 100.
+    const postId = await env.t.run(async (ctx) => (await ctx.db.query("socialPosts").withIndex("by_award", (q) => q.eq("awardId", sotd)).first())?._id);
+    expect(postId).toBeDefined();
+    expect(sent()).toEqual([
+      expect.objectContaining({
+        title: "Site of the Day: Paper Weather",
+        body: "Paper Weather by Fold & Co. won Site of the Day · 12 Nov 2026. Its post is waiting in the Studio.",
+        url: `https://studio.shemoqmedi.space/queue?post=${postId}`,
+        tag: `award-${sotd}`,
+      }),
+    ]);
+
+    // Announced again (its post already queued): the copy links the admin's awards.
+    sendNotification.mockClear();
+    const warn2 = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await env.t.action(internal.notify.awardAnnounced, { awardId: sotd });
+    await drain(env);
+    warn2.mockRestore();
+    expect(sent()).toEqual([expect.objectContaining({ url: "https://admin.shemoqmedi.space/awards", tag: `award-${sotd}` })]);
   });
 
   it("an empty day and a round without a winner push to the admins", async () => {

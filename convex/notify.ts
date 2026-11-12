@@ -21,7 +21,7 @@ import { siteUrl } from "./seo";
 import { deliver, type Message } from "./emails";
 import { newClaimToken } from "./claimLinks";
 import { pushAdmins } from "./push";
-import { adminUrl } from "../lib/hosts";
+import { adminUrl, studioPostUrl } from "../lib/hosts";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -172,13 +172,15 @@ export const awardAnnounced = internalAction({
       }
     }
 
-    await ctx.runMutation(internal.social.queueAward, { awardId });
-    // The admins' copy. Not for the honorary First 100, given by hand in bulk.
+    const postId = await ctx.runMutation(internal.social.queueAward, { awardId });
+    // The admins' copy, one push for the award and its queued post: it opens
+    // the post in the Studio when one was queued, else the admin's awards.
+    // Not for the honorary First 100, given by hand in bulk.
     if (!honorary) {
       await pushAdmins(ctx, {
         title: `${name}: ${data.listing.title}`,
-        body: `${data.listing.title} by ${data.listing.creditName} ${verb} ${label}.`,
-        url: adminUrl("/awards"),
+        body: `${data.listing.title} by ${data.listing.creditName} ${verb} ${label}.${postId ? " Its post is waiting in the Studio." : ""}`,
+        url: postId ? studioPostUrl(postId) : adminUrl("/awards"),
         tag: `award-${awardId}`,
       });
     }

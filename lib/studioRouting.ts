@@ -73,17 +73,42 @@ export function studioOriginFor(url: URL): string {
 }
 
 /**
+ * The Studio origin the browser is on, from a Host header that isStudioHost
+ * accepted: production, or studio.localhost with its port. Redirects on the
+ * Studio host are built from this, not from the request URL: a local server
+ * (next dev / next start) reports its own http://localhost:<port> as the
+ * request URL whatever the Host header says, which would send the browser to
+ * the admin.
+ */
+export function studioRequestOrigin(host: string): string {
+  const name = host.trim().toLowerCase();
+  if (name.replace(/:\d+$/, "") === "studio.localhost") return `http://${name}`;
+  return STUDIO_ORIGIN;
+}
+
+/**
+ * The Studio's sign-in page for a request on the Studio host, coming back to
+ * the same path and query (a path, so it always stays on the Studio).
+ */
+export function studioSignInUrl(host: string, url: URL): string {
+  const signIn = new URL("/sign-in", studioRequestOrigin(host));
+  // One leading slash: "//host" would read as another site.
+  signIn.searchParams.set("redirect_url", `${url.pathname.replace(/^\/+/, "/")}${url.search}`);
+  return signIn.toString();
+}
+
+/**
  * Where a request goes. `host` is the request's Host header; `url` the
- * request URL (its pathname and search are used; its origin only for
- * redirects within the same host).
+ * request URL (only its pathname and search are used; its origin only
+ * locally, for the Studio's development port).
  */
 export function studioRouting(host: string | null | undefined, url: URL): StudioRouting {
   const { pathname, search } = url;
 
-  if (isStudioHost(host)) {
+  if (host && isStudioHost(host)) {
     if (isShared(pathname)) return { type: "pass" };
     const inner = underStudio(pathname);
-    if (inner !== null) return { type: "redirect", url: `${url.origin}${inner}${search}` };
+    if (inner !== null) return { type: "redirect", url: `${studioRequestOrigin(host)}${inner}${search}` };
     return { type: "rewrite", path: `${STUDIO_PREFIX}${pathname === "/" ? "" : pathname}${search}` };
   }
 

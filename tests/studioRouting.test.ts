@@ -2,7 +2,7 @@
 // by proxy.ts): Studio rewrites, the paths both hosts share, and the admin's
 // redirects to the Studio.
 import { describe, expect, it } from "vitest";
-import { MOVED_TO_STUDIO, studioOriginFor, studioRouting } from "../lib/studioRouting";
+import { MOVED_TO_STUDIO, studioOriginFor, studioRequestOrigin, studioRouting, studioSignInUrl } from "../lib/studioRouting";
 
 const STUDIO = "studio.shemoqmedi.space";
 const ADMIN = "admin.shemoqmedi.space";
@@ -76,6 +76,13 @@ describe("the Studio host", () => {
     expect(route("studio.localhost:3000", "/studio/reels")).toEqual({ type: "redirect", url: "http://studio.localhost:3000/reels" });
   });
 
+  it("redirects on the host the browser is on, not the request URL's origin", () => {
+    // next dev / next start report http://localhost:<port> as the request URL whatever the Host header says.
+    const local = new URL("http://localhost:3000/studio/reels?x=1");
+    expect(studioRouting("studio.localhost:3000", local)).toEqual({ type: "redirect", url: "http://studio.localhost:3000/reels?x=1" });
+    expect(studioRouting(STUDIO, new URL("http://localhost:3000/studio/queue"))).toEqual({ type: "redirect", url: "https://studio.shemoqmedi.space/queue" });
+  });
+
   it("never redirects off the host through extra slashes", () => {
     const r = route(STUDIO, "/studio//evil.example/x");
     expect(r).toEqual({ type: "redirect", url: "https://studio.shemoqmedi.space/evil.example/x" });
@@ -127,6 +134,31 @@ describe("the admin host", () => {
   it("sends local development to studio.localhost on the same port", () => {
     expect(route("localhost:3000", "/studio/queue")).toEqual({ type: "redirect", url: "http://studio.localhost:3000/queue" });
     expect(route("127.0.0.1:4000", "/design")).toEqual({ type: "redirect", url: "http://studio.localhost:4000/create" });
+  });
+});
+
+describe("studioRequestOrigin and studioSignInUrl", () => {
+  it("builds the Studio origin from the Host header", () => {
+    expect(studioRequestOrigin("studio.shemoqmedi.space")).toBe("https://studio.shemoqmedi.space");
+    expect(studioRequestOrigin("Studio.Shemoqmedi.Space:443")).toBe("https://studio.shemoqmedi.space");
+    expect(studioRequestOrigin("studio.localhost:3000")).toBe("http://studio.localhost:3000");
+    expect(studioRequestOrigin("studio.localhost")).toBe("http://studio.localhost");
+  });
+
+  it("signs in on the Studio host and comes back to the same path", () => {
+    const local = new URL("http://localhost:3000/queue?status=failed&post=abc");
+    const url = new URL(studioSignInUrl("studio.localhost:3000", local));
+    expect(url.origin).toBe("http://studio.localhost:3000");
+    expect(url.pathname).toBe("/sign-in");
+    expect(url.searchParams.get("redirect_url")).toBe("/queue?status=failed&post=abc");
+    const prod = new URL(studioSignInUrl(STUDIO, new URL("https://studio.shemoqmedi.space/")));
+    expect(prod.origin).toBe("https://studio.shemoqmedi.space");
+    expect(prod.searchParams.get("redirect_url")).toBe("/");
+  });
+
+  it("never comes back to another site", () => {
+    const url = new URL(studioSignInUrl(STUDIO, new URL("https://studio.shemoqmedi.space//evil.example/x")));
+    expect(url.searchParams.get("redirect_url")).toBe("/evil.example/x");
   });
 });
 

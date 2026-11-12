@@ -2,6 +2,7 @@
 
 import { useClerk, useUser } from "@clerk/nextjs";
 import { useState } from "react";
+import { showError } from "@/components/admin/Alerts";
 import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 import { ArrowIcon } from "./icons";
 import { PushSwitch } from "./PushSwitch";
@@ -38,7 +39,12 @@ export function SettingsSheet({ open, onClose, adminOrigin }: { open: boolean; o
             disabled={leaving}
             onClick={async () => {
               setLeaving(true);
-              await signOut({ redirectUrl: "/sign-in" });
+              try {
+                await signOut({ redirectUrl: "/sign-in" });
+              } catch (err) {
+                showError(err);
+                setLeaving(false);
+              }
             }}
           >
             Sign out

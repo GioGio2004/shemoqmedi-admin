@@ -1,6 +1,7 @@
 "use client";
 
 import { Component, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { errorMessage } from "@/components/admin/format";
 import { CloseIcon } from "./icons";
 
 // Small building blocks shared by every Studio screen.
@@ -71,6 +72,20 @@ export function Sheet({ open, onClose, title, children }: { open: boolean; onClo
   );
 }
 
+/**
+ * Why the sheet's action failed, inside the sheet: an open modal <dialog>
+ * sits in the top layer, above the page's alerts (which are also inert to
+ * screen readers while it is open).
+ */
+export function SheetError({ error }: { error: unknown }) {
+  if (error === null || error === undefined) return null;
+  return (
+    <p className="st-callout" role="alert">
+      {errorMessage(error)}
+    </p>
+  );
+}
+
 /** A yes/no sheet instead of confirm(). `onConfirm` may be async: the sheet waits, then closes. */
 export function ConfirmSheet({
   open,
@@ -90,13 +105,22 @@ export function ConfirmSheet({
   tone?: "ink" | "blue";
 }) {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [wasOpen, setWasOpen] = useState(open);
+  // Each opening starts without the last one's error.
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setError(null);
+  }
   async function confirm() {
     setBusy(true);
+    setError(null);
     try {
       await onConfirm();
       onClose();
-    } catch {
-      // The caller showed the error; keep the sheet open to try again.
+    } catch (err) {
+      // Keep the sheet open to try again, with the reason in it.
+      setError(err);
     } finally {
       setBusy(false);
     }
@@ -104,6 +128,7 @@ export function ConfirmSheet({
   return (
     <Sheet open={open} onClose={onClose} title={title}>
       <div className="st-note">{body}</div>
+      <SheetError error={error} />
       <div className="st-sheet-foot">
         <button type="button" className="st-btn st-btn-ghost" onClick={onClose} disabled={busy}>
           Cancel
