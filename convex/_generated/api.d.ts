@@ -18,6 +18,7 @@ import type * as creators from "../creators.js";
 import type * as crons from "../crons.js";
 import type * as digest from "../digest.js";
 import type * as emails from "../emails.js";
+import type * as graphics from "../graphics.js";
 import type * as http from "../http.js";
 import type * as importer from "../importer.js";
 import type * as jury from "../jury.js";
@@ -68,6 +69,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   digest: typeof digest;
   emails: typeof emails;
+  graphics: typeof graphics;
   http: typeof http;
   importer: typeof importer;
   jury: typeof jury;
