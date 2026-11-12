@@ -1,38 +1,65 @@
 import { v } from "convex/values";
-import { internalAction } from "./_generated/server";
+import { internalAction, internalQuery, type ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { uploadToImageKitFromServer } from "./lib/imagekitServer";
-import { slugify } from "./lib/listingHelpers";
+import { categoryName, listingCategories, slugify } from "./lib/listingHelpers";
+import { mediaRow, mediaUrl } from "./lib/media";
+import { readPillars } from "./lib/scoring";
 import { FORMATS, TEMPLATES, graphicsQuery, isFormat, isTemplate } from "../lib/graphics/spec";
 import { PALETTE_IDS } from "../lib/palettes";
 
 // Social post graphics. The pictures are drawn by the admin app's
-// /api/graphics route (satori; templates in lib/graphics); this action asks
-// it for a PNG and stores the result on ImageKit so Postiz, Instagram and
-// the rest can fetch it from a public URL.
+// /api/graphics routes (satori + sharp; templates in lib/graphics); these
+// actions ask for JPEGs and store them on ImageKit so Postiz, Instagram and
+// the rest can fetch them from a public URL.
 //
 // Convex env:
 //   ADMIN_ORIGIN         the admin app, e.g. https://admin.shemoqmedi.space
 //   GRAPHICS_RENDER_KEY  shared secret; the same value on the admin app
 //   IMAGEKIT_PRIVATE_KEY (already set for the media pipeline)
 //
-// Called by the MCP tool render_graphic (workstream 5).
+// Called by the MCP tools render_graphic / render_carousel (workstream 5).
 
 const FOLDER = "/social/graphics";
+const GLASS = ["frost", "liquid", "tint"];
+const PALETTES = [...PALETTE_IDS, "auto"];
+
+function config() {
+  const origin = process.env.ADMIN_ORIGIN?.replace(/\/+$/, "");
+  const key = process.env.GRAPHICS_RENDER_KEY;
+  if (!origin || !key) throw new Error("Graphics rendering needs ADMIN_ORIGIN and GRAPHICS_RENDER_KEY on this Convex deployment.");
+  return { origin, key };
+}
+
+async function fetchJpeg(url: string, key: string) {
+  const res = await fetch(url, { headers: { "x-render-key": key }, signal: AbortSignal.timeout(90_000) });
+  if (!res.ok || res.headers.get("content-type") !== "image/jpeg") {
+    throw new Error(`Rendering failed (HTTP ${res.status}): ${(await res.text()).slice(0, 200)}`);
+  }
+  return res.blob();
+}
+
+function checkPalette(palette: string, glass: string | undefined) {
+  if (!PALETTES.includes(palette)) throw new Error(`Unknown palette "${palette}". Use one of: ${PALETTES.join(", ")}.`);
+  if (glass !== undefined && !GLASS.includes(glass)) throw new Error(`Unknown glass "${glass}". Use one of: ${GLASS.join(", ")}.`);
+}
 
 /**
- * Render one graphic and upload it.
+ * Render one graphic (JPEG) and upload it.
  *
  *   template   award | new_listing | call_submissions | call_jury |
  *              announcement | jury_quote | screenshot
- *   format     ig_portrait | square | story | link
- *   palette    a lib/palettes.ts id (house, egypt, night, paper, saperavi, moss)
+ *   format     ig_portrait | square | story | reel_cover | link
+ *   palette    a lib/palettes.ts id (house, egypt, night, paper, saperavi,
+ *              moss) or "auto" (tinted from the screenshot's own colours)
  *   fields     the template's text fields by key (lib/graphics/spec.ts),
  *              e.g. { tier: "SOTD", title, studio, date, awardSlug, url }
  *   imageUrls  the template's image slots in order: award [screenshot, badge],
- *              new_listing / jury_quote / screenshot [screenshot]. Award badges
- *              come from fields.awardSlug, so a badge URL is rarely needed.
+ *              the rest [screenshot]. Award badges come from fields.awardSlug,
+ *              so a badge URL is rarely needed. Calls use the screenshot only
+ *              as a blurred backdrop.
+ *   glass      frost (default) | liquid | tint
  */
 export const render = internalAction({
   args: {
@@ -41,50 +68,212 @@ export const render = internalAction({
     palette: v.string(),
     fields: v.optional(v.record(v.string(), v.string())),
     imageUrls: v.optional(v.array(v.string())),
+    glass: v.optional(v.string()),
   },
   returns: v.object({ url: v.string(), mediaId: v.id("media") }),
   // Return type spelled out: it references `internal`, which would otherwise make the api types circular.
-  handler: async (ctx, { template, format, palette, fields = {}, imageUrls = [] }): Promise<{ url: string; mediaId: Id<"media"> }> => {
+  handler: async (ctx, { template, format, palette, fields = {}, imageUrls = [], glass }): Promise<{ url: string; mediaId: Id<"media"> }> => {
     if (!isTemplate(template)) throw new Error(`Unknown template "${template}". Use one of: ${Object.keys(TEMPLATES).join(", ")}.`);
     if (!isFormat(format)) throw new Error(`Unknown format "${format}". Use one of: ${Object.keys(FORMATS).join(", ")}.`);
-    if (!(PALETTE_IDS as string[]).includes(palette)) throw new Error(`Unknown palette "${palette}". Use one of: ${PALETTE_IDS.join(", ")}.`);
-
-    const origin = process.env.ADMIN_ORIGIN?.replace(/\/+$/, "");
-    const key = process.env.GRAPHICS_RENDER_KEY;
-    if (!origin || !key) throw new Error("Graphics rendering needs ADMIN_ORIGIN and GRAPHICS_RENDER_KEY on this Convex deployment.");
+    checkPalette(palette, glass);
+    const { origin, key } = config();
 
     const slots: readonly string[] = TEMPLATES[template].images;
     const images = Object.fromEntries(slots.map((slot, i) => [slot, imageUrls[i]]));
-    const query = graphicsQuery({ template, format, palette, fields, images });
-
-    const res = await fetch(`${origin}/api/graphics?${query}`, {
-      headers: { "x-render-key": key },
-      signal: AbortSignal.timeout(45_000),
-    });
-    if (!res.ok || res.headers.get("content-type") !== "image/png") {
-      throw new Error(`Rendering failed (HTTP ${res.status}): ${(await res.text()).slice(0, 200)}`);
-    }
-    const png = await res.blob();
+    const query = graphicsQuery({ template, format, palette, fields: { ...fields, glass, output: "jpeg" }, images });
+    const jpeg = await fetchJpeg(`${origin}/api/graphics?${query}`, key);
 
     const label = fields.title || fields.headline || fields.site || template;
-    const fileName = `shemoqmedi-${slugify(template)}-${slugify(label, "graphic")}-${format}.png`;
-    const file = await uploadToImageKitFromServer(png, {
-      fileName,
-      folder: FOLDER,
-      tags: ["social", template, format, palette],
-    });
-
     const { width, height } = FORMATS[format];
-    const mediaId = await ctx.runMutation(internal.media.registerInternal, {
-      fileId: file.fileId,
-      url: file.url,
-      filePath: file.filePath,
-      kind: "image",
-      contentType: "image/png",
-      size: file.size,
-      width: file.width ?? width,
-      height: file.height ?? height,
-    });
-    return { url: file.url, mediaId };
+    return await store(ctx, jpeg, `shemoqmedi-${slugify(template)}-${slugify(label, "graphic")}-${format}.jpg`, FOLDER, [template, format, palette], width, height);
+  },
+});
+
+async function store(ctx: ActionCtx, body: Blob, fileName: string, folder: string, tags: string[], width: number, height: number) {
+  const file = await uploadToImageKitFromServer(body, { fileName, folder, tags: ["social", ...tags] });
+  const mediaId: Id<"media"> = await ctx.runMutation(internal.media.registerInternal, {
+    fileId: file.fileId,
+    url: file.url,
+    filePath: file.filePath,
+    kind: "image",
+    contentType: "image/jpeg",
+    size: file.size,
+    width: file.width ?? width,
+    height: file.height ?? height,
+  });
+  return { url: file.url, mediaId };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The storytelling carousel
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "2026-11-12" → "12 Nov 2026". */
+function displayDay(day: string) {
+  const [y, m, d] = day.split("-").map(Number);
+  return y && m && d ? `${d} ${MONTHS[m - 1]} ${y}` : day;
+}
+
+const factsValidator = v.object({
+  slug: v.string(),
+  title: v.string(),
+  studio: v.string(),
+  url: v.string(),
+  tagline: v.string(),
+  categories: v.array(v.string()),
+  tech: v.array(v.string()),
+  shots: v.array(v.string()),
+  mobile: v.union(v.string(), v.null()),
+  award: v.union(v.object({ tier: v.string(), date: v.string(), slug: v.string() }), v.null()),
+  score: v.union(v.number(), v.null()),
+  pillars: v.union(v.object({ design: v.number(), usability: v.number(), creativity: v.number(), content: v.number() }), v.null()),
+  quote: v.union(v.object({ text: v.string(), juror: v.string(), role: v.string() }), v.null()),
+});
+
+/** What a listing's carousel says: facts, screenshots, its latest award, the jury. */
+export const carouselFacts = internalQuery({
+  args: { listingId: v.id("listings") },
+  returns: v.union(factsValidator, v.null()),
+  handler: async (ctx, { listingId }) => {
+    const l = await ctx.db.get(listingId);
+    if (!l) return null;
+    const ids = [l.coverId, ...(l.galleryIds ?? [])];
+    const shots: string[] = [];
+    let mobile: string | null = null;
+    for (const id of ids) {
+      const url = await mediaUrl(ctx, id);
+      if (!url) continue;
+      const row = await mediaRow(ctx, id);
+      // A tall screenshot is the phone view, not a slide of its own.
+      if (!mobile && row?.width && row.height && row.height > row.width * 1.3) mobile = url;
+      else shots.push(url);
+    }
+    const awards = await ctx.db
+      .query("awards")
+      .withIndex("by_listing", (q) => q.eq("listingId", listingId))
+      .order("desc")
+      .take(10);
+    const award = awards.find((a) => a.status === "active") ?? null;
+    const evals = await ctx.db
+      .query("juryEvaluations")
+      .withIndex("by_listing", (q) => q.eq("listingId", listingId))
+      .take(50);
+    // The quote: the fullest comment that still fits a slide.
+    const best = evals
+      .filter((e) => e.comment.trim().length >= 20 && e.comment.trim().length <= 300)
+      .sort((a, b) => b.comment.length - a.comment.length)[0];
+    const juror = best ? await ctx.db.get(best.jurorId) : null;
+    return {
+      slug: l.slug,
+      title: l.title,
+      studio: l.creditName,
+      url: l.url,
+      tagline: l.tagline,
+      categories: listingCategories(l).map(categoryName),
+      tech: l.technologies,
+      shots: shots.slice(0, 4),
+      mobile,
+      award: award ? { tier: award.tier, date: displayDay(award.date), slug: award.slug } : null,
+      score: l.finalScore ?? null,
+      pillars: l.editorialScores ? readPillars(l.editorialScores) : null,
+      quote: best && juror ? { text: best.comment.trim(), juror: juror.name, role: juror.title } : null,
+    };
+  },
+});
+
+/**
+ * Render the storytelling Instagram carousel (6–8 JPEG slides, 1080×1350,
+ * cut from one panorama) and upload every slide. Give a `listingId` to
+ * take the facts from the database, `facts` to override or supply them
+ * (keys: title, studio, url, tagline, kicker, date, tier, awardSlug, score,
+ * design, usability, creativity, content, quote, juror, role, tech,
+ * categories, link, cta), or both.
+ *
+ *   story.chips   one-line chips for the detail slides ("The type", "The grid")
+ *   story.notes   a sentence under each detail
+ *   story.cta     the last slide's headline
+ *   story.glass   frost (default) | liquid | tint
+ *   story.shots   screenshot URLs to use instead of the listing's
+ *   story.mobile  a tall (phone) screenshot URL
+ */
+export const renderCarousel = internalAction({
+  args: {
+    listingId: v.optional(v.id("listings")),
+    facts: v.optional(v.record(v.string(), v.string())),
+    palette: v.string(),
+    story: v.optional(
+      v.object({
+        chips: v.optional(v.array(v.string())),
+        notes: v.optional(v.array(v.string())),
+        cta: v.optional(v.string()),
+        glass: v.optional(v.string()),
+        shots: v.optional(v.array(v.string())),
+        mobile: v.optional(v.string()),
+      }),
+    ),
+  },
+  returns: v.object({ urls: v.array(v.string()), mediaIds: v.array(v.id("media")), slides: v.array(v.string()) }),
+  handler: async (ctx, { listingId, facts = {}, palette, story = {} }): Promise<{ urls: string[]; mediaIds: Id<"media">[]; slides: string[] }> => {
+    checkPalette(palette, story.glass);
+    if (!listingId && !facts.title) throw new Error("Give a listingId, or facts with at least a title.");
+    const { origin, key } = config();
+
+    const base = listingId ? await ctx.runQuery(internal.graphics.carouselFacts, { listingId }) : null;
+    if (listingId && !base) throw new Error("Listing not found.");
+
+    const q = new URLSearchParams({ palette, output: "jpeg" });
+    if (story.glass) q.set("glass", story.glass);
+    const put = (k: string, value: string | number | null | undefined) => {
+      if (value !== null && value !== undefined && String(value).trim()) q.set(k, String(value));
+    };
+    if (base) {
+      put("title", base.title);
+      put("studio", base.studio);
+      put("url", base.url);
+      put("tagline", base.tagline);
+      put("slug", base.slug);
+      put("tech", base.tech.join(","));
+      put("categories", base.categories.join(","));
+      if (base.award) {
+        put("tier", base.award.tier);
+        put("date", base.award.date);
+        put("awardSlug", base.award.slug);
+      }
+      put("score", base.score);
+      if (base.pillars) for (const [k, value] of Object.entries(base.pillars)) put(k, value);
+      if (base.quote) {
+        put("quote", base.quote.text);
+        put("juror", base.quote.juror);
+        put("role", base.quote.role);
+      }
+    }
+    for (const [k, value] of Object.entries(facts)) put(k, value);
+    for (const shot of story.shots ?? base?.shots ?? []) q.append("shot", shot);
+    put("mobile", story.mobile ?? base?.mobile ?? null);
+    for (const chip of story.chips ?? []) q.append("chip", chip);
+    for (const note of story.notes ?? []) q.append("note", note);
+    put("cta", story.cta);
+
+    const endpoint = `${origin}/api/graphics/carousel`;
+    q.set("slide", "plan");
+    const planRes = await fetch(`${endpoint}?${q}`, { headers: { "x-render-key": key }, signal: AbortSignal.timeout(60_000) });
+    if (!planRes.ok) throw new Error(`Carousel plan failed (HTTP ${planRes.status}): ${(await planRes.text()).slice(0, 200)}`);
+    const { slides } = (await planRes.json()) as { slides: string[] };
+
+    const label = slugify(q.get("title") ?? "carousel", "carousel");
+    const folder = `/social/carousels/${label}-${Date.now().toString(36)}`;
+    const urls: string[] = [];
+    const mediaIds: Id<"media">[] = [];
+    // One at a time, in order: each slide is a full render on the admin app.
+    for (let i = 0; i < slides.length; i++) {
+      q.set("slide", String(i));
+      const jpeg = await fetchJpeg(`${endpoint}?${q}`, key);
+      const saved = await store(ctx, jpeg, `shemoqmedi-${label}-${String(i + 1).padStart(2, "0")}-${slides[i]}.jpg`, folder, ["carousel", slides[i], palette], 1080, 1350);
+      urls.push(saved.url);
+      mediaIds.push(saved.mediaId);
+    }
+    return { urls, mediaIds, slides };
   },
 });

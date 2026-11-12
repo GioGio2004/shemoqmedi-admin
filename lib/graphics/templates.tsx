@@ -1,751 +1,447 @@
 /* eslint-disable jsx-a11y/alt-text -- satori markup, not a page */
-import type { CSSProperties, ReactNode } from "react";
-import { alpha, inkOn, luminance, type Palette } from "@/lib/palettes";
+import type { ReactNode } from "react";
 import { FORMATS, TIERS, type FormatId, type TemplateId, type Tier } from "./spec";
+import {
+  wrapLines,
+  Arrow,
+  BrowserGlass,
+  Display,
+  Glass,
+  Label,
+  QuoteMark,
+  ScoreTile,
+  Seal,
+  Wordmark,
+  col,
+  fit,
+  host,
+  ink,
+  pillWidth,
+  row,
+  soft,
+  type Rect,
+  type Scene,
+} from "./glass";
 
-// JSX for satori (next/og). Satori lays out with flexbox only: every element
-// with more than one child needs display:flex, and there is no grid, no
-// em/rem and no CSS variables. Sizes are px on the final canvas.
-//
-// One layout system for every template, Kencho-style: a thin header row
-// (wordmark, kicker), generous margins, one big headline, and a footer row
-// (site address, date). Colours follow the palette's 60/30/10 roles: base is
-// the background, surface fills the one large block (the screenshot panel,
-// the call's body band), accent marks only small things (the chip, the CTA).
+// Single-image social graphics in the glass language (see glass.tsx): a
+// blurred, palette-tinted backdrop of the site, glass panels whose
+// coordinates are fixed per format (so the frost lines up), Inter display
+// type. One layout per template and shape: wide (link 1200×627), portrait
+// (1080×1350), square (1080×1080), tall (story and reel cover, 1080×1920;
+// a reel cover keeps everything inside the 3:4 crop the profile grid shows).
 
-export type Images = Record<string, string | null>;
+export type SingleAssets = {
+  back: string | null;
+  /** The screenshot, sharp, for browser windows. */
+  shot: string | null;
+  badge: string | null;
+};
 
 export type RenderInput = {
   template: TemplateId;
   format: FormatId;
-  palette: Palette;
+  scene: Scene;
   fields: Record<string, string>;
-  images: Images;
+  assets: SingleAssets;
 };
 
-type Box = {
-  w: number;
-  h: number;
-  /** Outer margin. */
-  m: number;
-  /** Wide (link) format: text and image side by side. */
-  wide: boolean;
-  /** Story format: extra vertical room. */
-  tall: boolean;
-};
+type Shape = "wide" | "portrait" | "square" | "tall";
 
-function box(format: FormatId): Box {
-  const { width: w, height: h } = FORMATS[format];
-  const wide = w / h > 1.3;
-  return { w, h, m: wide ? 64 : 80, wide, tall: h / w > 1.6 };
+type Frame = { W: number; H: number; M: number; shape: Shape };
+
+function frameOf(format: FormatId): Frame {
+  const { width: W, height: H } = FORMATS[format];
+  const shape: Shape = W / H > 1.3 ? "wide" : H / W > 1.6 ? "tall" : H > W ? "portrait" : "square";
+  return { W, H, M: shape === "wide" ? 56 : 88, shape };
 }
 
-/** Shrink a headline until it fits `lines` lines of `width` px (Inter ≈ 0.54em per character). */
-function fit(text: string, width: number, lines: number, max: number, min = 28) {
-  const chars = Math.max(text.length, 1);
-  const size = (width * lines) / (chars * 0.54);
-  return Math.round(Math.max(min, Math.min(max, size)));
+function At({ x, y, w, children }: { x: number; y: number; w?: number; children: ReactNode }) {
+  return <div style={{ ...col, position: "absolute", left: x, top: y, ...(w ? { width: w } : {}) }}>{children}</div>;
 }
 
-/** The accent, unless it would vanish on `fill` (house: near-black on black); then the base colour. */
-function accentOn(p: Palette, fill: string) {
-  const [a, b] = [luminance(p.accent), luminance(fill)].sort((x, y) => y - x);
-  return (a + 0.05) / (b + 0.05) < 1.6 ? p.base : p.accent;
+/** A text area from `top` to `bottom`, its content sitting on the bottom edge. */
+function Area({ x, top, bottom, w, align = "flex-end", children }: { x: number; top: number; bottom: number; w: number; align?: "flex-end" | "center"; children: ReactNode }) {
+  return <div style={{ ...col, position: "absolute", left: x, top, width: w, height: bottom - top, justifyContent: align }}>{children}</div>;
 }
 
-function hostOf(url: string) {
-  return url.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "");
+/** Title size for a block of `areaH` px that also holds the label, studio and tagline. */
+function titleSize(title: string, width: number, areaH: number, max: number, studio: boolean, tagline: string, taglineSize: number, studioSize = 36) {
+  const tagLines = tagline ? Math.min(3, wrapLines(tagline, width, taglineSize, 0.5)) : 0;
+  const rest = 22 + 30 + (studio ? 26 + studioSize * 1.2 : 0) + (tagLines ? 22 + tagLines * taglineSize * 1.36 : 0);
+  return fit(title, width, 4, max, 40, areaH - rest);
 }
 
-/** Wide formats: a browser window about as wide as a desktop screenshot, running off the canvas edge. */
-function bleedW(b: Box) {
-  return Math.round((b.h - 56) * 1.62);
-}
-
-const row: CSSProperties = { display: "flex", flexDirection: "row" };
-const col: CSSProperties = { display: "flex", flexDirection: "column" };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared pieces
-// ─────────────────────────────────────────────────────────────────────────────
-
-function Wordmark({ color, size }: { color: string; size: number }) {
+function TitleBlock({
+  s,
+  kicker,
+  title,
+  size,
+  studio,
+  tagline,
+  taglineSize = 28,
+  studioSize = 36,
+}: {
+  s: Scene;
+  kicker: string;
+  title: string;
+  size: number;
+  studio?: string;
+  tagline?: string;
+  taglineSize?: number;
+  studioSize?: number;
+}) {
+  // A column, not a fragment: satori lays fragments out as a row.
   return (
-    <div style={{ ...row, alignItems: "baseline", color, fontSize: size, fontWeight: 700, letterSpacing: size * 0.14 }}>
-      SHEMOQMEDI
-      <span style={{ marginLeft: size * 0.5, fontWeight: 500, opacity: 0.55, letterSpacing: size * 0.3 }}>SPACE</span>
-    </div>
-  );
-}
-
-/** A small filled label: the accent's one big moment. */
-function Chip({ p, size, children }: { p: Palette; size: number; children: ReactNode }) {
-  return (
-    <div
-      style={{
-        ...row,
-        alignItems: "center",
-        background: p.accent,
-        color: inkOn(p.accent),
-        fontSize: size,
-        fontWeight: 600,
-        letterSpacing: size * 0.02,
-        padding: `${size * 0.42}px ${size * 0.8}px`,
-        borderRadius: size * 0.25,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function Header({ p, b, kicker }: { p: Palette; b: Box; kicker?: string }) {
-  const ink = inkOn(p.base);
-  const size = b.wide ? 18 : 22;
-  return (
-    <div style={{ ...row, alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-      <Wordmark color={ink} size={size} />
-      {kicker ? (
-        <div style={{ ...row, alignItems: "center", color: alpha(ink, 0.7), fontSize: size, fontWeight: 500 }}>
-          <div style={{ width: size * 0.55, height: size * 0.55, background: p.accent, marginRight: size * 0.6 }} />
-          {kicker}
+    <div style={{ ...col }}>
+      <Label s={s} dot size={Math.max(15, Math.round(studioSize * 0.55))}>
+        {kicker}
+      </Label>
+      <div style={{ display: "flex", marginTop: 30 }}>
+        <Display s={s} size={size}>
+          {title}
+        </Display>
+      </div>
+      {studio ? (
+        <div style={{ display: "flex", marginTop: 26, fontSize: studioSize, fontWeight: 500, letterSpacing: -0.6, color: soft(s, 0.72) }}>
+          by {studio}
         </div>
+      ) : null}
+      {tagline ? (
+        <div style={{ display: "block", marginTop: 22, fontSize: taglineSize, lineHeight: 1.36, color: soft(s, 0.75), lineClamp: 3 }}>{tagline}</div>
       ) : null}
     </div>
   );
 }
 
-function Footer({ p, b, left, right }: { p: Palette; b: Box; left?: string; right?: string }) {
-  const ink = inkOn(p.base);
-  const size = b.wide ? 18 : 22;
+function Header({ s, fr, right }: { s: Scene; fr: Frame; right?: string }) {
+  const y = fr.shape === "tall" ? 300 : fr.M;
+  const size = fr.shape === "wide" ? 15 : 19;
   return (
-    <div
-      style={{
-        ...row,
-        justifyContent: "space-between",
-        width: "100%",
-        paddingTop: size * 1.1,
-        borderTop: `2px solid ${alpha(ink, 0.12)}`,
-        color: alpha(ink, 0.6),
-        fontSize: size,
-        fontWeight: 500,
-      }}
-    >
-      <span>{left ?? "shemoqmedi.space"}</span>
-      <span>{right ?? ""}</span>
-    </div>
+    <>
+      <At x={fr.M} y={y}>
+        <Wordmark s={s} size={size} />
+      </At>
+      {right ? (
+        <At x={fr.W / 2} y={y} w={fr.W / 2 - fr.M}>
+          <div style={{ ...row, justifyContent: "flex-end" }}>
+            <Label s={s} size={size}>
+              {right}
+            </Label>
+          </div>
+        </At>
+      ) : null}
+    </>
   );
 }
 
-/** Whole canvas in the base colour, with the outer margin. */
-function Canvas({ p, b, children, padded = true }: { p: Palette; b: Box; children: ReactNode; padded?: boolean }) {
+function Canvas({ s, fr, back, children }: { s: Scene; fr: Frame; back: string | null; children: ReactNode }) {
   return (
-    <div
-      style={{
-        ...col,
-        width: b.w,
-        height: b.h,
-        background: p.base,
-        color: inkOn(p.base),
-        fontFamily: "Inter",
-        padding: padded ? b.m : 0,
-      }}
-    >
+    <div style={{ display: "flex", position: "relative", width: fr.W, height: fr.H, overflow: "hidden", fontFamily: "Inter", background: s.palette.base }}>
+      {back ? <img src={back} width={fr.W} height={fr.H} style={{ position: "absolute", left: 0, top: 0 }} /> : null}
       {children}
     </div>
   );
 }
 
-/**
- * A screenshot in a clean browser window: a slim title bar with three dots
- * and the address, then the page, cropped from the top. With no screenshot,
- * an empty page in the surface colour stands in.
- */
-function Browser({
-  p,
-  src,
-  url,
-  width,
-  height,
-  on,
-}: {
-  p: Palette;
-  src: string | null;
-  url?: string;
-  width: number;
-  height: number;
-  /** The colour the window sits on (for its edge). */
-  on: string;
-}) {
-  const bar = Math.round(Math.max(30, width * 0.042));
-  const chrome = "#F4F4F2";
-  const dot = Math.round(bar * 0.26);
-  const radius = Math.round(bar * 0.4);
-  return (
-    <div
-      style={{
-        ...col,
-        width,
-        height,
-        borderRadius: radius,
-        overflow: "hidden",
-        background: chrome,
-        border: `1px solid ${alpha(inkOn(on), 0.16)}`,
-      }}
-    >
-      <div style={{ ...row, alignItems: "center", height: bar, padding: `0 ${bar * 0.5}px`, background: chrome }}>
-        {[0, 1, 2].map((i) => (
-          <div
-            key={i}
-            style={{ width: dot, height: dot, borderRadius: dot, background: "#D4D4D0", marginRight: dot * 0.7 }}
-          />
-        ))}
-        {url ? (
-          <div style={{ ...row, flex: 1, justifyContent: "center", marginRight: dot * 5 }}>
-            <div
-              style={{
-                ...row,
-                padding: `${bar * 0.1}px ${bar * 0.6}px`,
-                borderRadius: bar,
-                background: "#FFFFFF",
-                color: "#5A5A58",
-                fontSize: Math.round(bar * 0.4),
-                fontWeight: 500,
-              }}
-            >
-              {hostOf(url)}
-            </div>
-          </div>
-        ) : null}
-      </div>
-      {src ? (
-        <img
-          src={src}
-          width={width}
-          height={height - bar}
-          style={{ width, height: height - bar, objectFit: "cover", objectPosition: "top" }}
-        />
-      ) : (
-        <div style={{ ...col, width, height: height - bar, background: alpha(p.surface, 0.25) }} />
-      )}
-    </div>
-  );
-}
-
-/** The largest desktop-shaped browser window (1.7:1 page under the title bar) inside maxW × maxH. */
-function desktopWindow(maxW: number, maxH: number) {
-  const bar = (w: number) => Math.round(Math.max(30, w * 0.042));
-  let width = maxW;
-  if (width / 1.7 + bar(width) > maxH) width = Math.floor((maxH - bar(maxW)) * 1.7);
-  return { width, height: Math.round(width / 1.7 + bar(width)) };
-}
-
-/**
- * Height of the bottom screenshot panel: at most `share` of the canvas, and
- * never taller than a wide desktop-shaped window (1.9:1 plus the title bar), so a
- * landscape screenshot is only ever cropped at the bottom, never at the sides.
- */
-function screenPanelHeight(b: Box, share: number) {
-  const windowW = b.w - b.m * 2;
-  const bar = Math.round(Math.max(30, windowW * 0.042));
-  return Math.round(Math.min(b.h * share, b.m + windowW / 1.9 + bar));
-}
-
-/** The surface-coloured panel a browser window sits in, flush to the edges it touches. */
-function ScreenPanel({
-  p,
-  src,
-  url,
-  width,
-  height,
-  inset,
-}: {
-  p: Palette;
-  src: string | null;
-  url?: string;
-  width: number;
-  height: number;
-  inset: number;
-}) {
-  return (
-    <div
-      style={{
-        ...col,
-        width,
-        height,
-        background: p.surface,
-        alignItems: "center",
-        justifyContent: "flex-end",
-        padding: `${inset}px ${inset}px 0`,
-      }}
-    >
-      <Browser
-        p={p}
-        src={src}
-        url={url}
-        width={width - inset * 2}
-        height={height - inset}
-        on={p.surface}
-      />
-    </div>
-  );
-}
-
-function Title({ text, size, color }: { text: string; size: number; color: string }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        fontSize: size,
-        lineHeight: 1.02,
-        fontWeight: 600,
-        letterSpacing: -size * 0.035,
-        color,
-      }}
-    >
-      {text}
-    </div>
-  );
+/** Where the browser window goes, per shape. */
+function browserRect(fr: Frame): Rect {
+  const w = fr.W - fr.M * 2;
+  switch (fr.shape) {
+    case "wide":
+      return { x: 600, y: 72, w: 780, h: 490 };
+    case "portrait":
+      return { x: fr.M, y: 724, w, h: 560 };
+    case "square":
+      return { x: fr.M, y: 590, w, h: 440 };
+    case "tall":
+      return { x: fr.M, y: 1100, w, h: 570 };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Templates
+// Award and new listing
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Fallback mark when the badge image is not available: the tier in a square. */
-function TierMark({ p, tier, size }: { p: Palette; tier: Tier; size: number }) {
-  return (
-    <div
-      style={{
-        ...col,
-        width: size,
-        height: size,
-        borderRadius: size,
-        alignItems: "center",
-        justifyContent: "center",
-        background: p.accent,
-        color: inkOn(p.accent),
-        fontSize: size * 0.26,
-        fontWeight: 700,
-        letterSpacing: size * 0.01,
-      }}
-    >
-      {tier}
-    </div>
-  );
-}
-
-function Award({ p, b, f, images }: { p: Palette; b: Box; f: Record<string, string>; images: Images }) {
-  const ink = inkOn(p.base);
+function SiteCard({ s, fr, f, a, award }: { s: Scene; fr: Frame; f: Record<string, string>; a: SingleAssets; award: boolean }) {
   const tier = (f.tier in TIERS ? f.tier : "SOTD") as Tier;
-  const kicker = TIERS[tier];
-  const badgeSize = b.wide ? 150 : b.tall ? 240 : 200;
-  const badge = images.badge ? (
-    <img src={images.badge} width={badgeSize} height={badgeSize} style={{ width: badgeSize, height: badgeSize }} />
-  ) : (
-    <TierMark p={p} tier={tier} size={badgeSize} />
-  );
+  const kicker = award ? TIERS[tier] : f.kicker || "New on Shemoqmedi";
+  const tagline = award ? "" : f.tagline;
+  const b = browserRect(fr);
+  const browser = <BrowserGlass s={s} rect={b} src={a.shot} url={f.url} radius={fr.shape === "wide" ? 26 : 34} />;
 
-  if (b.wide) {
-    const textW = Math.round(b.w * 0.44);
-    const panelW = b.w - textW - b.m;
+  if (fr.shape === "wide") {
+    const width = 500;
+    const size = titleSize(f.title, width, (award ? 430 : 560) - 110, 70, true, tagline, 20, 24);
+    const seal = 168;
     return (
-      <div style={{ ...row, width: b.w, height: b.h, background: p.base, color: ink, fontFamily: "Inter" }}>
-        <div style={{ ...col, width: textW + b.m, height: b.h, padding: b.m, paddingRight: b.m * 0.75 }}>
-          <Header p={p} b={b} />
-          <div style={{ ...col, flex: 1, justifyContent: "center" }}>
-            <div style={{ ...row, marginBottom: 26 }}>
-              <Chip p={p} size={20}>
-                {kicker}
-              </Chip>
-            </div>
-            <Title text={f.title} size={fit(f.title, textW, 2, 64)} color={ink} />
-            <div style={{ display: "flex", marginTop: 16, fontSize: 26, color: alpha(ink, 0.65), fontWeight: 500 }}>
-              by {f.studio}
-            </div>
-          </div>
-          <Footer p={p} b={b} right={f.date} />
-        </div>
-        <div style={{ ...col, width: panelW, height: b.h, background: p.surface, position: "relative", overflow: "hidden" }}>
-          <div style={{ ...col, position: "absolute", left: 56, top: 56 }}>
-            <Browser p={p} src={images.screenshot} url={f.url} width={bleedW(b)} height={b.h - 56} on={p.surface} />
-          </div>
-          <div style={{ ...col, position: "absolute", right: 28, bottom: 28 }}>{badge}</div>
-        </div>
-      </div>
-    );
-  }
-
-  const textW = b.w - b.m * 2;
-  const panelH = screenPanelHeight(b, b.h > b.w ? 0.47 : 0.42);
-  return (
-    <Canvas p={p} b={b} padded={false}>
-      <div style={{ ...col, flex: 1, padding: `${b.m}px ${b.m}px ${b.m * 0.8}px` }}>
-        <Header p={p} b={b} kicker={f.date} />
-        <div style={{ ...row, flex: 1, alignItems: b.tall ? "center" : "flex-end", justifyContent: "space-between" }}>
-          <div style={{ ...col, width: textW - badgeSize - 40 }}>
-            <div style={{ ...row, marginBottom: b.tall ? 40 : 28 }}>
-              <Chip p={p} size={24}>
-                {kicker}
-              </Chip>
-            </div>
-            <Title
-              text={f.title}
-              size={fit(f.title, textW - badgeSize - 40, b.h > b.w ? 3 : 2, b.tall ? 120 : 104)}
-              color={ink}
-            />
-            <div style={{ display: "flex", marginTop: 20, fontSize: 34, color: alpha(ink, 0.65), fontWeight: 500 }}>
-              by {f.studio}
-            </div>
-          </div>
-          {badge}
-        </div>
-      </div>
-      <ScreenPanel p={p} src={images.screenshot} url={f.url} width={b.w} height={panelH} inset={b.m} />
-    </Canvas>
-  );
-}
-
-function NewListing({ p, b, f, images }: { p: Palette; b: Box; f: Record<string, string>; images: Images }) {
-  const ink = inkOn(p.base);
-  if (b.wide) {
-    const textW = Math.round(b.w * 0.42);
-    const panelW = b.w - textW - b.m;
-    return (
-      <div style={{ ...row, width: b.w, height: b.h, background: p.base, color: ink, fontFamily: "Inter" }}>
-        <div style={{ ...col, width: textW + b.m, height: b.h, padding: b.m, paddingRight: b.m * 0.75 }}>
-          <Header p={p} b={b} />
-          <div style={{ ...col, flex: 1, justifyContent: "center" }}>
-            <div style={{ ...row, marginBottom: 24 }}>
-              <Chip p={p} size={18}>
-                {f.kicker}
-              </Chip>
-            </div>
-            <Title text={f.title} size={fit(f.title, textW, 2, 60)} color={ink} />
-            <div style={{ display: "flex", marginTop: 14, fontSize: 24, color: alpha(ink, 0.65), fontWeight: 500 }}>
-              by {f.studio}
-            </div>
-            {f.tagline ? (
-              <div
-                style={{ display: "block", marginTop: 22, fontSize: 21, lineHeight: 1.4, color: alpha(ink, 0.8), lineClamp: 3 }}
-              >
-                {f.tagline}
-              </div>
-            ) : null}
-          </div>
-          <Footer p={p} b={b} />
-        </div>
-        <div style={{ ...col, width: panelW, height: b.h, background: p.surface, position: "relative", overflow: "hidden" }}>
-          <div style={{ ...col, position: "absolute", left: 56, top: 56 }}>
-            <Browser p={p} src={images.screenshot} url={f.url} width={bleedW(b)} height={b.h - 56} on={p.surface} />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const textW = b.w - b.m * 2;
-  const panelH = screenPanelHeight(b, b.h > b.w ? 0.5 : 0.44);
-  return (
-    <Canvas p={p} b={b} padded={false}>
-      <div style={{ ...col, flex: 1, padding: `${b.m}px ${b.m}px ${b.m * 0.75}px` }}>
-        <Header p={p} b={b} kicker={f.kicker} />
-        <div style={{ ...col, flex: 1, justifyContent: b.tall ? "center" : "flex-end" }}>
-          <Title text={f.title} size={fit(f.title, textW, b.tall ? 3 : 2, b.tall ? 132 : 108)} color={ink} />
-          <div style={{ display: "flex", marginTop: 18, fontSize: 34, color: alpha(ink, 0.65), fontWeight: 500 }}>
-            by {f.studio}
-          </div>
-          {f.tagline ? (
-            <div
-              style={{
-                display: "block",
-                marginTop: 28,
-                width: textW * 0.86,
-                fontSize: b.h > b.w ? 30 : 27,
-                lineHeight: 1.4,
-                color: alpha(ink, 0.8),
-                lineClamp: 3,
-              }}
-            >
-              {f.tagline}
-            </div>
-          ) : null}
-        </div>
-      </div>
-      <ScreenPanel p={p} src={images.screenshot} url={f.url} width={b.w} height={panelH} inset={b.m} />
-    </Canvas>
-  );
-}
-
-/** Call for submissions, call for jury, announcement: headline on base, body + CTA in the surface band. */
-function Call({ p, b, f }: { p: Palette; b: Box; f: Record<string, string> }) {
-  const ink = inkOn(p.base);
-  const sInk = inkOn(p.surface);
-  const textW = b.w - b.m * 2;
-  const cta = f.cta ? hostOf(f.cta) : "";
-  const ctaFill = accentOn(p, p.surface);
-
-  const ctaEl = cta ? (
-    <div style={{ ...row }}>
-      <div
-        style={{
-          ...row,
-          alignItems: "center",
-          background: ctaFill,
-          color: inkOn(ctaFill),
-          fontSize: b.wide ? 22 : 30,
-          fontWeight: 600,
-          padding: b.wide ? "16px 26px" : "22px 34px",
-          borderRadius: 6,
-        }}
-      >
-        {cta}
-        <svg
-          width={b.wide ? 20 : 26}
-          height={b.wide ? 20 : 26}
-          viewBox="0 0 24 24"
-          style={{ marginLeft: b.wide ? 14 : 18 }}
-        >
-          <path d="M5 12h13M13 6l6 6-6 6" stroke={inkOn(ctaFill)} strokeWidth="2.4" fill="none" />
-        </svg>
-      </div>
-    </div>
-  ) : null;
-
-  if (b.wide) {
-    const bandW = Math.round(b.w * 0.36);
-    const leftW = b.w - bandW;
-    return (
-      <div style={{ ...row, width: b.w, height: b.h, background: p.base, color: ink, fontFamily: "Inter" }}>
-        <div style={{ ...col, width: leftW, height: b.h, padding: b.m }}>
-          <Header p={p} b={b} />
-          <div style={{ ...col, flex: 1, justifyContent: "center" }}>
-            <Title text={f.headline} size={fit(f.headline, leftW - b.m * 2, 3, 76)} color={ink} />
-          </div>
-          <Footer p={p} b={b} left={f.kicker} />
-        </div>
-        <div
-          style={{
-            ...col,
-            width: bandW,
-            height: b.h,
-            background: p.surface,
-            color: sInk,
-            padding: b.m * 0.8,
-            justifyContent: "flex-end",
-          }}
-        >
-          {f.body ? (
-            <div style={{ display: "block", fontSize: 24, lineHeight: 1.42, marginBottom: 32, lineClamp: 7 }}>{f.body}</div>
-          ) : null}
-          {ctaEl}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <Canvas p={p} b={b} padded={false}>
-      <div style={{ ...col, flex: 1, padding: `${b.m}px ${b.m}px ${b.m}px` }}>
-        <Header p={p} b={b} kicker={f.kicker} />
-        <div style={{ ...col, flex: 1, justifyContent: "center" }}>
-          <Title
-            text={f.headline}
-            size={fit(f.headline, textW, b.tall ? 5 : b.h > b.w ? 4 : 3, b.tall ? 150 : 132)}
-            color={ink}
-          />
-        </div>
-      </div>
-      {/* The surface band: as tall as its text, at least ~30% of the canvas. */}
-      <div
-        style={{
-          ...col,
-          minHeight: Math.round(b.h * (b.h > b.w ? 0.3 : 0.32)),
-          background: p.surface,
-          color: sInk,
-          padding: `${b.m * 0.9}px ${b.m}px ${b.m}px`,
-          justifyContent: "flex-end",
-        }}
-      >
-        {f.body ? (
-          <div
-            style={{
-              display: "block",
-              width: textW * 0.9,
-              fontSize: b.tall ? 36 : b.h > b.w ? 32 : 29,
-              lineHeight: 1.38,
-              marginBottom: b.h > b.w ? 40 : 32,
-              lineClamp: 4,
-            }}
-          >
-            {f.body}
-          </div>
+      <>
+        {browser}
+        <At x={fr.M} y={fr.M}>
+          <Wordmark s={s} size={15} />
+        </At>
+        <Area x={fr.M} top={110} bottom={award ? 430 : 560} w={width} align="center">
+          <TitleBlock s={s} kicker={kicker} title={f.title} size={size} studio={f.studio} tagline={tagline} taglineSize={20} studioSize={24} />
+        </Area>
+        {award ? <Seal s={s} rect={{ x: b.x - seal / 2 + 10, y: fr.H - seal - 36, w: seal, h: seal }} badge={a.badge} tier={tier} /> : null}
+        {f.date ? (
+          <At x={fr.M} y={fr.H - fr.M - 18}>
+            <Label s={s} size={15}>
+              {f.date}
+            </Label>
+          </At>
         ) : null}
-        {ctaEl}
-      </div>
-    </Canvas>
+      </>
+    );
+  }
+
+  const seal = fr.shape === "square" ? 200 : 236;
+  // The seal sits on the browser's corner; only portrait and square titles share its column.
+  const width = fr.W - fr.M * 2 - (award && fr.shape !== "tall" ? seal * 0.55 : 0);
+  const max = fr.shape === "tall" ? 150 : fr.shape === "portrait" ? 132 : 112;
+  const taglineSize = fr.shape === "square" ? 26 : 30;
+  const bottom = b.y - (award ? 110 : 60);
+  const top = fr.shape === "tall" ? 360 : 160;
+  const size = titleSize(f.title, width, bottom - top, f.title.length <= 12 ? max * 1.3 : max, true, tagline, taglineSize);
+  return (
+    <>
+      <Header s={s} fr={fr} right={award ? f.date : undefined} />
+      <Area x={fr.M} top={top} bottom={bottom} w={width}>
+        <TitleBlock s={s} kicker={kicker} title={f.title} size={size} studio={f.studio} tagline={tagline} taglineSize={taglineSize} />
+      </Area>
+      {browser}
+      {award ? <Seal s={s} rect={{ x: fr.W - fr.M - seal + 24, y: b.y - seal * 0.62, w: seal, h: seal }} badge={a.badge} tier={tier} /> : null}
+      {fr.shape === "tall" ? (
+        <At x={fr.M} y={b.y + b.h + 64} w={fr.W - fr.M * 2}>
+          <div style={{ ...row, justifyContent: "space-between", alignItems: "center" }}>
+            <Label s={s}>{f.url ? host(f.url) : "shemoqmedi.space"}</Label>
+            <Label s={s}>shemoqmedi.space</Label>
+          </div>
+        </At>
+      ) : null}
+    </>
   );
 }
 
-function JuryQuote({ p, b, f, images }: { p: Palette; b: Box; f: Record<string, string>; images: Images }) {
-  const ink = inkOn(p.base);
-  const sInk = inkOn(p.surface);
-  const textW = b.w - b.m * 2;
+// ─────────────────────────────────────────────────────────────────────────────
+// Screenshot slide
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ScreenshotSlide({ s, fr, f, a }: { s: Scene; fr: Frame; f: Record<string, string>; a: SingleAssets }) {
+  const caption = (size: number) => (
+    <div style={{ ...col }}>
+      <Display s={s} size={size}>
+        {f.title || host(f.url || "shemoqmedi.space")}
+      </Display>
+      {f.studio ? <div style={{ display: "flex", marginTop: 16, fontSize: size * 0.48, fontWeight: 500, color: soft(s, 0.7) }}>by {f.studio}</div> : null}
+    </div>
+  );
+  if (fr.shape === "wide") {
+    const b = { x: fr.M, y: 72, w: 760, h: 483 };
+    return (
+      <>
+        <BrowserGlass s={s} rect={b} src={a.shot} url={f.url} radius={26} />
+        <At x={870} y={fr.M}>
+          <Wordmark s={s} size={14} />
+        </At>
+        <At x={870} y={250} w={290}>
+          {caption(fit(f.title || "x", 290, 3, 52, 26))}
+        </At>
+      </>
+    );
+  }
+  const w = fr.W - fr.M * 2;
+  const h = Math.round(w / 1.6);
+  const y = fr.shape === "tall" ? 620 : fr.shape === "portrait" ? 360 : 230;
+  return (
+    <>
+      <Header s={s} fr={fr} right={f.index} />
+      <BrowserGlass s={s} rect={{ x: fr.M, y, w, h }} src={a.shot} url={f.url} />
+      <At x={fr.M} y={y + h + (fr.shape === "square" ? 56 : 80)} w={w}>
+        {caption(fit(f.title || "x", w, 1, fr.shape === "square" ? 64 : 76, 36))}
+      </At>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Jury quote
+// ─────────────────────────────────────────────────────────────────────────────
+
+function JuryQuote({ s, fr, f }: { s: Scene; fr: Frame; f: Record<string, string> }) {
   const quote = f.quote.replace(/^["“]|["”]$/g, "");
-  // Drawn, not typed: Inter's “ is slanted bars at this size.
-  const mark = (size: number) => (
-    <svg width={size} height={size * 0.85} viewBox="0 0 52 44" style={{ marginBottom: size * 0.3 }}>
-      <path
-        d="M0 44V26C0 12 7 3 20 0l2 6C14 9 10 14 10 22h10v22zM30 44V26C30 12 37 3 50 0l2 6C44 9 40 14 40 22h10v22z"
-        fill={accentOn(p, p.base) === p.base ? ink : p.accent}
-      />
-    </svg>
-  );
-  const attribution = (color: string, size: number) => (
-    <div style={{ ...row, alignItems: "center" }}>
-      <div style={{ width: size * 1.6, height: 2, background: color, marginRight: size * 0.7, opacity: 0.5 }} />
-      <div style={{ ...col }}>
-        <span style={{ fontSize: size, fontWeight: 600, color }}>{f.juror}</span>
-        {f.role ? (
-          <span style={{ fontSize: size * 0.8, fontWeight: 400, color: alpha(color, 0.65), marginTop: 4 }}>{f.role}</span>
-        ) : null}
+  const score = Number(f.score);
+  const hasScore = f.score !== undefined && f.score !== "" && Number.isFinite(score);
+  const wide = fr.shape === "wide";
+  const card: Rect = wide
+    ? { x: fr.M, y: fr.M, w: 760, h: fr.H - fr.M * 2 }
+    : fr.shape === "tall"
+      ? { x: fr.M, y: 400, w: fr.W - fr.M * 2, h: 860 }
+      : fr.shape === "portrait"
+        ? { x: fr.M, y: 190, w: fr.W - fr.M * 2, h: 780 }
+        : { x: fr.M, y: 170, w: fr.W - fr.M * 2, h: 600 };
+  const pad = wide ? 44 : 56;
+  const textW = card.w - pad * 2;
+  const qSize = fit(quote, textW, wide ? 5 : fr.shape === "square" ? 5 : 7, wide ? 40 : 64, 24);
+  const tile = wide ? 170 : 210;
+  const siteBlock = (
+    <div style={{ ...col }}>
+      <Label s={s} size={wide ? 14 : 18}>
+        From the jury, on
+      </Label>
+      <div style={{ display: "flex", marginTop: 14 }}>
+        <Display s={s} size={fit(f.site || "Shemoqmedi", wide ? 300 : 600, 2, wide ? 44 : 64, 28)}>
+          {f.site || "Shemoqmedi"}
+        </Display>
       </div>
     </div>
   );
-
-  if (b.wide) {
-    const sideW = Math.round(b.w * 0.34);
-    const leftW = b.w - sideW;
-    return (
-      <div style={{ ...row, width: b.w, height: b.h, background: p.base, color: ink, fontFamily: "Inter" }}>
-        <div style={{ ...col, width: leftW, height: b.h, padding: b.m }}>
-          <Header p={p} b={b} kicker="From the jury" />
-          <div style={{ ...col, flex: 1, justifyContent: "center" }}>
-            {mark(64)}
-            <div style={{ display: "flex", fontSize: fit(quote, leftW - b.m * 2, 4, 46, 24), lineHeight: 1.22, fontWeight: 500, letterSpacing: -0.6 }}>
-              {quote}
-            </div>
-          </div>
-          {attribution(ink, 22)}
-        </div>
-        <div style={{ ...col, width: sideW, height: b.h, background: p.surface, color: sInk, padding: 40, justifyContent: "space-between" }}>
-          {images.screenshot ? (
-            <Browser p={p} src={images.screenshot} {...desktopWindow(sideW - 80, b.h)} on={p.surface} />
-          ) : (
-            <div style={{ display: "flex" }} />
-          )}
-          <div style={{ ...col }}>
-            <span style={{ fontSize: 18, color: alpha(sInk, 0.6), fontWeight: 500 }}>On</span>
-            <span style={{ fontSize: 30, fontWeight: 600, letterSpacing: -0.6, marginTop: 4 }}>{f.site}</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const bandH = Math.round(b.h * (images.screenshot ? (b.tall ? 0.29 : 0.3) : 0.2));
-  const thumb = desktopWindow(Math.round(b.w * 0.55), bandH - b.m * 0.6);
   return (
-    <Canvas p={p} b={b} padded={false}>
-      <div style={{ ...col, flex: 1, padding: b.m }}>
-        <Header p={p} b={b} kicker="From the jury" />
-        <div style={{ ...col, flex: 1, justifyContent: "center" }}>
-          {mark(b.tall ? 110 : 92)}
-          <div
-            style={{
-              display: "flex",
-              fontSize: fit(quote, textW, b.tall ? 7 : b.h > b.w ? 6 : 5, b.tall ? 76 : 66, 30),
-              lineHeight: 1.2,
-              fontWeight: 500,
-              letterSpacing: -1,
-            }}
-          >
+    <>
+      {wide ? null : <Header s={s} fr={fr} right="The jury" />}
+      <Glass s={s} rect={card} pad={pad} inner={{ justifyContent: "space-between" }}>
+        <div style={{ ...col }}>
+          <QuoteMark size={wide ? 40 : 56} color={s.palette.accent} />
+          <div style={{ display: "flex", marginTop: wide ? 18 : 28, fontSize: qSize, fontWeight: 500, lineHeight: 1.16, letterSpacing: -qSize * 0.02, color: ink(s) }}>
             {quote}
           </div>
-          <div style={{ ...row, marginTop: b.tall ? 64 : 48 }}>{attribution(ink, 30)}</div>
         </div>
-      </div>
-      <div
-        style={{
-          ...row,
-          height: bandH,
-          background: p.surface,
-          color: sInk,
-          padding: `0 ${b.m}px`,
-          alignItems: images.screenshot ? "flex-end" : "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <div style={{ ...col, paddingBottom: images.screenshot ? b.m : 0, alignSelf: images.screenshot ? "flex-end" : "center" }}>
-          <span style={{ fontSize: 22, color: alpha(sInk, 0.6), fontWeight: 500 }}>On</span>
-          <span style={{ fontSize: 44, fontWeight: 600, letterSpacing: -1, marginTop: 6 }}>{f.site}</span>
+        <div style={{ ...row, alignItems: "center" }}>
+          <div style={{ width: 40, height: 2, background: soft(s, 0.4), marginRight: 20 }} />
+          <div style={{ ...col }}>
+            <span style={{ fontSize: wide ? 20 : 26, fontWeight: 600, color: ink(s) }}>{f.juror}</span>
+            {f.role ? <span style={{ fontSize: wide ? 16 : 21, color: soft(s, 0.65), marginTop: 4 }}>{f.role}</span> : null}
+          </div>
         </div>
-        {images.screenshot ? (
-          <Browser p={p} src={images.screenshot} {...thumb} on={p.surface} />
-        ) : (
-          <span style={{ fontSize: 22, color: alpha(sInk, 0.6), fontWeight: 500 }}>shemoqmedi.space</span>
-        )}
-      </div>
-    </Canvas>
+      </Glass>
+      {wide ? (
+        <>
+          <At x={860} y={fr.M}>
+            <Wordmark s={s} size={14} />
+          </At>
+          <At x={860} y={150} w={290}>
+            {siteBlock}
+          </At>
+          {hasScore ? <ScoreTile s={s} rect={{ x: 860, y: fr.H - fr.M - tile, w: tile, h: tile }} value={score.toFixed(1)} label="Jury score" /> : null}
+        </>
+      ) : (
+        <>
+          <At x={fr.M} y={card.y + card.h + 60} w={hasScore ? 600 : fr.W - fr.M * 2}>
+            {siteBlock}
+          </At>
+          {hasScore ? (
+            <ScoreTile s={s} rect={{ x: fr.W - fr.M - tile, y: card.y + card.h + 50, w: tile, h: tile }} value={score.toFixed(1)} label="Jury score" />
+          ) : null}
+        </>
+      )}
+    </>
   );
 }
 
-/** One framed screenshot for an Instagram carousel. */
-function Screenshot({ p, b, f, images }: { p: Palette; b: Box; f: Record<string, string>; images: Images }) {
-  const ink = inkOn(p.base);
-  const caption = [f.title, f.studio && `by ${f.studio}`].filter(Boolean).join(" ");
-  const innerW = b.w - b.m * 2;
-  const inset = Math.round(b.m * (b.wide ? 0.6 : 0.75));
-  // A desktop-shaped window in a surface panel just big enough to hold it.
-  const win = desktopWindow(innerW - inset * 2, b.h - b.m * 2 - 140 - inset * 2);
-  const panelH = win.height + inset * 2;
+// ─────────────────────────────────────────────────────────────────────────────
+// Calls and announcements
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** "https://www.shemoqmedi.space/submit/" → "shemoqmedi.space/submit". */
+function shortUrl(url: string) {
+  return url.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "");
+}
+
+function Call({ s, fr, f }: { s: Scene; fr: Frame; f: Record<string, string> }) {
+  const cta = f.cta ? shortUrl(f.cta) : "";
+  const ctaPill = (rect: Rect, size: number) => (
+    <Glass
+      s={s}
+      rect={rect}
+      radius={rect.h / 2}
+      inner={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: `0 ${size * 1.2}px 0 ${size * 1.4}px` }}
+    >
+      <div style={{ display: "flex", fontSize: size, fontWeight: 600, letterSpacing: -size * 0.01, color: ink(s) }}>{cta}</div>
+      <Arrow size={size * 1.15} color={ink(s)} />
+    </Glass>
+  );
+
+  if (fr.shape === "wide") {
+    const leftW = 600;
+    return (
+      <>
+        <At x={fr.M} y={fr.M}>
+          <Wordmark s={s} size={15} />
+        </At>
+        <At x={fr.M} y={150} w={leftW}>
+          <Label s={s} dot size={15}>
+            {f.kicker}
+          </Label>
+          <div style={{ display: "flex", marginTop: 26 }}>
+            <Display s={s} size={fit(f.headline, leftW, 3, 76, 34)}>
+              {f.headline}
+            </Display>
+          </div>
+        </At>
+        {f.body ? (
+          <Glass s={s} rect={{ x: 724, y: 150, w: 420, h: 270 }} pad={36} inner={{ justifyContent: "center" }}>
+            <div style={{ display: "block", fontSize: 23, lineHeight: 1.4, color: ink(s), lineClamp: 7 }}>{f.body}</div>
+          </Glass>
+        ) : null}
+        {cta ? ctaPill({ x: 724, y: fr.H - fr.M - 84, w: 420, h: 84 }, 21) : null}
+      </>
+    );
+  }
+
+  const w = fr.W - fr.M * 2;
+  const geo = {
+    tall: { head: 420, lines: 5, max: 150, card: { y: 1130, h: 300 }, pill: 1470, body: 34 },
+    portrait: { head: 210, lines: 4, max: 136, card: { y: 820, h: 270 }, pill: 1130, body: 32 },
+    square: { head: 180, lines: 3, max: 118, card: { y: 610, h: 220 }, pill: 872, body: 29 },
+  }[fr.shape as "tall" | "portrait" | "square"];
+  const pillW = Math.min(w, pillWidth(cta, 28) + 80);
   return (
-    <Canvas p={p} b={b}>
-      <Header p={p} b={b} kicker={f.index} />
-      <div style={{ ...col, flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <div
-          style={{
-            ...col,
-            width: innerW,
-            height: panelH,
-            background: p.surface,
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: 10,
-          }}
-        >
-          <Browser
-            p={p}
-            src={images.screenshot}
-            url={f.url}
-            {...win}
-            on={p.surface}
-          />
-        </div>
-      </div>
-      <div style={{ ...row, justifyContent: "space-between", marginTop: 30, fontSize: b.wide ? 18 : 24, fontWeight: 500 }}>
-        <span style={{ color: ink }}>{caption}</span>
-        <span style={{ color: alpha(ink, 0.6) }}>shemoqmedi.space</span>
-      </div>
-    </Canvas>
+    <>
+      <Header s={s} fr={fr} right={f.kicker} />
+      <At x={fr.M} y={geo.head} w={w}>
+        <Display s={s} size={fit(f.headline, w, geo.lines, geo.max, 56)}>
+          {f.headline}
+        </Display>
+      </At>
+      {f.body ? (
+        <Glass s={s} rect={{ x: fr.M, y: geo.card.y, w, h: geo.card.h }} pad="44px 50px" inner={{ justifyContent: "center" }}>
+          <div style={{ display: "block", fontSize: geo.body, lineHeight: 1.38, letterSpacing: -0.3, color: ink(s), lineClamp: 4 }}>{f.body}</div>
+        </Glass>
+      ) : null}
+      {cta ? ctaPill({ x: fr.M, y: geo.pill, w: pillW, h: 104 }, 28) : null}
+    </>
   );
 }
 
-export function renderTemplate({ template, format, palette, fields, images }: RenderInput) {
-  const b = box(format);
-  const props = { p: palette, b, f: fields, images };
+export function renderTemplate({ template, format, scene, fields, assets }: RenderInput) {
+  const fr = frameOf(format);
+  let body: ReactNode;
   switch (template) {
     case "award":
-      return <Award {...props} />;
+      body = <SiteCard s={scene} fr={fr} f={fields} a={assets} award />;
+      break;
     case "new_listing":
-      return <NewListing {...props} />;
+      body = <SiteCard s={scene} fr={fr} f={fields} a={assets} award={false} />;
+      break;
     case "call_submissions":
     case "call_jury":
     case "announcement":
-      return <Call {...props} />;
+      body = <Call s={scene} fr={fr} f={fields} />;
+      break;
     case "jury_quote":
-      return <JuryQuote {...props} />;
+      body = <JuryQuote s={scene} fr={fr} f={fields} />;
+      break;
     case "screenshot":
-      return <Screenshot {...props} />;
+      body = <ScreenshotSlide s={scene} fr={fr} f={fields} a={assets} />;
+      break;
   }
+  return (
+    <Canvas s={scene} fr={fr} back={assets.back}>
+      {body}
+    </Canvas>
+  );
+}
+
+/** How wide to prepare the screenshot for a format's browser window. */
+export function shotWidth(format: FormatId) {
+  return Math.round(browserRect(frameOf(format)).w * 1.35);
 }

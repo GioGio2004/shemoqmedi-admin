@@ -26,6 +26,26 @@ import { Select } from "./Select";
 
 type Fields = Record<string, string>;
 
+const GLASS = [
+  { id: "frost", label: "Frost" },
+  { id: "liquid", label: "Liquid" },
+  { id: "tint", label: "Tint" },
+] as const;
+
+/** What Claude writes for a carousel; here typed by hand. */
+const STORY_FIELDS = [
+  { key: "chip1", label: "Detail 1 chip", placeholder: "The type" },
+  { key: "note1", label: "Detail 1 line", placeholder: "A wordmark built like furniture." },
+  { key: "chip2", label: "Detail 2 chip", placeholder: "The grid" },
+  { key: "note2", label: "Detail 2 line", placeholder: "Every crop is deliberate." },
+  { key: "quote", label: "Jury quote", long: true },
+  { key: "juror", label: "Juror" },
+  { key: "role", label: "Juror role", placeholder: "Creative director" },
+  { key: "cta", label: "Last slide headline", placeholder: "See the whole site on Shemoqmedi." },
+] as const satisfies readonly FieldSpec[];
+
+type StoryKey = (typeof STORY_FIELDS)[number]["key"];
+
 function initialFields(): Record<TemplateId, Fields> {
   return Object.fromEntries(
     TEMPLATE_IDS.map((t) => [
@@ -97,7 +117,13 @@ function Swatch({ base, surface, accent }: { base: string; surface: string; acce
 export function DesignStudio() {
   const [template, setTemplate] = useState<TemplateId>("award");
   const [format, setFormat] = useState<FormatId>("ig_portrait");
-  const [palette, setPalette] = useState<PaletteId>("house");
+  const [mode, setMode] = useState<"single" | "carousel">("single");
+  const [palette, setPalette] = useState<PaletteId | "auto">("house");
+  const [glass, setGlass] = useState<(typeof GLASS)[number]["id"]>("frost");
+  const [story, setStory] = useState<Record<StoryKey, string>>(
+    () => Object.fromEntries(STORY_FIELDS.map((f) => [f.key, ""])) as Record<StoryKey, string>,
+  );
+  const [slides, setSlides] = useState<string[]>([]);
   const [fields, setFields] = useState(initialFields);
   const [listingId, setListingId] = useState<Id<"listings"> | null>(null);
   const [screenshot, setScreenshot] = useState("");
@@ -107,7 +133,7 @@ export function DesignStudio() {
 
   const listings = useQuery(api.admin.featuredOptions, {});
   const detail = useQuery(api.listings.reviewDetail, listingId ? { id: listingId } : "skip");
-  const awards = useQuery(api.awards.overview, template === "award" ? {} : "skip");
+  const awards = useQuery(api.awards.overview, template === "award" || mode === "carousel" ? {} : "skip");
 
   const spec = TEMPLATES[template];
   const current = fields[template];
@@ -161,16 +187,73 @@ export function DesignStudio() {
     return [detail.coverUrl, ...detail.galleryUrls].filter((u): u is string => !!u);
   }, [detail]);
 
-  const query = graphicsQuery({
+  const singleQuery = graphicsQuery({
     template,
     format,
     palette,
-    fields: current,
+    fields: { ...current, glass },
     images: spec.images.includes("screenshot" as never) ? { screenshot } : {},
   });
-  const src = `/api/graphics?${useDebounced(query, 400)}`;
-  const { width, height } = FORMATS[format];
-  const fileName = `shemoqmedi-${template}-${format}-${palette}.png`.replace(/_/g, "-");
+
+  // The carousel tells the chosen site's story: its facts, every screenshot, the award picked above.
+  const carouselQuery = useMemo(() => {
+    const q = new URLSearchParams({ palette, glass });
+    const put = (k: string, v: string | number | null | undefined) => {
+      if (v !== null && v !== undefined && String(v).trim()) q.set(k, String(v).trim());
+    };
+    if (detail) {
+      put("title", detail.title);
+      put("studio", detail.creditName);
+      put("url", detail.url);
+      put("tagline", detail.tagline);
+      put("slug", detail.slug);
+      put("tech", detail.technologies.join(","));
+      put("categories", detail.categoryNames.join(","));
+      put("score", detail.finalScore);
+      if (detail.editorialScores) for (const [k, v] of Object.entries(detail.editorialScores)) put(k, v);
+      for (const shot of shots.slice(0, 4)) q.append("shot", shot);
+    }
+    const award = fields.award;
+    if (award.awardSlug) {
+      put("tier", award.tier);
+      put("date", award.date);
+      put("awardSlug", award.awardSlug);
+    }
+    put("quote", story.quote);
+    put("juror", story.juror);
+    put("role", story.role);
+    put("cta", story.cta);
+    for (const chip of [story.chip1, story.chip2].filter((c) => c.trim())) q.append("chip", chip.trim());
+    for (const note of [story.note1, story.note2].filter((c) => c.trim())) q.append("note", note.trim());
+    return q.toString();
+  }, [detail, shots, fields.award, story, palette, glass]);
+
+  const settledSingle = useDebounced(singleQuery, 400);
+  const settledCarousel = useDebounced(carouselQuery, 600);
+  const carousel = mode === "carousel";
+  const src = carousel
+    ? `/api/graphics/carousel?${settledCarousel}&slide=strip&scale=0.3&output=jpeg`
+    : `/api/graphics?${settledSingle}`;
+
+  // How many slides the story has (6–8), for the download links.
+  useEffect(() => {
+    if (!carousel || !detail) return;
+    let live = true;
+    fetch(`/api/graphics/carousel?${settledCarousel}&slide=plan`)
+      .then((r) => (r.ok ? r.json() : { slides: [] }))
+      .then((j: { slides: string[] }) => {
+        if (live) setSlides(j.slides);
+      })
+      .catch(() => {
+        if (live) setSlides([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [carousel, detail, settledCarousel]);
+
+  const { width, height } = carousel ? { width: 1080 * Math.max(1, slides.length || 7), height: 1350 } : FORMATS[format];
+  const fileName = carousel ? "shemoqmedi-carousel-strip.jpg" : `shemoqmedi-${template}-${format}-${palette}.jpg`.replace(/_/g, "-");
 
   const q = search.trim().toLowerCase();
   const matches = (listings ?? [])
@@ -189,7 +272,7 @@ export function DesignStudio() {
           </p>
         </div>
         <a href={src} download={fileName} className="admin-button">
-          Download PNG
+          {carousel ? "Download strip" : "Download JPEG"}
         </a>
       </div>
 
@@ -206,16 +289,27 @@ export function DesignStudio() {
                   <button
                     key={t}
                     type="button"
-                    className={t === template ? "admin-button" : "admin-button admin-button-secondary"}
-                    aria-pressed={t === template}
-                    onClick={() => setTemplate(t)}
+                    className={!carousel && t === template ? "admin-button" : "admin-button admin-button-secondary"}
+                    aria-pressed={!carousel && t === template}
+                    onClick={() => {
+                      setMode("single");
+                      setTemplate(t);
+                    }}
                   >
                     {TEMPLATES[t].label}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  className={carousel ? "admin-button" : "admin-button admin-button-secondary"}
+                  aria-pressed={carousel}
+                  onClick={() => setMode("carousel")}
+                >
+                  Carousel story
+                </button>
               </div>
             </div>
-            <div className="grid gap-2">
+            <div className="grid gap-2" hidden={carousel}>
               <p className="admin-eyebrow">Format</p>
               <div className="flex flex-wrap gap-2">
                 {FORMAT_IDS.map((f) => (
@@ -249,6 +343,31 @@ export function DesignStudio() {
                     {p.name}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  className={palette === "auto" ? "admin-button" : "admin-button admin-button-secondary"}
+                  aria-pressed={palette === "auto"}
+                  onClick={() => setPalette("auto")}
+                  title="Tinted from the site's own colours"
+                >
+                  Auto
+                </button>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <p className="admin-eyebrow">Glass</p>
+              <div className="flex flex-wrap gap-2">
+                {GLASS.map((g) => (
+                  <button
+                    key={g.id}
+                    type="button"
+                    className={g.id === glass ? "admin-button" : "admin-button admin-button-secondary"}
+                    aria-pressed={g.id === glass}
+                    onClick={() => setGlass(g.id)}
+                  >
+                    {g.label}
+                  </button>
+                ))}
               </div>
             </div>
           </section>
@@ -257,7 +376,7 @@ export function DesignStudio() {
             <h2 id="design-source" className="text-2xl font-semibold">
               From a site
             </h2>
-            {template === "award" && (
+            {(template === "award" || carousel) && (
               <AwardPicker
                 awards={awards?.recent.filter((a) => a.status === "active") ?? null}
                 value={current.awardSlug ?? ""}
@@ -302,7 +421,7 @@ export function DesignStudio() {
               </ul>
             )}
 
-            {spec.images.includes("screenshot" as never) && (
+            {!carousel && spec.images.includes("screenshot" as never) && (
               <div className="grid gap-3 border-t border-black/10 pt-5">
                 <p className="admin-eyebrow">Screenshot</p>
                 {shots.length > 0 && (
@@ -338,9 +457,25 @@ export function DesignStudio() {
             <h2 id="design-text" className="text-2xl font-semibold">
               Text
             </h2>
-            {spec.fields.map((f) => (
-              <FieldInput key={`${template}-${f.key}`} field={f} value={current[f.key] ?? ""} onChange={(v) => setField(f.key, v)} />
-            ))}
+            {carousel ? (
+              <>
+                {!detail && (
+                  <p className="text-sm text-black/55">Pick a site above: the story is told from its facts and screenshots.</p>
+                )}
+                {STORY_FIELDS.map((f) => (
+                  <FieldInput
+                    key={`story-${f.key}`}
+                    field={f}
+                    value={story[f.key]}
+                    onChange={(v) => setStory((all) => ({ ...all, [f.key]: v }))}
+                  />
+                ))}
+              </>
+            ) : (
+              spec.fields.map((f) => (
+                <FieldInput key={`${template}-${f.key}`} field={f} value={current[f.key] ?? ""} onChange={(v) => setField(f.key, v)} />
+              ))
+            )}
           </section>
         </div>
 
@@ -368,6 +503,21 @@ export function DesignStudio() {
             />
           </div>
           {failed === src && <p className="text-sm">The preview did not render. Check the fields and the image URL.</p>}
+          {carousel && detail && slides.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="admin-eyebrow mr-2">Slides</span>
+              {slides.map((kind, i) => (
+                <a
+                  key={`${i}-${kind}`}
+                  className="admin-button admin-button-secondary"
+                  href={`/api/graphics/carousel?${settledCarousel}&slide=${i}`}
+                  download={`shemoqmedi-${detail.slug}-${String(i + 1).padStart(2, "0")}-${kind}.jpg`}
+                >
+                  {i + 1} · {kind}
+                </a>
+              ))}
+            </div>
+          )}
         </section>
       </div>
     </>

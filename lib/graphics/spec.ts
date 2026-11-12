@@ -1,11 +1,15 @@
 // What the social graphics renderer (app/api/graphics) accepts: templates,
-// their text fields and image slots, and the output formats. Plain data, so
+// their text fields and image slots, and the output formats. Image slots are
+// optional: calls and announcements use a screenshot only as a blurred
+// backdrop, and draw a soft palette gradient without one. Plain data, so
 // the Design page, the route and Convex (convex/graphics.ts) share it.
 
 export const FORMATS = {
   ig_portrait: { label: "Instagram feed", width: 1080, height: 1350 },
   square: { label: "Square", width: 1080, height: 1080 },
-  story: { label: "Story / reel cover", width: 1080, height: 1920 },
+  story: { label: "Story", width: 1080, height: 1920 },
+  /** 9:16, with everything that matters inside the 3:4 crop the profile grid shows. */
+  reel_cover: { label: "Reel cover", width: 1080, height: 1920 },
   link: { label: "Link post (LinkedIn, Facebook)", width: 1200, height: 627 },
 } as const;
 
@@ -78,7 +82,7 @@ export const TEMPLATES = {
       { key: "body", label: "Body", long: true },
       { key: "cta", label: "Call to action URL", placeholder: "shemoqmedi.space/submit" },
     ],
-    images: [],
+    images: ["screenshot"],
     defaults: {
       kicker: "Call for submissions",
       headline: "Show us the site you’re proud of.",
@@ -93,7 +97,7 @@ export const TEMPLATES = {
       { key: "body", label: "Body", long: true },
       { key: "cta", label: "Call to action URL", placeholder: "shemoqmedi.space/jury" },
     ],
-    images: [],
+    images: ["screenshot"],
     defaults: {
       kicker: "Call for jury",
       headline: "Judge the web’s finest websites.",
@@ -109,7 +113,7 @@ export const TEMPLATES = {
       { key: "body", label: "Body", long: true },
       { key: "cta", label: "Call to action URL", placeholder: "shemoqmedi.space" },
     ],
-    images: [],
+    images: ["screenshot"],
     defaults: { kicker: "Announcement", headline: "Headline", body: "", cta: "shemoqmedi.space" },
   },
   jury_quote: {
@@ -119,6 +123,7 @@ export const TEMPLATES = {
       { key: "juror", label: "Juror name" },
       { key: "role", label: "Juror role", placeholder: "Designer, Studio" },
       { key: "site", label: "Site title" },
+      { key: "score", label: "Jury score (optional)", placeholder: "8.4" },
     ],
     images: ["screenshot"],
     defaults: { quote: "Quote", juror: "Juror", site: "" },
