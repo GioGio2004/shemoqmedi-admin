@@ -135,6 +135,16 @@ describe("the browser preview", () => {
     expect(ready).toContain("data:image/jpeg;base64,BB");
   });
 
+  it("shows the award badge the server render uses, and none on other templates", () => {
+    const award = renderToStaticMarkup(previewElement({ template: "award", format: "square", palette: "house", style: "bento", fields: { ...FIELDS, awardSlug: "floema-sotd" } }));
+    expect(award).toContain("/badge/floema-sotd?shape=seal&amp;theme=light");
+    const given = renderToStaticMarkup(previewElement({ template: "award", format: "square", palette: "house", fields: { ...FIELDS, awardSlug: "floema-sotd" }, assets: { badge: "data:image/png;base64,QQ" } }));
+    expect(given).toContain("data:image/png;base64,QQ");
+    expect(given).not.toContain("/badge/floema-sotd");
+    const other = renderToStaticMarkup(previewElement({ template: "new_listing", format: "square", palette: "house", fields: { ...FIELDS, awardSlug: "floema-sotd" } }));
+    expect(other).not.toContain("/badge/");
+  });
+
   it("fills empty fields with the template's defaults", () => {
     expect(previewFields("call_jury", { headline: "  " }).headline).toBe(TEMPLATES.call_jury.defaults.headline);
     expect(previewFields("award", { title: " Floema " }).title).toBe("Floema");

@@ -8,7 +8,7 @@ import sharp from "sharp";
 import { NextRequest } from "next/server";
 import { convexTest } from "convex-test";
 import schema from "../convex/schema";
-import { api } from "../convex/_generated/api";
+import { api, internal } from "../convex/_generated/api";
 import { unpackSlides } from "../convex/graphics";
 import { SLIDES_CONTENT_TYPE, packSlides } from "../lib/graphics/render";
 import { deliveryUrl } from "../lib/graphics/imaging";
@@ -142,6 +142,44 @@ describe("the Studio's own upload", () => {
   });
 });
 
+describe("media.verify for the Studio's uploads", () => {
+  function fakeDetails(filePath: string) {
+    const calls: { url: string; method: string }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        calls.push({ url: String(input instanceof Request ? input.url : input), method: init?.method ?? "GET" });
+        if (init?.method === "DELETE") return new Response(null, { status: 204 });
+        return Response.json({ size: 200_000, mime: "image/jpeg", filePath });
+      }),
+    );
+    return calls;
+  }
+
+  async function registered() {
+    const { t, admin } = await setup();
+    const file = { url: `${IK}/social/graphics/final_v.jpg`, fileId: "file_verify1", filePath: "/social/graphics/final_v.jpg", size: 200_000, width: 1080, height: 1350, contentType: "image/jpeg" };
+    const id = await admin.mutation(api.media.registerSocial, file);
+    return { t, id, fileId: file.fileId };
+  }
+
+  it("keeps a file ImageKit really holds in /social/graphics", async () => {
+    const { t, id, fileId } = await registered();
+    const calls = fakeDetails("/social/graphics/final_v.jpg");
+    await t.action(internal.media.verify, { id, fileId, kind: "image", folder: "/social/graphics/" });
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    expect((await t.run((ctx) => ctx.db.get(id)))?.invalid).toBeFalsy();
+  });
+
+  it("flags and deletes a file that is really somewhere else", async () => {
+    const { t, id, fileId } = await registered();
+    const calls = fakeDetails("/listings/someone/else.jpg");
+    await t.action(internal.media.verify, { id, fileId, kind: "image", folder: "/social/graphics/" });
+    expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+    expect((await t.run((ctx) => ctx.db.get(id)))?.invalid).toBe(true);
+  });
+});
+
 describe("the carousel's wire format", () => {
   it("packs and unpacks every slide in order", () => {
     const files = [Buffer.from("first"), Buffer.from("second slide"), Buffer.from("3")];
@@ -152,6 +190,8 @@ describe("the carousel's wire format", () => {
     expect([out.width, out.height]).toEqual([1080, 1350]);
     expect(out.slides.map((s) => s.blob.size)).toEqual([5, 12, 1]);
     expect(() => unpackSlides(ab.slice(0, ab.byteLength - 1))).toThrow(/Malformed/);
+    const noSize = packSlides(files, ["hook", "site", "cta"], { width: 0, height: 1350, type: "image/jpeg" });
+    expect(() => unpackSlides(noSize.buffer.slice(noSize.byteOffset, noSize.byteOffset + noSize.byteLength) as ArrayBuffer)).toThrow(/Malformed/);
   });
 });
 
@@ -209,5 +249,32 @@ describe("screenshot delivery", () => {
     expect(deliveryUrl(`${IK}/listings/a/b.webp?tr=w-400`).searchParams.get("tr")).toBe("w-400");
     expect(deliveryUrl(`${IK}/tr:w-300/listings/a/b.webp`).searchParams.has("tr")).toBe(false);
     expect(deliveryUrl("https://quiet-owl.convex.cloud/api/storage/abc").searchParams.has("tr")).toBe(false);
+    // Not a screenshot (a badge may be a transparent PNG): fetched as stored.
+    expect(deliveryUrl(`${IK}/badges/seal.png`, false).searchParams.has("tr")).toBe(false);
   });
+
+  it("fetches an award badge from ImageKit as stored, and the screenshot as a JPEG", async () => {
+    const png = await sharp({ create: { width: 40, height: 40, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer();
+    const fetched: string[] = [];
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input instanceof Request ? input.url : input);
+        // The renderer loads its own wasm and fonts from disk with fetch: let those through.
+        if (!url.startsWith("https:")) return realFetch(input, init);
+        fetched.push(url);
+        return new Response(new Uint8Array(png), { headers: { "Content-Type": "image/png" } });
+      }),
+    );
+    const shot = `${IK}/listings/floema/cover-badge-test.webp`;
+    const badge = `${IK}/badges/badge-test-seal.png`;
+    const res = await graphicGET(
+      new NextRequest(`http://localhost/api/graphics?template=award&format=square&style=swiss&screenshot=${encodeURIComponent(shot)}&badge=${encodeURIComponent(badge)}`, { headers: { "x-render-key": KEY } }),
+    );
+    expect(res.status).toBe(200);
+    const byPath = (part: string) => new URL(fetched.find((u) => u.includes(part))!);
+    expect(byPath("cover-badge-test").searchParams.get("tr")).toBe("w-1600,f-jpg");
+    expect(byPath("badge-test-seal").searchParams.has("tr")).toBe(false);
+  }, 30_000);
 });

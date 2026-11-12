@@ -1,5 +1,4 @@
 import type { ReactElement } from "react";
-import { STOREFRONT_URL } from "@/lib/storefront";
 import type { Palette } from "@/lib/palettes";
 import { FORMATS, TEMPLATES, TIERS, type FormatId, type Style, type TemplateId } from "./spec";
 import type { GlassStyle, PanelShape, Scene } from "./glass";
@@ -31,11 +30,7 @@ import { timer, type Timer } from "./timing";
 // two together with the grain in a single encode. The flat styles are one
 // satori render and one encode.
 
-/** The storefront's badge art for an award slug (a seal on a light ground). */
-export function badgeUrlFor(awardSlug: string | undefined, explicit?: string | null) {
-  if (explicit) return explicit;
-  return awardSlug && /^[a-z0-9-]{3,120}$/.test(awardSlug) ? `${STOREFRONT_URL}/badge/${awardSlug}?shape=seal&theme=light` : null;
-}
+export { badgeUrlFor } from "./badge";
 
 /** Templates whose glass layout shows the screenshot sharp (the rest use it only as the blurred backdrop). */
 function glassShowsShot(template: TemplateId) {

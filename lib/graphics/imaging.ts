@@ -80,22 +80,29 @@ export const FETCH_WIDTH = 1600;
 /**
  * ImageKit screenshots are stored as big WebPs. Asking for a 1600 px JPEG
  * instead is a smaller download, a faster decode, and a format satori draws
- * as it is. Images that already carry a transform are left alone.
+ * as it is. Only for screenshots: a badge or logo may be a transparent PNG,
+ * which a JPEG would flatten onto a box. Images that already carry a
+ * transform are left alone.
  */
-export function deliveryUrl(raw: string) {
+export function deliveryUrl(raw: string, screenshot = true) {
   const url = new URL(raw);
-  if (isImageKit(url) && !url.searchParams.has("tr") && !url.pathname.includes("/tr:")) {
+  if (screenshot && isImageKit(url) && !url.searchParams.has("tr") && !url.pathname.includes("/tr:")) {
     url.searchParams.set("tr", `w-${FETCH_WIDTH},f-jpg`);
   }
   return url;
 }
 
-/** An image's bytes, or null when it is missing, too big or not on our hosts. Cached for ten minutes. */
-export function fetchImage(raw: string | null | undefined): Promise<Buffer | null> {
+/**
+ * An image's bytes, or null when it is missing, too big or not on our hosts.
+ * Cached for ten minutes. `screenshot`: an opaque picture, fetched from
+ * ImageKit as a 1600 px JPEG (deliveryUrl); anything else (a badge) comes as
+ * stored.
+ */
+export function fetchImage(raw: string | null | undefined, { screenshot = false } = {}): Promise<Buffer | null> {
   if (!raw) return Promise.resolve(null);
   let url: URL;
   try {
-    url = deliveryUrl(raw);
+    url = deliveryUrl(raw, screenshot);
   } catch {
     return Promise.resolve(null);
   }
@@ -150,9 +157,9 @@ export async function picture(buf: Buffer | null, source?: string): Promise<Pict
   }
 }
 
-/** fetchImage, then picture, remembering the URL for the backdrop cache. */
+/** A screenshot: fetchImage, then picture, remembering the URL for the backdrop cache. */
 export async function fetchPicture(url: string | null | undefined) {
-  return picture(await fetchImage(url), url ?? undefined);
+  return picture(await fetchImage(url, { screenshot: true }), url ?? undefined);
 }
 
 export function dataUri(buf: Buffer, type: "jpeg" | "png") {

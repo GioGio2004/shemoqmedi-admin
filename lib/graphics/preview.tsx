@@ -5,6 +5,7 @@ import type { GlassStyle, Scene } from "./glass";
 import { renderTemplate } from "./templates";
 import { FLAT_STYLES, themeOf } from "./styles";
 import { resolve, type HostVisitor } from "./tree";
+import { badgeUrlFor } from "./badge";
 
 // The Studio's instant preview: the same template components the server
 // renders with satori, drawn by the browser inside a scaled box. Nothing
@@ -27,7 +28,11 @@ import { resolve, type HostVisitor } from "./tree";
 
 export { previewFontFaces } from "./fonts";
 
-/** What /api/graphics/assets returns, plus an optional badge image. All optional: the preview draws without them. */
+/**
+ * What /api/graphics/assets returns, plus an optional badge image (award;
+ * without one, the storefront badge for fields.awardSlug, as the server
+ * render uses). All optional: the preview draws without them.
+ */
 export type PreviewAssets = {
   palette?: Pick<Palette, "base" | "surface" | "accent">;
   light?: boolean;
@@ -114,7 +119,7 @@ export function previewElement({ template, format, palette: paletteId, style = "
   const palette = paletteOf(paletteId, assets);
   const f = previewFields(template, fields);
   const shot = assets?.shot || shotUrl || null;
-  const badge = assets?.badge ?? null;
+  const badge = template === "award" ? (assets?.badge ?? badgeUrlFor(f.awardSlug)) : null;
   const { width, height } = FORMATS[format];
   if (style === "glass") {
     const back = assets?.back || shot;

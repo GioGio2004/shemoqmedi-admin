@@ -86,6 +86,8 @@ export function unpackSlides(body: ArrayBuffer) {
     height: number;
     type: string;
   };
+  const sized = (x: unknown) => Number.isInteger(x) && (x as number) > 0;
+  if (!Array.isArray(header.slides) || !header.slides.length || !sized(header.width) || !sized(header.height)) throw new Error("Malformed carousel response.");
   let at = 4 + headerLength;
   const slides = header.slides.map(({ name, bytes }) => {
     if (!Number.isInteger(bytes) || bytes <= 0 || at + bytes > body.byteLength) throw new Error("Malformed carousel response.");
@@ -267,7 +269,8 @@ type CarouselArgs = {
 };
 type Carousel = { urls: string[]; mediaIds: Id<"media">[]; slides: string[] };
 
-async function renderStory(ctx: ActionCtx, { listingId, facts = {}, palette, style, story = {} }: CarouselArgs): Promise<Carousel> {
+/** The carousel, plus the slide size the renderer reported (for renderForPost). */
+async function renderStory(ctx: ActionCtx, { listingId, facts = {}, palette, style, story = {} }: CarouselArgs): Promise<Carousel & { width: number; height: number }> {
   checkOptions(palette, story.glass, style);
   if (!listingId && !facts.title) throw new Error("Give a listingId, or facts with at least a title.");
   const { origin, key } = config();
@@ -323,7 +326,7 @@ async function renderStory(ctx: ActionCtx, { listingId, facts = {}, palette, sty
   const saved = await mapLimit(slides, CAROUSEL_CONCURRENCY, ({ name, blob }, i) =>
     store(ctx, blob, `shemoqmedi-${label}-${String(i + 1).padStart(2, "0")}-${name}.jpg`, folder, ["carousel", name, palette, style ?? "glass"], width, height),
   );
-  return { urls: saved.map((s) => s.url), mediaIds: saved.map((s) => s.mediaId), slides: slides.map((s) => s.name) };
+  return { urls: saved.map((s) => s.url), mediaIds: saved.map((s) => s.mediaId), slides: slides.map((s) => s.name), width, height };
 }
 
 /**
@@ -351,7 +354,10 @@ export const renderCarousel = internalAction({
     story: v.optional(storyOptions),
   },
   returns: v.object({ urls: v.array(v.string()), mediaIds: v.array(v.id("media")), slides: v.array(v.string()) }),
-  handler: async (ctx, args): Promise<Carousel> => renderStory(ctx, args),
+  handler: async (ctx, args): Promise<Carousel> => {
+    const { urls, mediaIds, slides } = await renderStory(ctx, args);
+    return { urls, mediaIds, slides };
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -377,7 +383,7 @@ export const renderForPost = action({
         style: args.style,
         story: { glass: args.glass, ...(args.imageUrls?.length ? { shots: args.imageUrls } : {}) },
       });
-      return { urls: story.urls, mediaIds: story.mediaIds, width: FORMATS.ig_portrait.width, height: FORMATS.ig_portrait.height };
+      return { urls: story.urls, mediaIds: story.mediaIds, width: story.width, height: story.height };
     }
     const one = await renderOne(ctx, args);
     return { urls: [one.url], mediaIds: [one.mediaId], width: one.width, height: one.height };
