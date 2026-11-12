@@ -156,10 +156,19 @@ const storyImage = { kind: "image" as const, url: STORY_IMG, role: "graphic" };
 describe("studio publishing API", () => {
   it("is for admins only", async () => {
     const env = await setup();
-    await expect(env.member.mutation(api.social.create, { kind: "custom" })).rejects.toThrow(/admin/);
-    await expect(env.member.query(api.social.channels, {})).rejects.toThrow(/admin/);
-    await expect(env.member.query(api.social.recent, {})).rejects.toThrow(/admin/);
-    await expect(env.t.query(api.social.recent, {})).rejects.toThrow(/Unauthenticated/);
+    const { id } = await env.admin.mutation(api.social.create, { kind: "custom", captions: { facebook: "FB" } });
+    for (const caller of [env.member, env.t]) {
+      const refused = caller === env.member ? /admin/ : /Unauthenticated/;
+      await expect(caller.query(api.social.get, { id })).rejects.toThrow(refused);
+      await expect(caller.mutation(api.social.create, { kind: "custom" })).rejects.toThrow(refused);
+      await expect(caller.mutation(api.social.update, { id, note: "x" })).rejects.toThrow(refused);
+      await expect(caller.mutation(api.social.publish, { id })).rejects.toThrow(refused);
+      await expect(caller.mutation(api.social.unschedule, { id })).rejects.toThrow(refused);
+      await expect(caller.query(api.social.channels, {})).rejects.toThrow(refused);
+      await expect(caller.query(api.social.recent, {})).rejects.toThrow(refused);
+    }
+    // Nothing changed.
+    expect(await env.admin.query(api.social.get, { id })).toMatchObject({ status: "waiting", note: null });
   });
 
   it("creates a post from a listing, edits it and reads it back", async () => {
@@ -356,6 +365,25 @@ describe("story placement", () => {
     expect(order.indexOf("POST rupload.facebook.com/video-upload/v26.0/VS1")).toBeLessThan(order.lastIndexOf("GET graph.facebook.com/v26.0/VS1"));
   });
 
+  it("a story whose media is not for Facebook is skipped there, not failed", async () => {
+    const fake = fakeMeta();
+    const env = await setup();
+    const post = await env.admin.mutation(api.social.create, {
+      kind: "custom",
+      placement: "story",
+      media: [{ ...storyImage, networks: ["instagram"] }],
+      captions: { instagram: "IG", facebook: "FB" },
+    });
+    await env.admin.mutation(api.social.publish, { id: post.id });
+    await drain(env);
+    const done = await env.admin.query(api.social.get, { id: post.id });
+    expect(done.status).toBe("sent");
+    const by = Object.fromEntries(done.results.map((r) => [r.network, r]));
+    expect(by.instagram).toMatchObject({ status: "sent" });
+    expect(by.facebook).toMatchObject({ status: "skipped", error: expect.stringMatching(/not for Facebook/) });
+    expect(fake.calls.filter((c) => c.url.pathname.startsWith("/v26.0/PAGE1/") && c.method === "POST")).toHaveLength(0);
+  });
+
   it("a story whose only network has no stories publishes nothing and says why", async () => {
     fakeMeta();
     const env = await setup();
@@ -468,6 +496,19 @@ describe("MCP: media", () => {
     const found = await env.t.query(api.mcp.findReel, { token: env.token, listingSlug: slug });
     expect(found).toMatchObject({ role: "reel", url: `${R2}/social/${slug}/${slug}-reel-new0000002.mp4` });
     await expect(env.t.query(api.mcp.findReel, { token: env.token, listingSlug: "missing" })).rejects.toThrow(/No listing/);
+  });
+
+  it("find_reel finds a reel of a listing whose slug is longer than a reel folder", async () => {
+    const env = await setup();
+    const listingId = await listing(env);
+    const long = `${"long-slug-".repeat(7)}end`; // 73 characters; reel keys keep the first 60
+    await env.t.run(async (ctx) => {
+      await ctx.db.patch(listingId, { slug: long });
+      const key = `social/${long.slice(0, 60)}/${long.slice(0, 60)}-reel-abcdef1234.mp4`;
+      await ctx.db.insert("media", { store: "r2", kind: "video", contentType: "video/mp4", size: 1000, fileId: key, url: `${R2}/${key}`, filePath: `/${key}`, createdAt: Date.now() });
+    });
+    const found = await env.t.query(api.mcp.findReel, { token: env.token, listingSlug: long });
+    expect(found).toMatchObject({ role: "reel", url: expect.stringContaining("-reel-abcdef1234.mp4") });
   });
 });
 

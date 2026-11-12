@@ -134,6 +134,8 @@ export const begin = internalMutation({
       if (noStories) skip(noStories);
       else if (network === "facebook") {
         if (!meta?.ids.pageId) skip(notConnected(meta, ENV_VARS.meta, "a Facebook Page token"));
+        // A feed post without media is a text post; a story has nothing to show.
+        else if (story && own.length === 0) skip("The story's image or video is not for Facebook; nothing was posted there.");
         // Sizes, so a story's 9:16 check sees them (socialApi.storyProblem).
         else jobs.push({ network, caption, media: story ? await withSizes(ctx, own) : own, token: meta.token, target: meta.ids.pageId });
       } else if (network === "instagram") {

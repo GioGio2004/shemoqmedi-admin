@@ -739,7 +739,9 @@ export async function publishPost(ctx: MutationCtx, id: Id<"socialPosts">, by: I
   if (!post) fail("Post not found.");
   const status = readStatus(post.status);
   if (status === "scheduled") await unschedulePost(ctx, id);
-  else if (status === "failed" || status === "approved") fail(`This post is ${status}: retry it instead.`);
+  else if (status === "failed" || status === "approved") {
+    fail(`This post is ${status}: retry it instead (or edit it, which sends it back to waiting).`);
+  }
   else if (status !== "waiting") fail(`This post is ${status}; it can't be published again.`);
   const now = Date.now();
   await ctx.db.patch(id, { scheduledFor: at !== undefined && at > now ? at : undefined, updatedAt: now });

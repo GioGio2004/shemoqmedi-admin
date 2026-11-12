@@ -12,7 +12,7 @@ import { action, internalMutation, internalQuery, mutation, query } from "./_gen
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { adminFromToken, requireTokenAdmin } from "./lib/mcpAuth";
-import { fail } from "./lib/listingHelpers";
+import { fail, slugify } from "./lib/listingHelpers";
 import { mergeSocials, normalizeEmail } from "./lib/contacts";
 import { readPillars } from "./lib/scoring";
 import { TIER_NAMES } from "./lib/awards";
@@ -591,11 +591,13 @@ export const findReel = query({
   handler: async (ctx, { token, listingSlug }) => {
     await requireTokenAdmin(ctx, token);
     const listing = await listingBySlug(ctx, listingSlug);
-    // R2 rows use the object key as fileId, so the listing's social folder is a range of by_fileId.
-    const from = `social/${listing.slug}/`;
+    // R2 rows use the object key as fileId, so the listing's social folder is a
+    // range of by_fileId. The folder is the slug as socialKey writes it
+    // (slugified, at most 60 characters), not always the listing's own slug.
+    const folder = `social/${slugify(listing.slug)}`;
     const rows = await ctx.db
       .query("media")
-      .withIndex("by_fileId", (q) => q.gte("fileId", from).lt("fileId", `social/${listing.slug}0`))
+      .withIndex("by_fileId", (q) => q.gte("fileId", `${folder}/`).lt("fileId", `${folder}0`))
       .take(500);
     const reels = rows.filter((row) => !row.invalid && roleOf(row) === "reel").sort((a, b) => b.createdAt - a.createdAt);
     return reels[0] ? mediaEntryOf(reels[0]) : null;
