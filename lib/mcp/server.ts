@@ -514,11 +514,16 @@ export async function verifyToken(req: Request, token: string | undefined): Prom
     return null;
   });
   if (oauth === null) {
+    // Logged (never the token) so a connector that shows no tools can be diagnosed.
+    console.warn("MCP sign-in refused: Clerk did not accept the access token (expired, or for another resource).");
     return undefined;
   }
   const credential = await serviceCredential(oauth.userId);
   const me = await convex.query(api.mcp.whoami, { token: credential });
   if (me === null) {
+    console.warn(
+      `MCP sign-in refused: Clerk user ${oauth.userId} is not a Shemoqmedi admin, or MCP_SERVICE_SECRET differs between Vercel and Convex.`,
+    );
     return undefined;
   }
   return {
