@@ -3,11 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "../convex/schema";
 import { api, internal } from "../convex/_generated/api";
-import type { Id } from "../convex/_generated/dataModel";
 import { R2_KEY, R2_LISTING_KEY, R2_SOCIAL_KEY } from "../convex/lib/r2";
 import {
   MAX_SCRIPT_CHARS,
   cleanScript,
+  mp3Seconds,
   mp4Duration,
   parseVoices,
   resolveVoice,
@@ -56,6 +56,13 @@ describe("ELEVENLABS_VOICES", () => {
     expect(resolveVoice(voices, " NINO ").voiceId).toBe(NINO);
     expect(resolveVoice(voices, LUKA).name).toBe("Luka");
     expect(() => resolveVoice(voices, "Giorgi")).toThrow(/Use one of: Nino, Luka/);
+  });
+
+  it("estimates an MP3's length from its size, skipping an ID3 tag", () => {
+    expect(mp3Seconds(new Uint8Array(32_000), 128)).toBe(2);
+    const tagged = new Uint8Array(10 + 300 + 16_000);
+    tagged.set([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 2, 0x2c]); // syncsafe 300
+    expect(mp3Seconds(tagged, 128)).toBe(1);
   });
 
   it("checks the script and sizes it to the video", () => {
@@ -222,8 +229,9 @@ describe("mp4Duration", () => {
   });
 });
 
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Actions (fetch mocked: no ElevenLabs credits, no R2, no worker)
+// Actions (fetch mocked: no ElevenLabs credits, no R2)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ENV = {
@@ -234,15 +242,28 @@ const ENV = {
   R2_PUBLIC_URL: "https://pub-test.r2.dev",
   ELEVENLABS_API_KEY: "xi-test",
   ELEVENLABS_VOICES: VOICES,
-  RENDER_WORKER_URL: "https://render.example.test/",
-  RENDER_WORKER_KEY: "render-key-0123456789",
 };
 
 const PREVIEW_KEY = "listings/paper-weather/paper-weather-website-preview-0123456789.mp4";
+/** 2 s of 128 kb/s MP3 (32 000 bytes) behind a 100-byte ID3 tag. */
+const FAKE_MP3 = (() => {
+  const bytes = new Uint8Array(10 + 100 + 32_000);
+  bytes.set([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 100]);
+  return bytes;
+})();
 
 async function setupListing(withVideo = true) {
   const t = convexTest(schema, modules);
-  const listingId = await t.run(async (ctx) => {
+  const ids = await t.run(async (ctx) => {
+    const admin = await ctx.db.insert("users", {
+      externalId: "admin",
+      name: "Admin",
+      email: "a@example.com",
+      role: "admin",
+      createdAt: 0,
+      updatedAt: 0,
+    });
+    await ctx.db.insert("users", { externalId: "maker", name: "Maker", email: "m@example.com", createdAt: 0, updatedAt: 0 });
     const cover = await ctx.db.insert("media", {
       fileId: "cover123",
       url: "https://ik.imagekit.io/x/listings/paper-weather/cover.webp",
@@ -264,7 +285,7 @@ async function setupListing(withVideo = true) {
           createdAt: 0,
         })
       : undefined;
-    return await ctx.db.insert("listings", {
+    const listingId = await ctx.db.insert("listings", {
       source: "import",
       submissionTier: "standard",
       slug: "paper-weather",
@@ -286,25 +307,31 @@ async function setupListing(withVideo = true) {
       createdAt: 0,
       updatedAt: 0,
     });
+    return { admin, listingId };
   });
-  return { t, listingId };
+  return {
+    t,
+    listingId: ids.listingId,
+    admin: t.withIdentity({ subject: "admin" }),
+    maker: t.withIdentity({ subject: "maker" }),
+  };
 }
 
 type Call = { method: string; url: URL; headers: Headers; body: string };
 
-/** Routes every outgoing request of the voiceover flow; records them. */
-function fakeServices(opts: { workerStatus?: number; stored?: boolean } = {}) {
+/** Routes every outgoing request (ElevenLabs, R2 API, R2 public); records them. */
+function fakeServices() {
   const calls: Call[] = [];
   const stored = new Map<string, { size: number; type: string }>();
   const preview = mp4({ seconds: 12 });
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const req = input instanceof Request ? input : new Request(input, init);
     const url = new URL(req.url);
-    const body = req.method === "GET" || req.method === "HEAD" ? "" : await req.clone().text();
+    const body = req.method === "GET" || req.method === "HEAD" || req.method === "PUT" ? "" : await req.clone().text();
     calls.push({ method: req.method, url, headers: req.headers, body });
 
     if (url.host === "api.elevenlabs.io" && url.pathname.startsWith("/v1/text-to-speech/")) {
-      return new Response(new Uint8Array(4096), { headers: { "content-type": "audio/mpeg" } });
+      return new Response(FAKE_MP3.slice(), { headers: { "content-type": "audio/mpeg" } });
     }
     if (url.host === "api.elevenlabs.io" && url.pathname.startsWith("/v1/voices/")) {
       const id = url.pathname.split("/").pop();
@@ -328,21 +355,14 @@ function fakeServices(opts: { workerStatus?: number; stored?: boolean } = {}) {
         return new Response(null, { status: 204 });
       }
     }
-    if (url.host === "render.example.test" && url.pathname === "/mux") {
-      if (opts.workerStatus) return Response.json({ error: "ffmpeg exploded" }, { status: opts.workerStatus });
-      const { putUrl } = JSON.parse(body) as { putUrl: string };
-      const key = decodeURIComponent(new URL(putUrl).pathname.replace("/shemoqmedi-media/", ""));
-      if (opts.stored !== false) stored.set(key, { size: 2_000_000, type: "video/mp4" });
-      return Response.json({ durationSec: 14.6, size: 2_000_000, width: 1280, height: 720 });
-    }
-    if (url.host === "pub-test.r2.dev") {
-      return rangeServer(preview)(url, { headers: req.headers });
-    }
+    if (url.host === "pub-test.r2.dev") return rangeServer(preview)(url, { headers: req.headers });
     return new Response(`unexpected ${req.method} ${url}`, { status: 599 });
   });
   vi.stubGlobal("fetch", fetchMock);
-  return { calls, stored, fetchMock };
+  return { calls, stored };
 }
+
+const elevenCalls = (calls: Call[]) => calls.filter((c) => c.url.host === "api.elevenlabs.io");
 
 describe("voiceover actions", () => {
   beforeEach(() => {
@@ -355,15 +375,17 @@ describe("voiceover actions", () => {
 
   it("listVoices names every narrator, with samples when ElevenLabs has them", async () => {
     fakeServices();
-    const t = convexTest(schema, modules);
-    const out = await t.action(internal.voiceover.listVoices, {});
-    expect(out).toEqual({
+    const { t, admin, maker } = await setupListing();
+    const expected = {
       wordsPerSecond: 2.5,
       voices: [
         { name: "Nino", voiceId: NINO, description: "Warm", previewUrl: `https://cdn.example/${NINO}.mp3` },
         { name: "Luka", voiceId: LUKA },
       ],
-    });
+    };
+    expect(await t.action(internal.voiceover.listVoices, {})).toEqual(expected);
+    expect(await admin.action(api.voiceover.voices, {})).toEqual(expected);
+    await expect(maker.action(api.voiceover.voices, {})).rejects.toThrow(/admin/);
   });
 
   it("videoInfo reads the preview's length and the word budget", async () => {
@@ -379,7 +401,22 @@ describe("voiceover actions", () => {
     expect(calls.every((c) => c.url.host === "pub-test.r2.dev" && c.headers.get("range"))).toBe(true);
   });
 
-  it("create: narration → R2 → worker → checked reel in media; the MP3 is cleaned up", async () => {
+  it("the page lists listings with a preview video, admins only", async () => {
+    const { listingId, admin, maker } = await setupListing();
+    expect(await admin.query(api.voiceover.listings, {})).toEqual([
+      {
+        id: listingId,
+        slug: "paper-weather",
+        title: "Paper Weather",
+        creditName: "Paper Weather",
+        status: "in_voting",
+        videoUrl: `https://pub-test.r2.dev/${PREVIEW_KEY}`,
+      },
+    ]);
+    await expect(maker.query(api.voiceover.listings, {})).rejects.toThrow(/admin/);
+  });
+
+  it("create: one ElevenLabs call → MP3 on R2 under social/ → { audioUrl, durationSec }", async () => {
     const { calls, stored } = fakeServices();
     const { t, listingId } = await setupListing();
     const out = await t.action(internal.voiceover.create, {
@@ -387,37 +424,38 @@ describe("voiceover actions", () => {
       script: "  Paper Weather builds quiet,   careful sites. ",
       voice: "nino",
     });
+    expect(out.durationSec).toBe(2);
+    expect(out.audioUrl).toMatch(
+      /^https:\/\/pub-test\.r2\.dev\/social\/paper-weather\/paper-weather-voiceover-[a-f0-9]{10}\.mp3$/,
+    );
+    const key = out.audioUrl.replace("https://pub-test.r2.dev/", "");
+    expect(stored.get(key)).toEqual({ size: FAKE_MP3.length, type: "audio/mpeg" });
 
-    expect(out.durationSec).toBe(14.6);
-    expect(out.url).toMatch(/^https:\/\/pub-test\.r2\.dev\/social\/paper-weather\/paper-weather-reel-[a-f0-9]{10}\.mp4$/);
-    const row = await t.run((ctx) => ctx.db.get(out.mediaId as Id<"media">));
-    expect(row).toMatchObject({ store: "r2", kind: "video", contentType: "video/mp4", size: 2_000_000, width: 1280 });
-    expect(R2_SOCIAL_KEY.test(row!.fileId)).toBe(true);
-
-    const tts = calls.find((c) => c.url.pathname.startsWith("/v1/text-to-speech/"))!;
-    expect(tts.method).toBe("POST");
-    expect(tts.url.pathname).toBe(`/v1/text-to-speech/${NINO}`);
-    expect(tts.url.searchParams.get("output_format")).toBe("mp3_44100_128");
-    expect(tts.headers.get("xi-api-key")).toBe("xi-test");
-    expect(JSON.parse(tts.body)).toEqual({
+    const tts = elevenCalls(calls);
+    expect(tts).toHaveLength(1);
+    expect(tts[0].method).toBe("POST");
+    expect(tts[0].url.pathname).toBe(`/v1/text-to-speech/${NINO}`);
+    expect(tts[0].url.searchParams.get("output_format")).toBe("mp3_44100_128");
+    expect(tts[0].headers.get("xi-api-key")).toBe("xi-test");
+    expect(JSON.parse(tts[0].body)).toEqual({
       text: "Paper Weather builds quiet, careful sites.",
       model_id: "eleven_multilingual_v2",
     });
-    expect(calls.filter((c) => c.url.pathname.startsWith("/v1/text-to-speech/"))).toHaveLength(1);
-
-    const mux = calls.find((c) => c.url.host === "render.example.test")!;
-    expect(mux.headers.get("x-render-key")).toBe("render-key-0123456789");
-    const sent = JSON.parse(mux.body);
-    expect(sent.videoUrl).toBe(`https://pub-test.r2.dev/${PREVIEW_KEY}`);
-    expect(sent.audioUrl).toMatch(/^https:\/\/pub-test\.r2\.dev\/social\/paper-weather\/paper-weather-voiceover-[a-f0-9]{10}\.mp3$/);
-    expect(new URL(sent.putUrl).searchParams.get("X-Amz-Signature")).toMatch(/^[a-f0-9]{64}$/);
-    expect(sent.layout).toBe("source");
-
-    // Only the reel is left on R2.
-    expect([...stored.keys()]).toEqual([row!.fileId]);
   });
 
-  it("create refuses bad input before spending any credits", async () => {
+  it("generate is the same for admins, and refused to everyone else before any credits", async () => {
+    const { calls } = fakeServices();
+    const { listingId, admin, maker } = await setupListing();
+    await expect(maker.action(api.voiceover.generate, { listingId, script: "Hi", voice: "Nino" })).rejects.toThrow(
+      /admin/,
+    );
+    expect(elevenCalls(calls)).toHaveLength(0);
+    const out = await admin.action(api.voiceover.generate, { listingId, script: "Hi", voice: "Luka" });
+    expect(out.audioUrl).toMatch(/\.mp3$/);
+    expect(elevenCalls(calls)[0].url.pathname).toBe(`/v1/text-to-speech/${LUKA}`);
+  });
+
+  it("bad input is refused before spending any credits", async () => {
     const { calls } = fakeServices();
     const { t, listingId } = await setupListing();
     await expect(t.action(internal.voiceover.create, { listingId, script: "Hi", voice: "Giorgi" })).rejects.toThrow(
@@ -426,34 +464,60 @@ describe("voiceover actions", () => {
     await expect(t.action(internal.voiceover.create, { listingId, script: "   ", voice: "Nino" })).rejects.toThrow(
       /empty/,
     );
-    vi.stubEnv("RENDER_WORKER_URL", "");
+    vi.stubEnv("ELEVENLABS_API_KEY", "");
     await expect(t.action(internal.voiceover.create, { listingId, script: "Hi", voice: "Nino" })).rejects.toThrow(
-      /RENDER_WORKER_URL is not set/,
+      /ELEVENLABS_API_KEY is not set/,
     );
-    vi.stubEnv("RENDER_WORKER_URL", ENV.RENDER_WORKER_URL);
+    vi.stubEnv("ELEVENLABS_API_KEY", ENV.ELEVENLABS_API_KEY);
     const bare = await setupListing(false);
     await expect(
       bare.t.action(internal.voiceover.create, { listingId: bare.listingId, script: "Hi", voice: "Nino" }),
     ).rejects.toThrow(/no preview video/);
-    expect(calls.filter((c) => c.url.host === "api.elevenlabs.io")).toHaveLength(0);
+    expect(elevenCalls(calls)).toHaveLength(0);
   });
 
-  it("a failed render leaves nothing on R2 and no media row", async () => {
-    const { stored } = fakeServices({ workerStatus: 500 });
-    const { t, listingId } = await setupListing();
-    await expect(t.action(internal.voiceover.create, { listingId, script: "Hi there", voice: "Luka" })).rejects.toThrow(
-      /render worker failed \(HTTP 500\): ffmpeg exploded/,
+  it("reel upload: admin-only presigned social/ key, registered as a media row and checked on R2", async () => {
+    const { stored } = fakeServices();
+    const { t, listingId, admin, maker } = await setupListing();
+    await expect(maker.action(api.voiceover.reelUploadUrl, { listingId, size: 1000 })).rejects.toThrow(/admin/);
+    await expect(admin.action(api.voiceover.reelUploadUrl, { listingId, size: 101 * 1024 * 1024 })).rejects.toThrow(
+      /100 MB/,
     );
-    expect(stored.size).toBe(0);
-    const reels = await t.run((ctx) => ctx.db.query("media").collect());
-    expect(reels.filter((m) => m.fileId.startsWith("social/"))).toHaveLength(0);
+    const { uploadUrl, key } = await admin.action(api.voiceover.reelUploadUrl, { listingId, size: 2_000_000 });
+    expect(key).toMatch(/^social\/paper-weather\/paper-weather-reel-[a-f0-9]{10}\.mp4$/);
+    expect(new URL(uploadUrl).pathname).toBe(`/shemoqmedi-media/${key}`);
+
+    for (const bad of [PREVIEW_KEY, "social/paper-weather/x.mp3", "social/../x/y.mp4"]) {
+      await expect(admin.mutation(api.voiceover.registerReel, { key: bad, size: 10 })).rejects.toThrow(/not a reel/);
+    }
+    await expect(maker.mutation(api.voiceover.registerReel, { key, size: 10 })).rejects.toThrow(/admin/);
+
+    // The browser PUTs the reel, then registers it.
+    stored.set(key, { size: 2_000_000, type: "video/mp4" });
+    const { mediaId, url } = await admin.mutation(api.voiceover.registerReel, { key, size: 2_000_000, width: 1280 });
+    expect(url).toBe(`https://pub-test.r2.dev/${key}`);
+    expect((await admin.mutation(api.voiceover.registerReel, { key, size: 2_000_000 })).mediaId).toBe(mediaId);
+    vi.useFakeTimers();
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    vi.useRealTimers();
+    expect(await t.run((ctx) => ctx.db.get(mediaId))).toMatchObject({
+      store: "r2",
+      kind: "video",
+      contentType: "video/mp4",
+      size: 2_000_000,
+      width: 1280,
+    });
+    expect((await t.run((ctx) => ctx.db.get(mediaId)))?.invalid).toBeUndefined();
   });
 
-  it("a reel the worker did not actually store is refused", async () => {
-    fakeServices({ stored: false });
-    const { t, listingId } = await setupListing();
-    await expect(t.action(internal.voiceover.create, { listingId, script: "Hi there", voice: "Nino" })).rejects.toThrow(
-      /not on R2/,
-    );
+  it("a registered reel that is not really on R2 is marked invalid", async () => {
+    fakeServices();
+    const { t, listingId, admin } = await setupListing();
+    const { key } = await admin.action(api.voiceover.reelUploadUrl, { listingId, size: 1000 });
+    const { mediaId } = await admin.mutation(api.voiceover.registerReel, { key, size: 1000 });
+    vi.useFakeTimers();
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+    vi.useRealTimers();
+    expect((await t.run((ctx) => ctx.db.get(mediaId)))?.invalid).toBe(true);
   });
 });

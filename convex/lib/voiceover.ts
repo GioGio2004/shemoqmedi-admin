@@ -12,6 +12,9 @@ export const WORDS_PER_SECOND = 2.5;
 /** Longest script we send to ElevenLabs (credits are per character). */
 export const MAX_SCRIPT_CHARS = 1200;
 
+/** Largest reel the admin page may upload (Instagram allows far more; this catches a runaway encode). */
+export const MAX_REEL_BYTES = 100 * 1024 * 1024;
+
 export type Voice = { name: string; voiceId: string };
 
 const VOICE_ID = /^[A-Za-z0-9_-]{8,64}$/;
@@ -83,6 +86,21 @@ export function socialKey(slug: string, label: string, ext: "mp3" | "mp4") {
   const key = `social/${s}/${s}-${slugify(label, "file")}-${suffix}.${ext}`;
   if (!R2_SOCIAL_KEY.test(key)) throw new Error(`Bad social key ${key}`);
   return key;
+}
+
+/**
+ * Seconds of a constant-bitrate MP3 (ElevenLabs' mp3_44100_128), from its
+ * size: an ID3v2 tag at the start is skipped. Close enough to size the reel;
+ * the browser decodes the real length before muxing.
+ */
+export function mp3Seconds(bytes: Uint8Array, kbps: number) {
+  let start = 0;
+  if (bytes.length >= 10 && bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) {
+    // ID3v2: 10-byte header + syncsafe size (+ 10-byte footer when flagged).
+    const size = ((bytes[6] & 0x7f) << 21) | ((bytes[7] & 0x7f) << 14) | ((bytes[8] & 0x7f) << 7) | (bytes[9] & 0x7f);
+    start = 10 + size + (bytes[5] & 0x10 ? 10 : 0);
+  }
+  return (Math.max(0, bytes.length - start) * 8) / (kbps * 1000);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
