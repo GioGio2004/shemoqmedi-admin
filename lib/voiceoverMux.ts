@@ -54,7 +54,7 @@ async function download(url: string, what: string) {
   } catch {
     // A network error here is almost always CORS on the R2 bucket.
     throw new UploadError(
-      `Could not download the ${what}. If this keeps happening, allow GET from this site in the R2 bucket's CORS policy.`,
+      `Could not download the ${what}: the R2 bucket's CORS policy doesn't allow this site. Allow GET and PUT from ${location.origin} there, then build again.`,
     );
   }
   if (!res.ok) throw new UploadError(`Could not download the ${what} (HTTP ${res.status}).`);
@@ -213,6 +213,15 @@ export async function buildReel(
 
 /** PUT the reel to a presigned R2 URL. */
 export async function uploadReel(blob: Blob, uploadUrl: string) {
-  const res = await fetch(uploadUrl, { method: "PUT", body: blob, headers: { "Content-Type": "video/mp4" } });
+  let res: Response;
+  try {
+    res = await fetch(uploadUrl, { method: "PUT", body: blob, headers: { "Content-Type": "video/mp4" } });
+  } catch {
+    // The browser blocks the PUT before it leaves (no answer to read): R2's CORS policy
+    // doesn't allow uploads from this site. Shown instead of a bare "Failed to fetch".
+    throw new UploadError(
+      `The reel was built but the upload was blocked. Allow PUT from ${location.origin} in the R2 bucket's CORS policy, then build again.`,
+    );
+  }
   if (!res.ok) throw new UploadError(`Reel upload failed (HTTP ${res.status}). Please try again.`);
 }
