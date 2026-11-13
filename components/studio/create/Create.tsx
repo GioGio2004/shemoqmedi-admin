@@ -1,5 +1,6 @@
 "use client";
 
+import "@/app/studio/screens/create.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAction, useMutation, useQuery } from "convex/react";
@@ -35,10 +36,12 @@ import {
 import { draftCaptions, storyCaption, type DraftFacts } from "@/lib/studio/drafts";
 import { createDraftStore } from "@/lib/studio/persist";
 import { formatTbilisi } from "@/lib/studio/time";
+import { useAmbient } from "../Ambient";
 import { CaptionEditor, StoryNetworks } from "../CaptionEditor";
 import { useMedia } from "../hooks";
+import { CheckIcon } from "../icons";
 import { TimeSheet } from "../TimeSheet";
-import { ConfirmSheet, PageHead } from "../ui";
+import { ConfirmSheet, PageHead, Segmented } from "../ui";
 import { FinalStep, type Rendered } from "./FinalStep";
 import { AwardPicker, ListingPicker, type AwardRow } from "./Pickers";
 import { PaletteStrip, PreviewStage, StylePicker, type Look } from "./Stage";
@@ -98,15 +101,26 @@ function freshDraft(output: Output): CreateDraft {
   };
 }
 
-function Step({ n, title, aside, children }: { n: string; title: string; aside?: React.ReactNode; children: React.ReactNode }) {
+const FORMAT_LABEL: Partial<Record<FormatId, string>> = { ig_portrait: "Portrait 4:5", square: "Square", link: "Link 1.91:1" };
+
+/** One step: a glass section with its large number; `done` turns the number into a check. */
+function Step({ n, title, aside, done, children }: { n: string; title: string; aside?: React.ReactNode; done?: boolean; children: React.ReactNode }) {
   return (
-    <section className="st-step" aria-labelledby={`step-${n}`}>
-      <div className="st-step-head">
-        <span className="st-step-n">{n}</span>
+    <section className="st-step st-create-step st-glass" aria-labelledby={`step-${n}`}>
+      <div className="st-create-step-head">
+        <span className="st-create-n" data-done={done || undefined} aria-hidden="true">
+          {n}
+          {done && (
+            <span className="st-create-n-done">
+              <CheckIcon size={12} />
+            </span>
+          )}
+        </span>
         <h2 id={`step-${n}`} className="st-h2">
           {title}
+          {done && <span className="sr-only">, done</span>}
         </h2>
-        {aside && <span className="st-note">{aside}</span>}
+        {aside && <span className="st-create-aside">{aside}</span>}
       </div>
       {children}
     </section>
@@ -320,15 +334,21 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
   }
 
   // ── Layout ────────────────────────────────────────────────────────────
+  // The background is the work itself: the chosen site's screenshots.
+  useAmbient(shotUrl ? [shotUrl, ...shots.filter((u) => u !== shotUrl)] : shots);
+
   const stageNote = output === "carousel" ? "Cover, drawn here · every slide is laid out in Render final" : undefined;
   const stage = <PreviewStage look={look} sticky={!wide} note={stageNote} />;
   const strip = <PaletteStrip look={look} onPick={setPalette} />;
   const { width: fw, height: fh } = FORMATS[effectiveFormat];
+  const fresh = !!rendered && !stale && rendering === null;
+  const outputHint = OUTPUTS.find((o) => o.id === output)?.hint;
+  const carouselNote = !outputAllowed("carousel", source) ? " · a carousel needs a listing" : "";
 
   const steps = (
     <>
-      <Step n="01" title="Source">
-        <div className="st-options">
+      <Step n="01" title="Source" aside={SOURCES.find((s) => s.id === source)?.label} done={needsListing(source) ? !!listingId : true}>
+        <div className="st-options st-create-options" role="group" aria-label="Source">
           {SOURCES.map((s) => (
             <button key={s.id} type="button" className="st-option" aria-pressed={source === s.id} onClick={() => pickSource(s.id)}>
               {s.label}
@@ -343,37 +363,27 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
       <Step n="02" title="Style" aside={STYLE_INFO[style].label}>
         <StylePicker look={look} onPick={setStyle} />
         <p className="st-note">{STYLE_INFO[style].description}</p>
-        {style === "glass" && (
-          <div className="st-seg" role="group" aria-label="Glass">
-            {GLASS.map((g) => (
-              <button key={g.id} type="button" aria-pressed={glass === g.id} onClick={() => setGlass(g.id)}>
-                {g.label}
-              </button>
-            ))}
-          </div>
-        )}
+        {style === "glass" && <Segmented kind="radio" size="sm" label="Glass" value={glass} onChange={setGlass} options={GLASS.map((g) => ({ value: g.id, label: g.label }))} />}
       </Step>
 
-      <Step n="03" title="Output">
-        <div className="st-options">
-          {OUTPUTS.map((o) => (
-            <button key={o.id} type="button" className="st-option" aria-pressed={output === o.id} disabled={!outputAllowed(o.id, source)} onClick={() => setOutput(o.id)}>
-              {o.label}
-              <small>{o.id === "carousel" && !needsListing(source) ? "Needs a listing" : o.hint}</small>
-            </button>
-          ))}
-        </div>
+      <Step n="03" title="Output" aside={output === "single" ? FORMAT_LABEL[effectiveFormat] : OUTPUTS.find((o) => o.id === output)?.label}>
+        <Segmented
+          kind="radio"
+          block
+          label="Output"
+          value={output}
+          onChange={setOutput}
+          options={OUTPUTS.map((o) => ({ value: o.id, label: o.label, disabled: !outputAllowed(o.id, source) }))}
+        />
+        <p className="st-note">
+          {outputHint}
+          {carouselNote}
+        </p>
         {output === "single" && (
-          <div className="st-seg" role="group" aria-label="Format">
-            {FEED_FORMATS.map((f) => (
-              <button key={f} type="button" aria-pressed={effectiveFormat === f} onClick={() => setFormat(f)}>
-                {f === "ig_portrait" ? "Portrait 4:5" : f === "square" ? "Square" : "Link 1.91:1"}
-              </button>
-            ))}
-          </div>
+          <Segmented kind="radio" size="sm" label="Format" value={effectiveFormat} onChange={setFormat} options={FEED_FORMATS.map((f) => ({ value: f, label: FORMAT_LABEL[f] ?? f }))} />
         )}
         {output !== "carousel" && (
-          <div className="st-scroll-x" role="group" aria-label="Template">
+          <div className="st-scroll-x st-create-chips" role="group" aria-label="Template">
             {templatesFor(source).map((t) => (
               <button key={t} type="button" className="st-chip st-chip-sm" aria-pressed={template === t} onClick={() => setTemplate(t)}>
                 {TEMPLATES[t].label}
@@ -408,20 +418,25 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
         )}
       </Step>
 
-      <Step n="05" title="Render final" aside={output === "carousel" ? "All slides" : `${fw}×${fh}`}>
+      <Step n="05" title="Render final" aside={output === "carousel" ? "All slides" : `${fw}×${fh}`} done={fresh}>
         <p className="st-note">The server draws the exact JPEG{output === "carousel" ? "s" : ""} that will be posted.</p>
         <FinalStep rendered={rendered} stale={stale} rendering={rendering} onRender={renderFinal} slots={output === "carousel" ? 7 : 1} ratio={fw / fh} glass={style === "glass"} />
         {carouselBlocked && <p className="st-note">A carousel needs a listing.</p>}
       </Step>
 
-      <Step n="06" title={story ? "Where" : "Captions"} aside={networks.length ? networks.map((n) => NETWORK_LABEL[n]).join(" · ") : "No network yet"}>
+      <Step
+        n="06"
+        title={story ? "Where" : "Captions"}
+        aside={networks.length ? networks.map((n) => NETWORK_LABEL[n]).join(" · ") : "No network yet"}
+        done={networks.length > 0 && captionsFit(finalCaptions)}
+      >
         {story ? (
           <StoryNetworks value={storyCaptions} onChange={setStoryCaps} label={label} />
         ) : (
           <>
             <CaptionEditor value={feedCaptions} onChange={setCaptions} drafts={drafts} />
             {captions && (
-              <button type="button" className="st-btn st-btn-quiet st-btn-sm" onClick={() => setCaptions(null)} style={{ justifySelf: "start" }}>
+              <button type="button" className="st-btn st-btn-quiet st-btn-sm st-create-start" onClick={() => setCaptions(null)}>
                 Back to the drafts
               </button>
             )}
@@ -430,29 +445,31 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
       </Step>
 
       <Step n="07" title="Publish">
-        {!rendered ? (
-          <p className="st-note">Render the final image first.</p>
-        ) : stale ? (
-          <p className="st-note">Render again: the design changed.</p>
-        ) : networks.length === 0 ? (
-          <p className="st-note">Give at least one network a caption.</p>
-        ) : !captionsFit(finalCaptions) ? (
-          <p className="st-note">A caption is over its network&apos;s limit.</p>
-        ) : (
-          <p className="st-note">
-            {story ? "A story" : output === "carousel" ? `A carousel of ${rendered.urls.length}` : "One image"} to <strong>{networks.map((n) => NETWORK_LABEL[n]).join(", ")}</strong>.
-          </p>
-        )}
-        <div className="st-actions">
-          <button type="button" className="st-btn st-btn-blue" disabled={!ready || saving !== null} data-busy={saving === "now"} onClick={() => setSheet("publish")}>
+        <p className="st-create-summary" data-ready={ready || undefined} aria-live="polite">
+          {!rendered ? (
+            "Render the final image first."
+          ) : stale ? (
+            "Render again: the design changed."
+          ) : networks.length === 0 ? (
+            "Give at least one network a caption."
+          ) : !captionsFit(finalCaptions) ? (
+            <span className="st-danger-text">A caption is over its network&apos;s limit.</span>
+          ) : (
+            <>
+              {story ? "A story" : output === "carousel" ? `A carousel of ${rendered.urls.length}` : "One image"} to <strong>{networks.map((n) => NETWORK_LABEL[n]).join(", ")}</strong>.
+            </>
+          )}
+        </p>
+        <div className="st-actions st-create-publish">
+          <button type="button" className="st-btn" disabled={!ready || saving !== null} data-busy={saving === "now"} onClick={() => setSheet("publish")}>
             Publish now
           </button>
-          <button type="button" className="st-btn" disabled={!ready || saving !== null} data-busy={saving === "schedule"} onClick={() => setSheet("schedule")}>
+          <button type="button" className="st-btn st-btn-ghost" disabled={!ready || saving !== null} data-busy={saving === "schedule"} onClick={() => setSheet("schedule")}>
             Schedule
           </button>
           <button
             type="button"
-            className="st-btn st-btn-ghost st-span"
+            className="st-btn st-btn-quiet st-span"
             disabled={!rendered || stale || rendering !== null || saving !== null}
             data-busy={saving === "draft"}
             onClick={() => finish("draft").catch(() => {})}
@@ -467,10 +484,10 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
   return (
     <>
       <style>{previewFontFaces}</style>
-      <PageHead index="03" section="Create" title="Create." />
+      <PageHead section="Create" title="Create." />
       {restored && (
-        <div className="st-callout" data-tone="blue" style={{ marginBottom: 16 }}>
-          <span style={{ flex: 1 }}>Picked up where you left off.</span>
+        <div className="st-create-restored st-glass" role="status">
+          <span>Picked up where you left off.</span>
           <button type="button" className="st-btn st-btn-quiet st-btn-sm" onClick={startOver} disabled={saving !== null || rendering !== null}>
             Start over
           </button>
@@ -478,20 +495,19 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
       )}
       {wide ? (
         <div className="st-create">
-          <div>{steps}</div>
-          <aside className="st-create-side" aria-label="Preview">
+          <div className="st-create-steps">{steps}</div>
+          <aside className="st-create-side st-glass" aria-label="Preview">
             {stage}
             {strip}
           </aside>
         </div>
       ) : (
-        <div className="st-create">{steps}</div>
+        <div className="st-create st-create-steps">{steps}</div>
       )}
       <ConfirmSheet
         open={sheet === "publish"}
         onClose={() => setSheet(null)}
         title="Publish now?"
-        tone="blue"
         confirmLabel="Publish now"
         body={
           <>

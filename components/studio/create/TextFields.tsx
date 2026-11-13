@@ -2,6 +2,8 @@
 
 import { useId } from "react";
 import { TIERS, type FieldSpec } from "@/lib/graphics/spec";
+import { ikUrl } from "../media";
+import { PickedMark } from "./PickedMark";
 
 /** One text field of a template: tier chips, a multi-line box or a line. Every key redraws the preview. */
 export function TextField({ field, value, onChange }: { field: FieldSpec; value: string; onChange: (v: string) => void }) {
@@ -28,7 +30,7 @@ export function TextField({ field, value, onChange }: { field: FieldSpec; value:
         <span>{field.label}</span>
       </label>
       {field.long ? (
-        <textarea id={id} className="st-input" rows={3} value={value} placeholder={field.placeholder} onChange={(e) => onChange(e.target.value)} style={{ minHeight: 88 }} />
+        <textarea id={id} className="st-input st-create-long" rows={3} value={value} placeholder={field.placeholder} onChange={(e) => onChange(e.target.value)} />
       ) : (
         <input id={id} className="st-input" value={value} placeholder={field.placeholder} onChange={(e) => onChange(e.target.value)} autoComplete="off" />
       )}
@@ -45,10 +47,12 @@ export function ShotPicker({ shots, value, onPick }: { shots: string[]; value: s
       <span id={id} className="st-label">
         Screenshot
       </span>
-      <div className="st-shots">
+      <div className="st-create-shots">
         {shots.map((url, i) => (
-          <button key={url} type="button" aria-pressed={url === value} onClick={() => onPick(url)} aria-label={`Screenshot ${i + 1}`}>
-            <img src={url} alt="" loading="lazy" decoding="async" />
+          <button key={url} type="button" className="st-create-shot lq" aria-pressed={url === value} onClick={() => onPick(url)} aria-label={`Screenshot ${i + 1}`}>
+            {/* Eager: these sit in a sideways scroller, where lazy loading may never fire. */}
+            <img src={ikUrl(url, 240)} alt="" width={104} height={66} decoding="async" />
+            {url === value && <PickedMark />}
           </button>
         ))}
       </div>

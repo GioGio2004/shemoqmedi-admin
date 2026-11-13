@@ -1,5 +1,6 @@
 "use client";
 
+import "@/app/studio/screens/reels.css";
 import { useEffect, useId, useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { useAction, useMutation, useQuery } from "convex/react";
@@ -15,6 +16,7 @@ import { createDraftStore } from "@/lib/studio/persist";
 import { reelBuilds, type BuildStage, type ReelBuildState } from "@/lib/studio/reelBuild";
 import { storyVideoProblem } from "@/convex/lib/socialApi";
 import { useCanEncode } from "../hooks";
+import { AlertIcon, ReelIcon } from "../icons";
 import { ConfirmSheet, PageHead, Skel } from "../ui";
 
 // Reels: a listing's preview video with a spoken narration (ElevenLabs),
@@ -161,6 +163,10 @@ export function Reels() {
   const lengthProblem = done ? storyVideoProblem(done.durationSec, "this reel") : null;
   const storyOk = vertical && !lengthProblem;
 
+  const narrationState = targetWords && scriptWords > targetWords ? "over" : undefined;
+  const narrationFill = targetWords ? Math.min(1, scriptWords / targetWords) : 0;
+  const voiced = audioUrl !== "";
+
   return (
     <>
       <PageHead
@@ -171,25 +177,41 @@ export function Reels() {
       />
 
       {canEncode === false && (
-        <div className="st-callout" data-tone="ink" style={{ marginBottom: 16 }}>
+        <div className="st-callout st-reels-warn">
+          <AlertIcon />
           <span>
-            This browser can&apos;t build video (no WebCodecs). You can voice the script here; build the reel in <strong style={{ color: "#fff" }}>desktop Chrome or Edge</strong>.
+            This browser can&apos;t build video (no WebCodecs). You can voice the script here; build the reel in <strong>desktop Chrome or Edge</strong>.
           </span>
         </div>
       )}
 
       {listings === undefined ? (
         <div className="st-split">
-          <Skel style={{ height: 420, borderRadius: 14 }} />
-          <Skel style={{ height: 420, borderRadius: 14 }} />
+          {[0, 1].map((i) => (
+            <div key={i} className="st-panel st-reels-panel" aria-hidden="true">
+              <Skel className="st-skel-text" style={{ width: 140 }} />
+              <Skel style={{ height: 48, borderRadius: 16 }} />
+              <Skel style={{ height: 220, borderRadius: 22 }} />
+              <Skel style={{ height: 48, borderRadius: 999 }} />
+            </div>
+          ))}
         </div>
       ) : listings.length === 0 ? (
-        <div className="st-empty">
+        <div className="st-empty st-in">
           <strong>No preview videos yet.</strong>A listing needs a preview video before it can become a reel.
         </div>
       ) : (
         <div className="st-split">
-          <section className="st-panel" aria-label="Listing and narration">
+          <section className="st-panel st-reels-panel st-in" aria-labelledby={`${ids.listing}-h`}>
+            <div className="st-reels-step" data-done={voiced}>
+              <span className="st-reels-num" aria-hidden="true">
+                1
+              </span>
+              <h2 id={`${ids.listing}-h`} className="st-h3">
+                Listing and narration
+              </h2>
+            </div>
+
             <div className="st-field">
               <label className="st-label" htmlFor={ids.listing}>
                 <span>Listing</span>
@@ -204,27 +226,44 @@ export function Reels() {
               </select>
             </div>
 
-            {listing && (
-              <video
-                key={listing.videoUrl}
-                src={listing.videoUrl}
-                className="st-video"
-                controls
-                muted
-                playsInline
-                preload="metadata"
-                onLoadedMetadata={(e) => setVideoSec(e.currentTarget.duration)}
-              />
-            )}
+            <div className="st-reels-frame">
+              {listing ? (
+                <>
+                  <video
+                    key={listing.videoUrl}
+                    src={listing.videoUrl}
+                    className="st-reels-video"
+                    controls
+                    muted
+                    playsInline
+                    preload="metadata"
+                    onLoadedMetadata={(e) => setVideoSec(e.currentTarget.duration)}
+                  />
+                  {videoSec !== null && Number.isFinite(videoSec) && (
+                    <div className="st-media-top">
+                      <span className="st-mchip">Preview</span>
+                      <span className="st-mchip st-tnum">{videoSec.toFixed(1)} s</span>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="st-reels-empty">
+                  <ReelIcon />
+                  <p>Pick a listing to see its preview video.</p>
+                </div>
+              )}
+            </div>
 
             <div className="st-field">
               <label className="st-label" htmlFor={ids.voice}>
                 <span>Voice</span>
               </label>
               {voicesError ? (
-                <p className="st-note">{voicesError}</p>
+                <p className="st-callout" data-tone="error" role="alert">
+                  {voicesError}
+                </p>
               ) : voices === null ? (
-                <Skel style={{ height: 48 }} />
+                <Skel style={{ height: 48, borderRadius: 16 }} />
               ) : (
                 <select id={ids.voice} className="st-input" value={voice} onChange={(e) => setVoice(e.target.value)} disabled={busy}>
                   {voices.map((v) => (
@@ -235,13 +274,15 @@ export function Reels() {
                 </select>
               )}
               {chosenVoice?.description && <p className="st-note">{chosenVoice.description}</p>}
-              {chosenVoice?.previewUrl && <audio key={chosenVoice.previewUrl} src={chosenVoice.previewUrl} controls preload="none" style={{ width: "100%" }} />}
+              {chosenVoice?.previewUrl && (
+                <audio key={chosenVoice.previewUrl} className="st-reels-audio" src={chosenVoice.previewUrl} controls preload="none" aria-label={`${chosenVoice.name}, a sample`} />
+              )}
             </div>
 
             <div className="st-field">
               <label className="st-label" htmlFor={ids.script}>
                 <span>Narration</span>
-                <span className="st-counter">
+                <span className="st-counter" data-state={narrationState === "over" ? "near" : undefined}>
                   {scriptWords} words · {(scriptWords / WORDS_PER_SECOND).toFixed(1)} s{targetWords ? ` · aim ${targetWords}` : ""}
                 </span>
               </label>
@@ -254,14 +295,39 @@ export function Reels() {
                 placeholder="Short and plain. Say what the site is and who made it."
                 disabled={busy}
               />
+              {targetWords !== null && (
+                <>
+                  <div className="st-reels-meter" data-state={narrationState} aria-hidden="true">
+                    <span style={{ "--fill": narrationFill } as React.CSSProperties} />
+                  </div>
+                  <p className="st-note st-tnum" aria-live="polite">
+                    {narrationState === "over" ? "Longer than the video: the last frame holds." : `About ${targetWords - scriptWords} words left for the video.`}
+                  </p>
+                </>
+              )}
             </div>
 
-            <button type="button" className="st-btn" onClick={() => setConfirmVoice(true)} disabled={!listing || !voice || !script.trim() || busy} data-busy={stage?.label === "Voicing the script…"}>
-              Generate voice
+            <button
+              type="button"
+              className={`st-btn st-btn-block${voiced ? " st-btn-ghost" : ""}`}
+              onClick={() => setConfirmVoice(true)}
+              disabled={!listing || !voice || !script.trim() || busy}
+              data-busy={stage?.label === "Voicing the script…"}
+            >
+              {voiced ? "Voice it again" : "Generate voiceover"}
             </button>
           </section>
 
-          <section className="st-panel" aria-label="Reel">
+          <section className="st-panel st-reels-panel st-in" aria-labelledby={`${ids.audio}-h`}>
+            <div className="st-reels-step" data-done={done !== null}>
+              <span className="st-reels-num" aria-hidden="true">
+                2
+              </span>
+              <h2 id={`${ids.audio}-h`} className="st-h3">
+                Reel
+              </h2>
+            </div>
+
             <div className="st-field">
               <label className="st-label" htmlFor={ids.audio}>
                 <span>Narration (MP3 URL)</span>
@@ -275,14 +341,14 @@ export function Reels() {
                 placeholder="Generate the voice, or paste an audioUrl"
                 disabled={busy}
               />
-              {audioUrl && <audio key={audioUrl} src={audioUrl} controls preload="metadata" style={{ width: "100%" }} />}
+              {audioUrl && <audio key={audioUrl} className="st-reels-audio" src={audioUrl} controls preload="metadata" aria-label="Narration" />}
             </div>
 
-            <button type="button" className="st-btn st-btn-blue" onClick={onBuild} disabled={!listing || !audioUrl || busy || canEncode === false}>
+            <button type="button" className={`st-btn st-btn-block${voiced ? "" : " st-btn-ghost"}`} onClick={onBuild} disabled={!listing || !audioUrl || busy || canEncode === false}>
               Build the reel
             </button>
             {stage && (
-              <div className="st-stack" style={{ gap: 6 }} role="status">
+              <div className="st-inset st-reels-status" role="status">
                 <div className="st-progress" data-indeterminate={stage.fraction === undefined}>
                   <span style={stage.fraction !== undefined ? { width: `${Math.round(stage.fraction * 100)}%` } : undefined} />
                 </div>
@@ -294,26 +360,42 @@ export function Reels() {
             )}
 
             {done ? (
-              <div className="st-stack">
-                <video src={done.url} className="st-video" controls playsInline />
+              <div className="st-reels-done st-in">
+                <div className={`st-reels-frame${vertical ? " is-vertical" : ""}`}>
+                  <video src={done.url} className="st-reels-video" controls playsInline />
+                  <div className="st-media-top">
+                    <span className="st-mchip">Ready</span>
+                    <span className="st-mchip st-tnum">{done.durationSec.toFixed(1)} s</span>
+                  </div>
+                </div>
                 <p className="st-note st-tnum">
                   {done.durationSec.toFixed(1)} s · {mb(done.size)} · {done.width}×{done.height}
                   {done.heldSec > 0 ? ` · last frame held ${done.heldSec.toFixed(1)} s` : ""}
                 </p>
-                <div className="st-actions">
-                  <button type="button" className="st-btn" onClick={() => post("feed")} disabled={posting !== null} data-busy={posting === "feed"}>
-                    Post as reel
-                  </button>
-                  <button type="button" className="st-btn st-btn-ghost" onClick={() => post("story")} disabled={posting !== null || !storyOk} data-busy={posting === "story"}>
-                    Post as story
-                  </button>
+                <div className="st-reels-attach">
+                  <h3 className="st-h3">Attach to a post</h3>
+                  <div className="st-actions">
+                    <button type="button" className="st-btn" onClick={() => post("feed")} disabled={posting !== null} data-busy={posting === "feed"}>
+                      Post as reel
+                    </button>
+                    <button type="button" className="st-btn st-btn-ghost" onClick={() => post("story")} disabled={posting !== null || !storyOk} data-busy={posting === "story"}>
+                      Post as story
+                    </button>
+                  </div>
+                  {!vertical && <p className="st-note">Stories need a 9:16 video; this one is {done.width}×{done.height}, so it goes to the feed as a reel.</p>}
+                  {vertical && lengthProblem && <p className="st-note">{lengthProblem}</p>}
+                  <p className="st-note">It opens in the queue as a waiting post with draft captions, ready to edit and publish.</p>
                 </div>
-                {!vertical && <p className="st-note">Stories need a 9:16 video; this one is {done.width}×{done.height}, so it goes to the feed as a reel.</p>}
-                {vertical && lengthProblem && <p className="st-note">{lengthProblem}</p>}
-                <p className="st-note">It opens in the queue as a waiting post with draft captions, ready to edit and publish.</p>
               </div>
             ) : (
-              !stage && <p className="st-note">The finished reel shows here.</p>
+              !stage && (
+                <div className="st-reels-frame">
+                  <div className="st-reels-empty">
+                    <ReelIcon />
+                    <p>The finished reel shows here.</p>
+                  </div>
+                </div>
+              )
             )}
           </section>
         </div>

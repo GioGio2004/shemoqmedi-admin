@@ -39,9 +39,8 @@ export function testOutcome(result: { configured: boolean; sent: number }): Outc
 
 /**
  * Notifications on this device (the app's one usePush), with a test once
- * it's on. `inline`: inside a sheet (a modal <dialog> in the top layer), where
- * the app's alerts would sit dimmed and inert under the backdrop, so the
- * outcome shows in the sheet itself and stays until the next action.
+ * it's on. `inline`: inside a sheet, where the outcome shows in the sheet
+ * itself and stays until the next action (a toast only lasts a few seconds).
  */
 export function PushSwitch({ withTest = true, inline = false }: { withTest?: boolean; inline?: boolean }) {
   const push = useStudioPush();
@@ -50,7 +49,7 @@ export function PushSwitch({ withTest = true, inline = false }: { withTest?: boo
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const report = (next: Outcome) => (inline ? setOutcome(next) : showAlert(next.text, next.tone));
 
-  if (!push || push.state === "loading") return <Skel style={{ height: 52 }} />;
+  if (!push || push.state === "loading") return <Skel style={{ height: 52, borderRadius: 16 }} />;
   const blocked = BLOCKED[push.state];
   if (blocked) return <p className="st-note">{blocked}</p>;
 
@@ -86,7 +85,7 @@ export function PushSwitch({ withTest = true, inline = false }: { withTest?: boo
         </button>
       )}
       {outcome && (
-        <p className="st-callout" data-tone={outcome.tone === "success" ? "blue" : undefined} role={outcome.tone === "error" ? "alert" : "status"}>
+        <p className="st-callout" data-tone={outcome.tone === "success" ? "ok" : "error"} role={outcome.tone === "error" ? "alert" : "status"}>
           {outcome.text}
         </p>
       )}

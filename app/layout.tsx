@@ -44,7 +44,8 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <ClerkProvider>
-      <html lang="en">
+      {/* The Studio sets data-studio-theme on <html> before hydration (app/studio/layout.tsx). */}
+      <html lang="en" suppressHydrationWarning>
         <body className={inter.variable}>
           <ConvexClientProvider>{children}</ConvexClientProvider>
           <AlertViewport />

@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { connection } from "next/server";
 import { StudioShell } from "@/components/studio/StudioShell";
+import { THEME_BG, THEME_SCRIPT } from "@/components/studio/themeScript";
 import "./studio.css";
 
 // The Studio (studio.shemoqmedi.space): proxy.ts rewrites /x on the Studio
@@ -15,7 +16,22 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, title: "Studio", statusBarStyle: "default" },
 };
 
+// The browser chrome takes the Studio's background, light or dark.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: THEME_BG.light },
+    { media: "(prefers-color-scheme: dark)", color: THEME_BG.dark },
+  ],
+  viewportFit: "cover",
+};
+
 export default async function StudioLayout({ children }: { children: React.ReactNode }) {
   await connection();
-  return <StudioShell>{children}</StudioShell>;
+  return (
+    <>
+      {/* The Light / Dark choice goes on <html> before the first paint, so there is no flash of the other theme. */}
+      <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      <StudioShell>{children}</StudioShell>
+    </>
+  );
 }

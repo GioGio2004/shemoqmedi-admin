@@ -1,0 +1,47 @@
+/*
+ * Reels (components/studio/reels/Reels.tsx), Liquid Glass. Contract:
+ * docs/studio-glass.md. Tokens only, no blue, no bezel: the videos sit flush
+ * in a rounded frame (hairline + shadow, nothing around them).
+ */
+
+.st-reels-panel { align-content: start; }
+.st-reels-step { display: flex; align-items: center; gap: 10px; }
+.st-reels-num { display: inline-grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 50%; background: var(--st-chip-bg); color: var(--st-ink); font: 700 13px/1 var(--st-font); font-variant-numeric: tabular-nums; }
+.st-reels-step[data-done="true"] .st-reels-num { background: var(--st-pri-bg); color: var(--st-on-accent); box-shadow: var(--st-pri-shadow); }
+.st-reels-step .st-h3 { flex: 1; min-width: 0; }
+
+/* The browser cannot build video: a plain glass note with the alert glyph. */
+.st-reels-warn { margin-bottom: 16px; }
+.st-reels-warn svg { flex: none; width: 20px; height: 20px; margin-top: 1px; }
+
+/* The media frame: flush, rounded, a hairline and a soft shadow. No padding ring. */
+.st-reels-frame { position: relative; overflow: hidden; border-radius: 22px; background: var(--st-ph); box-shadow: var(--st-ring), var(--st-shadow-sm); transform: translateZ(0); }
+.st-reels-video { display: block; width: 100%; max-height: 56dvh; object-fit: contain; background: var(--st-ph); }
+.st-reels-frame.is-vertical .st-reels-video { max-height: 64dvh; }
+.st-reels-frame .st-media-top { top: 10px; }
+.st-reels-empty { display: grid; place-items: center; align-content: center; gap: 8px; min-height: 196px; padding: 24px; color: var(--st-ink-3); text-align: center; font-size: 14px; line-height: 1.45; }
+.st-reels-empty svg { width: 30px; height: 30px; }
+.st-reels-empty p { margin: 0; max-width: 30ch; color: var(--st-ink-2); }
+
+/* Narration length against the video: a thin meter under the textarea. */
+.st-reels-meter { position: relative; height: 4px; overflow: hidden; border-radius: 2px; background: var(--st-chip-bg); }
+.st-reels-meter > span { position: absolute; inset: 0 auto 0 0; width: 100%; border-radius: inherit; background: var(--st-ink); transform-origin: left center; transform: scaleX(var(--fill, 0)); transition: transform var(--dur-snappy) var(--spring-snappy); }
+.st-reels-meter[data-state="over"] > span { background: var(--st-ink-2); }
+.st-reels-audio { width: 100%; height: 44px; border-radius: 999px; }
+
+/* The build status: a recessed glass row with the progress bar. */
+.st-reels-status { display: grid; gap: 10px; padding: 14px 16px; }
+.st-reels-status .st-note { color: var(--st-ink); font-weight: 500; }
+
+/* The finished reel. */
+.st-reels-done { display: grid; gap: 14px; }
+.st-reels-attach { display: grid; gap: 10px; }
+
+@media (min-width: 1000px) {
+  .st-panel.st-reels-panel { padding: 22px; }
+  .st-reels-panel .st-btn-block { width: auto; justify-self: start; min-width: 220px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .st-reels-meter > span { transition-duration: .01ms; }
+}

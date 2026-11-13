@@ -1,0 +1,98 @@
+/*
+ * Create — the step flow in Liquid Glass (see docs/studio-glass.md).
+ * Steps are glass sections with large numbers; pickers are glass chips and
+ * droplet segments; style and palette tiles show the design flush on their
+ * own corners, picked = a black ring and check (white in dark). The final
+ * render sits flush and opens in the Lightbox. No bezel, no blue.
+ * The pinned stage keeps the shared .st-step / .st-stage-* classes so the
+ * shrink-while-typing rule in studio.css still applies.
+ */
+
+/* ── Steps: glass sections with large numbers ───────────────────────────── */
+.st .st-create-steps { display: grid; gap: 14px; align-content: start; }
+.st .st-step.st-create-step { gap: 16px; padding: 18px 18px 22px; border-radius: 30px; box-shadow: inset 0 1px 0 var(--st-spec), var(--st-ring), var(--st-shadow); }
+.st-create-step-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.st-create-n { position: relative; min-width: 44px; font: 800 30px/1 var(--st-font); letter-spacing: -.045em; font-variant-numeric: tabular-nums; color: var(--st-ink-3); transition: color .3s ease; }
+.st-create-n[data-done] { color: var(--st-ink); }
+.st-create-n-done { position: absolute; top: -6px; right: -4px; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; color: var(--st-on-accent); background: var(--st-pri-bg); box-shadow: var(--st-pri-shadow); animation: st-create-pop var(--dur-bouncy) var(--spring-bouncy) both; }
+.st-create-aside { max-width: 44vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px/1.2 var(--st-font); color: var(--st-ink-2); font-variant-numeric: tabular-nums; }
+@media (min-width: 1000px) { .st-create-aside { max-width: 220px; } }
+
+/* "Picked up where you left off": a glass capsule. */
+.st-create-restored { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 14px; padding: 4px 4px 4px 18px; border-radius: 999px; font: 500 14px/1.3 var(--st-font); }
+
+/* Sideways rows bleed to the section's edges (the section pads 18px). */
+.st .st-create-chips { margin: 0 -18px; padding: 4px 18px 8px; scroll-padding-inline: 18px; }
+
+/* ── Style and palette tiles ────────────────────────────────────────────── */
+.st-create-strip { display: flex; gap: 10px; overflow-x: auto; margin: 0 -18px; padding: 4px 18px 10px; scroll-padding-inline: 18px; scroll-snap-type: x proximity; overscroll-behavior-x: contain; }
+.st-create-strip > * { scroll-snap-align: start; }
+.st-create-side .st-create-strip { margin: 0; padding: 4px 2px 6px; flex-wrap: wrap; overflow: visible; }
+/* A tile: the small design flush at the top, the name under it. Glass without its own blur (the picture covers it; many tiles stay cheap). */
+.st .st-create-tile { flex: none; display: grid; align-content: start; padding: 0; border: 0; border-radius: 18px; text-align: left; color: var(--st-ink); -webkit-backdrop-filter: none; backdrop-filter: none; background-color: var(--st-btn-glass); }
+.st .st-create-tile[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--st-accent), var(--st-shadow-sm); }
+.st .st-create-mini { display: block; border-radius: 0; box-shadow: none; }
+.st-create-tile-label { display: block; padding: 8px 10px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 13px/1.2 var(--st-font); letter-spacing: -.01em; }
+.st-create-swatch .st-create-tile-label { padding: 7px 8px 9px; font-size: 11px; color: var(--st-ink-2); }
+.st-create-swatch[aria-pressed="true"] .st-create-tile-label { color: var(--st-ink); }
+.st-create-bar { display: flex; width: 100%; height: 4px; box-shadow: inset 0 .5px 0 var(--st-hair); }
+.st-create-bar.is-auto { background: linear-gradient(90deg, var(--st-ink), var(--st-ink-3), var(--st-ph)); }
+
+/* The picked mark: a glossy black check (white in dark). */
+.st-create-check { position: absolute; z-index: 2; top: 6px; right: 6px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; color: var(--st-on-accent); background: var(--st-pri-bg); box-shadow: var(--st-pri-shadow); pointer-events: none; animation: st-create-pop var(--dur-bouncy) var(--spring-bouncy) both; }
+
+/* ── The live stage ─────────────────────────────────────────────────────── */
+.st .st-create-stage .st-stage-box { border-radius: 18px; box-shadow: var(--st-ring), var(--st-shadow); }
+/* On a phone: the graphic itself floats pinned under the top bar, with its own ring and shadow.
+   No plate behind it: a glass plate wider than the picture read as a white frame (Giorgi: no bezels). */
+.st .st-create-stage.st-stage-sticky { top: calc(var(--st-safe-t) + var(--st-top-h) + 4px); margin: 0; padding-inline: 0; border-radius: 0; background: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; }
+.st .st-create-stage.st-stage-sticky::before, .st .st-create-stage.st-stage-sticky::after { content: none; }
+/* With no plate the meta line would sit on the scrolling steps: a small glass capsule instead. */
+.st .st-create-stage.st-stage-sticky .st-stage-meta { width: auto; margin: 8px auto 0; padding: 5px 12px; border-radius: 999px; background-color: var(--st-glass-strong); -webkit-backdrop-filter: blur(20px) saturate(180%); backdrop-filter: blur(20px) saturate(180%); box-shadow: inset 0 1px 0 var(--st-spec), var(--st-ring); }
+.st-create-live { display: inline-flex; align-items: center; gap: 6px; }
+.st-create-live .st-spin { width: 11px; height: 11px; border-width: 1.5px; }
+/* Desktop: the stage and the palettes in one glass panel beside the steps. */
+.st .st-create-side { position: sticky; gap: 16px; padding: 16px; border-radius: 30px; max-height: calc(100dvh - var(--st-safe-t) - var(--st-top-h) - 40px); overflow-y: auto; overscroll-behavior: contain; }
+
+/* ── Pickers ────────────────────────────────────────────────────────────── */
+.st-create-picks { display: grid; gap: 8px; }
+.st .st-create-pick { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 0 12px 0 0; border: 0; border-radius: 20px; overflow: hidden; text-align: left; color: var(--st-ink); background: var(--st-inset-bg); box-shadow: inset 0 0 0 .5px var(--st-hair); }
+@media (hover: hover) { .st .st-create-pick:hover { background: var(--st-glass-strong); } }
+.st .st-create-pick[aria-pressed="true"], .st .st-create-pick[data-chosen="true"] { box-shadow: 0 0 0 2px var(--st-accent); }
+.st-create-pick .st-create-check { position: static; flex: none; }
+/* The cover sits flush on the row's left edge, clipped by its corners. */
+.st-create-thumb { align-self: stretch; flex: none; width: 96px; min-height: 64px; background: var(--st-ph); }
+.st-create-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.st-create-more { justify-self: start; }
+.st-create-start { justify-self: start; }
+
+.st-create-shots { display: flex; gap: 8px; overflow-x: auto; margin: 0 -18px; padding: 4px 18px 8px; scroll-padding-inline: 18px; overscroll-behavior-x: contain; }
+.st .st-create-shot { flex: none; width: 104px; height: 66px; padding: 0; border: 0; border-radius: 14px; background: var(--st-ph); box-shadow: var(--st-ring); }
+.st .st-create-shot[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--st-accent); }
+.st-create-shot img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
+.st-create-shot .st-create-check { top: 4px; right: 4px; width: 20px; height: 20px; }
+.st textarea.st-create-long { min-height: 88px; }
+
+/* ── Render final: the server's JPEGs, flush ────────────────────────────── */
+.st-create-finals { display: flex; gap: 10px; overflow-x: auto; margin: 0 -18px; padding: 4px 18px 8px; scroll-padding-inline: 18px; scroll-snap-type: x proximity; overscroll-behavior-x: contain; }
+.st-create-final { position: relative; flex: none; padding: 0; border: 0; border-radius: 18px; overflow: hidden; background: var(--st-ph); box-shadow: var(--st-ring), var(--st-shadow-sm); cursor: zoom-in; scroll-snap-align: start; transform: translateZ(0); transition: transform var(--dur-bouncy) var(--spring-bouncy), opacity .3s ease; -webkit-tap-highlight-color: transparent; }
+.st-create-final:active { transform: scale(.97); transition-duration: .16s; }
+.st-create-final img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.st-create-finals[data-stale] .st-create-final { opacity: .45; }
+.st .st-create-final-index { position: absolute; z-index: 1; left: 8px; top: 8px; height: 24px; padding: 0 9px; font-size: 11px; pointer-events: none; }
+.st-create-slot { flex: none; display: grid; place-items: center; border-radius: 18px; font: 600 13px/1 var(--st-font); font-variant-numeric: tabular-nums; color: var(--st-ink-3); }
+.st-create-slot:not(.st-skel) { background: var(--st-inset-bg); box-shadow: inset 0 0 0 .5px var(--st-hair); }
+.st-create-render { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; }
+
+/* ── Publish ────────────────────────────────────────────────────────────── */
+.st-create-summary { margin: 0; padding: 14px 16px; border-radius: 18px; background: var(--st-inset-bg); box-shadow: inset 0 0 0 .5px var(--st-hair); font: 500 15px/1.4 var(--st-font); color: var(--st-ink-2); }
+.st-create-summary[data-ready] { color: var(--st-ink); }
+.st-create-summary strong { font-weight: 600; color: var(--st-ink); }
+
+@keyframes st-create-pop { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .st-create-check, .st-create-n-done { animation: none; }
+  .st-create-final, .st-create-n { transition-duration: .01ms; }
+  .st-create-final:active { transform: none; }
+}

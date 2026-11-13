@@ -1,0 +1,73 @@
+/* Home: the bento dashboard in liquid glass. Tokens only, no bezel, no blue.
+   Shared classes (st-tile, st-card, st-btn, st-badge-link, st-inset) come from
+   app/studio/studio.css; this file only adds st-home-* pieces and modifiers. */
+
+/* ── Tiles: a gentle liquid press (the shared .is-pressed squash is for buttons) ── */
+.st-tile.st-home-tile { min-height: 196px; }
+@media (min-width: 900px) { .st-tile.st-home-tile { min-height: 236px; } }
+.st .st-home-tile.is-pressed { --sx: .985; --sy: .985; }
+.st .st-home-sp.is-pressed { --sx: .97; --sy: .97; }
+.st a.st-home-tile:active { transform: translate3d(0, var(--lift), 0) scale(var(--sx), var(--sy)); }
+.st-home-tile.st-tile-ink { --st-spot: var(--st-pri-spot); --st-ripple: var(--st-pri-ripple); }
+.st-home-hint { font: 600 13px/1.2 var(--st-font); letter-spacing: -.005em; opacity: .7; }
+.st-skel.st-home-skel-big { width: 72px; height: 70px; opacity: .25; }
+
+/* ── Next out: the picture sits flush in the tile, rounded with it ── */
+.st-tile.st-home-flush { padding: 0; gap: 0; overflow: hidden; }
+.st-home-next-pic { position: relative; flex: 1 1 auto; min-height: 96px; overflow: hidden; background: var(--st-ph); }
+.st-home-next-pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.st-home-next-pic .st-media-top { flex-wrap: wrap; }
+.st-home-next-body { display: grid; gap: 4px; padding: 12px 14px 14px; }
+.st-home-next-body.is-bare { margin-top: auto; padding: 0; }
+.st-home-next-title { margin: 0; font: 700 16px/1.22 var(--st-font); letter-spacing: -.02em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+@media (min-width: 900px) { .st-home-next-title { font-size: 19px; } }
+.st-home-next-when { margin: 0; font: 500 13px/1.35 var(--st-font); color: var(--st-ink-2); font-variant-numeric: tabular-nums; }
+
+/* ── Quick actions: liquid buttons, the first one glossy black ── */
+.st-home-quick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: auto; }
+.st-home-quick .st-btn { min-width: 0; min-height: 52px; padding: 0 14px; }
+.st-home-quick .st-btn svg { width: 19px; height: 19px; flex: none; }
+
+/* ── Latest published: picture tiles on the ambient, a swipe row on phones ── */
+.st-home-sec { display: grid; gap: 12px; min-width: 0; padding-top: 10px; }
+.st-home-sec-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 2px; }
+.st-home-pubs { display: flex; gap: 12px; margin: 0 -16px -14px; padding: 2px 16px 24px; list-style: none; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scroll-padding-inline: 16px; }
+.st-home-pubs > * { flex: 0 0 min(64vw, 240px); scroll-snap-align: start; }
+@media (min-width: 900px) { .st-home-pubs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin: 0; padding: 0 0 6px; overflow: visible; } }
+.st-card.st-home-pub { align-content: start; border-radius: 24px; }
+.st-home-pub .st-card-media { aspect-ratio: 4 / 5; }
+.st-home-pic { display: block; width: 100%; height: 100%; padding: 0; margin: 0; border: 0; border-radius: 0; background: none; cursor: zoom-in; }
+.st-home-pic img, .st-home-pic video { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.st-home-pic:focus-visible { outline-offset: -4px; }
+.st-home-pic-none { display: grid; place-items: center; height: 100%; color: var(--st-ink-3); font: 600 13px/1 var(--st-font); }
+.st-home-pub .st-card-body { gap: 10px; padding: 8px 12px 14px; }
+.st-home-pub-link { display: grid; align-content: center; gap: 2px; min-width: 0; min-height: 48px; color: var(--st-ink); text-decoration: none; border-radius: 12px; }
+.st-home-pub-link > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-home-pub-title { font: 650 15px/1.25 var(--st-font); letter-spacing: -.015em; }
+.st-home-pub-meta { font: 500 12.5px/1.3 var(--st-font); color: var(--st-ink-2); font-variant-numeric: tabular-nums; }
+.st-home-pub .st-badge-links { padding: 0 4px 2px; }
+.st-home-pub-skel { display: grid; gap: 10px; }
+.st-skel.st-home-skel-pic { aspect-ratio: 4 / 5; border-radius: 24px; }
+
+/* ── Channels: one recessed cell per network ── */
+.st-home-nets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.st-inset.st-home-net { display: grid; gap: 6px; min-width: 0; padding: 12px 12px 13px; border-radius: 18px; }
+.st-home-net-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.st-home-net-name { flex: 1; min-width: 0; font: 600 15px/1.2 var(--st-font); letter-spacing: -.015em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-home-net[data-tone="off"] .st-home-net-name { color: var(--st-ink-2); }
+.st-home-net-meta { min-width: 0; font: 500 12.5px/1.35 var(--st-font); color: var(--st-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-skel.st-home-skel-net { height: 66px; border-radius: 18px; }
+
+/* ── Usage: dashboard links as recessed liquid rows ── */
+.st-home-usage { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 900px) { .st-home-usage { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.st-home-use { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 10px 14px; border-radius: 18px; color: var(--st-ink); text-decoration: none; background: var(--st-inset-bg); box-shadow: inset 0 0 0 .5px var(--st-hair), inset 0 1px 0 var(--st-sheen); }
+.st-home-use-main { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.st-home-use-main > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-home-use svg { flex: none; color: var(--st-ink-2); }
+
+@media (prefers-reduced-motion: reduce) {
+  .st .st-home-tile.is-pressed, .st .st-home-sp.is-pressed { --sx: 1; --sy: 1; }
+  .st a.st-home-tile:active { transform: none; }
+  .st-home-use, .st-home-pic { transition-duration: .01ms !important; }
+}

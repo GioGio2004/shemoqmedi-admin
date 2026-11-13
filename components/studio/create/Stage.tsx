@@ -6,6 +6,7 @@ import { FORMATS, STYLES, STYLE_INFO, type FormatId, type Style, type TemplateId
 import { getPalette } from "@/lib/palettes";
 import { PALETTE_CHOICES, assetsUrl, miniFetchesAssets, previewShotUrl, type GlassId, type PaletteChoice } from "@/lib/studio/create";
 import { useWidth } from "../hooks";
+import { PickedMark } from "./PickedMark";
 import { useAssets } from "./useAssets";
 
 // The instant preview: the graphic drawn by the browser from the same
@@ -39,7 +40,12 @@ function props(look: Look, assets: PreviewAssets | null, scale: number): Graphic
   };
 }
 
-/** The big preview, sized by its box (no layout shift: the box's ratio is set by CSS before anything draws). */
+/**
+ * The big preview, sized by its box (no layout shift: the box's ratio is set
+ * by CSS before anything draws). The graphic sits flush on its own corners;
+ * on a phone the stage pins under the top bar on glass and shrinks to a
+ * thumbnail while a field of its step has focus.
+ */
 export function PreviewStage({ look, sticky, note }: { look: Look; sticky?: boolean; note?: string }) {
   const url = assetsUrl(look);
   const assets = useAssets(url);
@@ -47,13 +53,16 @@ export function PreviewStage({ look, sticky, note }: { look: Look; sticky?: bool
   const { width: fw, height: fh } = FORMATS[look.format];
   const waiting = !!url && !assets;
   return (
-    <div className={`st-stage${sticky ? " st-stage-sticky" : ""}`}>
+    <div className={`st-stage st-create-stage${sticky ? " st-stage-sticky" : ""}`}>
       <div ref={ref} className="st-stage-box" style={{ ["--ar" as string]: `${fw} / ${fh}` }} aria-label="Preview" role="img">
         {width > 0 && <GraphicPreview {...props(look, assets, width / fw)} />}
       </div>
       <div className="st-stage-meta">
         <span>{note ?? `${FORMATS[look.format].label} · ${fw}×${fh}`}</span>
-        <span>{waiting ? (look.style === "glass" ? "Preparing the glass…" : "Reading colours…") : "Live preview"}</span>
+        <span className="st-create-live" aria-live="polite">
+          {waiting ? <span className="st-spin" aria-hidden="true" /> : <span className="st-dot" data-tone="live" aria-hidden="true" />}
+          {waiting ? (look.style === "glass" ? "Preparing the glass…" : "Reading colours…") : "Live"}
+        </span>
       </div>
     </div>
   );
@@ -69,7 +78,7 @@ const Mini = memo(function Mini({ look, width, fetchAssets = true }: { look: Loo
   const { width: fw, height: fh } = FORMATS[look.format];
   const scale = width / fw;
   return (
-    <span className="st-swatch-box" style={{ width, height: Math.round(fh * scale) }}>
+    <span className="st-swatch-box st-create-mini" style={{ width, height: Math.round(fh * scale) }}>
       <GraphicPreview {...props(look, assets, scale)} />
     </span>
   );
@@ -86,22 +95,32 @@ export function PaletteStrip({ look, onPick }: { look: Look; onPick: (p: Palette
   const looks = useMemo(() => PALETTE_CHOICES.map((p) => ({ ...deferred, palette: p })), [deferred]);
   const width = FORMATS[look.format].width > FORMATS[look.format].height ? 104 : 70;
   return (
-    <div className="st-strip" role="group" aria-label="Palette">
+    <div className="st-create-strip" role="group" aria-label="Palette">
       {PALETTE_CHOICES.map((p, i) => {
         const palette = p === "auto" ? null : getPalette(p);
+        const on = look.palette === p;
         return (
-          <button key={p} type="button" className="st-swatch" aria-pressed={look.palette === p} onClick={() => onPick(p)} aria-label={palette ? palette.name : "Auto (from the screenshot)"}>
+          <button
+            key={p}
+            type="button"
+            className="st-create-tile st-create-swatch st-glass lq"
+            aria-pressed={on}
+            onClick={() => onPick(p)}
+            aria-label={palette ? palette.name : "Auto (from the screenshot)"}
+            style={{ width }}
+          >
             <Mini look={looks[i]} width={width} fetchAssets={miniFetchesAssets(looks[i])} />
             {palette ? (
-              <span className="st-swatch-bar" aria-hidden="true">
-                <span style={{ flex: 6, background: palette.base, boxShadow: "inset 0 0 0 1px rgb(0 0 0 / .08)" }} />
+              <span className="st-create-bar" aria-hidden="true">
+                <span style={{ flex: 6, background: palette.base }} />
                 <span style={{ flex: 3, background: palette.surface }} />
                 <span style={{ flex: 1, background: palette.accent }} />
               </span>
             ) : (
-              <span className="st-swatch-bar" aria-hidden="true" style={{ background: "linear-gradient(90deg, #0a0a0a, #0040ff, #f3efe6)" }} />
+              <span className="st-create-bar is-auto" aria-hidden="true" />
             )}
-            <span>{palette ? palette.name : "Auto"}</span>
+            <span className="st-create-tile-label">{palette ? palette.name : "Auto"}</span>
+            {on && <PickedMark />}
           </button>
         );
       })}
@@ -114,16 +133,19 @@ export function StylePicker({ look, onPick }: { look: Look; onPick: (s: Style) =
   const deferred = useDeferredValue(look);
   const looks = useMemo(() => STYLES.map((s) => ({ ...deferred, style: s })), [deferred]);
   const wide = FORMATS[look.format].width > FORMATS[look.format].height;
+  const width = wide ? 140 : look.format === "story" ? 88 : 116;
   return (
-    <div className="st-styles" role="group" aria-label="Style">
-      {STYLES.map((s, i) => (
-        <button key={s} type="button" className="st-style-card" aria-pressed={look.style === s} onClick={() => onPick(s)} title={STYLE_INFO[s].description}>
-          <span className="st-style-thumb">
-            <Mini look={looks[i]} width={wide ? 118 : look.format === "story" ? 84 : 112} />
-          </span>
-          <span>{STYLE_INFO[s].label}</span>
-        </button>
-      ))}
+    <div className="st-create-strip st-create-styles" role="group" aria-label="Style">
+      {STYLES.map((s, i) => {
+        const on = look.style === s;
+        return (
+          <button key={s} type="button" className="st-create-tile st-glass lq" aria-pressed={on} onClick={() => onPick(s)} title={STYLE_INFO[s].description} style={{ width }}>
+            <Mini look={looks[i]} width={width} />
+            <span className="st-create-tile-label">{STYLE_INFO[s].label}</span>
+            {on && <PickedMark />}
+          </button>
+        );
+      })}
     </div>
   );
 }

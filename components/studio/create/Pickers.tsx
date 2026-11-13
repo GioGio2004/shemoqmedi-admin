@@ -8,15 +8,32 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { TIERS } from "@/lib/graphics/spec";
 import { formatDay } from "@/lib/storefront";
 import { SearchIcon } from "../icons";
+import { ikUrl } from "../media";
 import { Skel } from "../ui";
+import { PickedMark } from "./PickedMark";
 
 // The listing and award pickers (the same sources as the old Design page:
 // admin.featuredOptions and awards.overview).
 
 export type AwardRow = FunctionReturnType<typeof api.awards.overview>["recent"][number];
 
+/** The site's cover, flush on the row's left edge (eager: the pickers are at the top of Create). */
 function Thumb({ url }: { url: string | null }) {
-  return url ? <img src={url} alt="" loading="lazy" decoding="async" /> : <span className="st-pick-ph" aria-hidden="true" />;
+  return (
+    <span className="st-create-thumb" aria-hidden="true">
+      {url && <img src={ikUrl(url, 240)} alt="" width={96} height={64} decoding="async" />}
+    </span>
+  );
+}
+
+function Loading() {
+  return (
+    <div className="st-create-picks" aria-busy="true">
+      {[0, 1, 2].map((i) => (
+        <Skel key={i} style={{ height: 64, borderRadius: 20 }} />
+      ))}
+    </div>
+  );
 }
 
 /** A live site: the chosen one as a row with "Change", else a search over every public listing. */
@@ -27,18 +44,10 @@ export function ListingPicker({ value, onPick }: { value: Id<"listings"> | null;
   const id = useId();
   const chosen = listings?.find((l) => l.id === value);
 
-  if (listings === undefined) {
-    return (
-      <div className="st-picker" aria-busy="true">
-        {[0, 1, 2].map((i) => (
-          <Skel key={i} style={{ height: 60, borderRadius: 12 }} />
-        ))}
-      </div>
-    );
-  }
+  if (listings === undefined) return <Loading />;
   if (chosen && !browsing) {
     return (
-      <div className="st-pick" data-chosen="true" role="group" aria-label="Chosen listing">
+      <div className="st-create-pick" data-chosen="true" role="group" aria-label="Chosen listing">
         <Thumb url={chosen.coverUrl} />
         <span className="st-list-main">
           <span className="st-list-title">{chosen.title}</span>
@@ -58,12 +67,12 @@ export function ListingPicker({ value, onPick }: { value: Id<"listings"> | null;
         <SearchIcon size={18} />
         <input id={id} className="st-input" type="search" inputMode="search" placeholder="Search live sites" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search live sites" />
       </div>
-      <div className="st-picker">
+      <div className="st-create-picks">
         {matches.map((l) => (
           <button
             key={l.id}
             type="button"
-            className="st-pick"
+            className="st-create-pick lq"
             aria-pressed={l.id === value}
             onClick={() => {
               onPick(l.id);
@@ -75,6 +84,7 @@ export function ListingPicker({ value, onPick }: { value: Id<"listings"> | null;
               <span className="st-list-title">{l.title}</span>
               <span className="st-list-meta">{l.creditName}</span>
             </span>
+            {l.id === value && <PickedMark />}
           </button>
         ))}
         {matches.length === 0 && <p className="st-note">No live site matches “{search}”.</p>}
@@ -87,26 +97,18 @@ export function ListingPicker({ value, onPick }: { value: Id<"listings"> | null;
 export function AwardPicker({ value, onPick }: { value: string | null; onPick: (award: AwardRow) => void }) {
   const overview = useQuery(api.awards.overview, {});
   const [all, setAll] = useState(false);
-  if (overview === undefined) {
-    return (
-      <div className="st-picker" aria-busy="true">
-        {[0, 1, 2].map((i) => (
-          <Skel key={i} style={{ height: 60, borderRadius: 12 }} />
-        ))}
-      </div>
-    );
-  }
+  if (overview === undefined) return <Loading />;
   const awards = overview.recent.filter((a) => a.status === "active" && a.listing);
   if (awards.length === 0) return <p className="st-note">No awards yet. Pick “Listing” or fill the text by hand.</p>;
   const chosen = awards.find((a) => a.slug === value);
   const shown = chosen && !all ? [chosen] : awards.slice(0, all ? 40 : 6);
   return (
-    <div className="st-picker">
+    <div className="st-create-picks">
       {shown.map((a) => (
         <button
           key={a.id}
           type="button"
-          className="st-pick"
+          className="st-create-pick lq"
           aria-pressed={a.slug === value}
           onClick={() => {
             onPick(a);
@@ -125,7 +127,7 @@ export function AwardPicker({ value, onPick }: { value: string | null; onPick: (
           </span>
         </button>
       ))}
-      <button type="button" className="st-btn st-btn-quiet st-btn-sm" onClick={() => setAll(!all)}>
+      <button type="button" className="st-btn st-btn-quiet st-btn-sm st-create-more" onClick={() => setAll(!all)}>
         {chosen && !all ? "Change award" : all ? "Fewer" : "More awards"}
       </button>
     </div>

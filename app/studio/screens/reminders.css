@@ -1,0 +1,45 @@
+/*
+ * Reminders (components/studio/reminders/Reminders.tsx, SwipeRow.tsx),
+ * Liquid Glass. Contract: docs/studio-glass.md. Tokens only, no blue, no
+ * bezel. The upcoming list is one glass group with hairline rows (iOS
+ * grouped list); a row swipes left over a Delete action.
+ */
+
+/* ── The form ─────────────────────────────────────────────────────────── */
+.st-reminders-new { align-content: start; }
+.st-reminders-when { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; padding: 0 14px 0 16px; border: 0; border-radius: 16px; background: var(--st-inset-bg); box-shadow: inset 0 0 0 .5px var(--st-hair), inset 0 1px 2px rgba(0, 0, 0, .04); color: var(--st-ink); font: 400 16px/1.3 var(--st-font); text-align: left; --st-spot: var(--st-sheen); --st-ripple: var(--st-chip-bg); }
+.st-reminders-when > svg { flex: none; color: var(--st-ink-3); }
+.st-reminders-when-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-reminders-when-text b { font: 700 20px/1 var(--st-font); letter-spacing: -.03em; }
+.st-reminders-when-text span { color: var(--st-ink-2); }
+.st-reminders-when[data-past] .st-reminders-when-text b { color: var(--st-danger); }
+.st-reminders-form .st-note[data-past] { color: var(--st-danger); }
+
+/* ── The upcoming list ───────────────────────────────────────────────── */
+.st-reminders-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 0 6px 10px; }
+@media (hover: hover) and (pointer: fine) { .st-reminders-hint { display: none; } }
+.st-panel.st-reminders-list { gap: 0; margin: 0; padding: 4px 0; overflow: hidden; list-style: none; }
+.st-reminders-skel { display: flex; align-items: center; gap: 14px; min-height: 68px; padding: 12px 18px; }
+
+.st-reminders-row { position: relative; overflow: hidden; }
+.st-reminders-row + .st-reminders-row::before { content: ""; position: absolute; top: 0; left: 18px; right: 0; height: .5px; z-index: 2; background: var(--st-hair); pointer-events: none; }
+.st-reminders-fore { position: relative; z-index: 1; display: flex; align-items: center; gap: 10px; min-height: 68px; padding: 8px 6px 8px 18px; touch-action: pan-y; -webkit-user-select: none; user-select: none; }
+.st-reminders-main { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; }
+.st-reminders-del { flex: none; color: var(--st-ink-2); }
+@media (hover: hover) { .st-reminders-del:hover:not(:disabled) { color: var(--st-danger); } }
+
+/* The Delete action behind the row, revealed exactly as far as the row has moved. */
+.st-reminders-swipe { position: absolute; inset: 0; display: flex; justify-content: flex-end; clip-path: inset(0 0 0 calc(100% - var(--st-swipe, 0px))); transition: clip-path var(--dur-bouncy) var(--spring-bouncy); pointer-events: none; }
+.st-reminders-row[data-drag] .st-reminders-swipe { transition: none; }
+.st-reminders-row[data-open="true"] .st-reminders-swipe { pointer-events: auto; }
+.st-reminders-swipe-del { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: 92px; height: 100%; padding: 0; border: 0; background: var(--st-chip-bg); color: var(--st-danger); font: 600 13px/1 var(--st-font); cursor: pointer; }
+.st-reminders-swipe-del svg { transition: transform var(--dur-bouncy) var(--spring-bouncy); }
+.st-reminders-row[data-armed] .st-reminders-swipe-del { font-weight: 700; }
+.st-reminders-row[data-armed] .st-reminders-swipe-del svg { transform: scale(1.18); }
+
+/* ── Empty ───────────────────────────────────────────────────────────── */
+.st-reminders-empty-icon { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 4px; border-radius: 50%; background: var(--st-chip-bg); color: var(--st-ink); }
+
+@media (prefers-reduced-motion: reduce) {
+  .st-reminders-swipe, .st-reminders-swipe-del svg { transition-duration: .01ms; }
+}

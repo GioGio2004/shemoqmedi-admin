@@ -42,8 +42,36 @@ export function showError(err: unknown) {
   showAlert(errorMessage(err), "error");
 }
 
+/** The alerts on screen now, for an app that draws them itself (the Studio's glass toasts). */
+export function useAlerts() {
+  return useSyncExternalStore(subscribe, () => alerts, () => EMPTY);
+}
+
+// While an app draws the alerts itself, the default viewport stays empty.
+let claims = 0;
+const claimListeners = new Set<() => void>();
+function subscribeClaims(listener: () => void) {
+  claimListeners.add(listener);
+  return () => claimListeners.delete(listener);
+}
+
+/** Takes over drawing the alerts until the returned release is called. */
+export function claimAlertViewport() {
+  claims++;
+  claimListeners.forEach((l) => l());
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    claims--;
+    claimListeners.forEach((l) => l());
+  };
+}
+
 export function AlertViewport() {
   const list = useSyncExternalStore(subscribe, () => alerts, () => EMPTY);
+  const claimed = useSyncExternalStore(subscribeClaims, () => claims > 0, () => false);
+  if (claimed) return null;
   return (
     <div
       aria-live="assertive"

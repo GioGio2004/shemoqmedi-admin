@@ -53,8 +53,10 @@ export const BellIcon = (p: IconProps) => (
 );
 export const GearIcon = (p: IconProps) => (
   <Svg {...p}>
-    <circle cx="12" cy="12" r="3" />
-    <path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8" />
+    {/* Settings sliders: a sun-like gear read as a second theme button beside the sun/moon. */}
+    <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
+    <circle cx="15" cy="7" r="2" />
+    <circle cx="9" cy="17" r="2" />
   </Svg>
 );
 export const ArrowIcon = (p: IconProps) => (
@@ -87,5 +89,36 @@ export const TrashIcon = (p: IconProps) => (
 export const CheckIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="m5 12.5 4.5 4.5L19 7.5" />
+  </Svg>
+);
+export const SunIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2.8v2M12 19.2v2M2.8 12h2M19.2 12h2M5.5 5.5l1.4 1.4M17.1 17.1l1.4 1.4M5.5 18.5l1.4-1.4M17.1 6.9l1.4-1.4" />
+  </Svg>
+);
+export const MoonIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />
+  </Svg>
+);
+export const ChevronLeftIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M14.5 5.5 8 12l6.5 6.5" />
+  </Svg>
+);
+export const ChevronRightIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M9.5 5.5 16 12l-6.5 6.5" />
+  </Svg>
+);
+export const ExternalIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M14 4.5h5.5V10M19.5 4.5 11 13M18 14v4.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1H10" />
+  </Svg>
+);
+export const AlertIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 7.5v5.5M12 16.5v.01" />
   </Svg>
 );
