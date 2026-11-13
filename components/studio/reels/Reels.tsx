@@ -70,7 +70,8 @@ export function Reels() {
       .then((out) => {
         if (!live) return;
         setVoices(out.voices);
-        setVoice((current) => current || out.voices[0]?.name || "");
+        // A remembered voice that was renamed or removed (ELEVENLABS_VOICES) falls back to the first one.
+        setVoice((current) => (current && out.voices.some((v) => v.name === current) ? current : out.voices[0]?.name || ""));
       })
       .catch((err: unknown) => live && setVoicesError(errorMessage(err)));
     return () => {

@@ -298,7 +298,8 @@ function Letter({ fr, t, c, folio }: { fr: Frame; t: Theme; c: CallContent; foli
     const leftW = 640;
     return (
       <Page W={fr.W} H={fr.H} background={p.base}>
-        <Masthead x={40} y={32} w={leftW} t={t} date="" kicker={c.kicker} />
+        {/* The kicker is already on the side band: the masthead keeps its own line. */}
+        <Masthead x={40} y={32} w={leftW} t={t} date="" />
         <At x={40} y={250} w={leftW}>
           <Turned text={c.headline} size={fitSize(c.headline, { width: leftW, lines: 3, max: 76, min: 34, charW: CHAR.serif })} color={t.ink} />
         </At>
@@ -321,7 +322,8 @@ function Letter({ fr, t, c, folio }: { fr: Frame; t: Theme; c: CallContent; foli
   const size = fitSize(c.headline, { width: w, lines: 4, max: geo.max, min: 48, height: geo.band - geo.head - 50, lineHeight: 0.98, charW: CHAR.serif });
   return (
     <Page W={fr.W} H={fr.H} background={p.base}>
-      <Masthead x={geo.M} y={geo.top} w={w} t={t} date="" kicker={c.kicker} />
+      {/* The kicker shows once: under the masthead, unless a folio takes that place. */}
+      <Masthead x={geo.M} y={geo.top} w={w} t={t} date="" kicker={folio ? c.kicker : undefined} />
       <At x={geo.M} y={geo.head} w={w}>
         <Caps size={17} color={accentOn(t)} style={{ marginBottom: 22 }}>
           {folio ?? c.kicker}

@@ -409,7 +409,19 @@ function Call({ fr, t, c, counter }: { fr: Frame; t: Theme; c: CallContent; coun
         <Label size={Math.max(13, count.h * 0.1)} color={t.ink}>
           Reviewed
         </Label>
-        <Big size={Math.min(count.h * 0.42, count.w * 0.32)} color={t.ink}>
+        {/* Two words that may wrap: fitted to the tile (padding and label taken off), never cut at its edge. */}
+        <Big
+          size={fitSize("By hand", {
+            width: count.w - look.pad * 2,
+            lines: 2,
+            max: 140,
+            min: 20,
+            height: count.h - look.pad * 2 - Math.max(13, count.h * 0.1) * 1.6,
+            lineHeight: 0.95,
+            charW: CHAR.sansBold,
+          })}
+          color={t.ink}
+        >
           By hand
         </Big>
       </Tile>
