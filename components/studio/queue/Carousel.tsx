@@ -43,6 +43,7 @@ export function Carousel({
   bottom,
   onOpen,
   onIndex,
+  onVideoMeta,
 }: {
   media: Post["media"];
   label: string;
@@ -63,6 +64,8 @@ export function Carousel({
   bottom?: ReactNode;
   onOpen?: (index: number, el: HTMLElement) => void;
   onIndex?: (index: number) => void;
+  /** A video slide's length, once its metadata has loaded (the card's reel chip). */
+  onVideoMeta?: (index: number, durationSec: number) => void;
 }) {
   const n = media.length;
   const track = useRef<HTMLDivElement>(null);
@@ -146,7 +149,11 @@ export function Carousel({
                     preload="metadata"
                     aria-hidden="true"
                     tabIndex={-1}
-                    onLoadedMetadata={i === 0 ? (e) => sized(e.currentTarget.videoWidth, e.currentTarget.videoHeight) : undefined}
+                    onLoadedMetadata={(e) => {
+                      const v = e.currentTarget;
+                      if (i === 0) sized(v.videoWidth, v.videoHeight);
+                      if (Number.isFinite(v.duration) && v.duration > 0) onVideoMeta?.(i, v.duration);
+                    }}
                   />
                 ) : (
                   <img

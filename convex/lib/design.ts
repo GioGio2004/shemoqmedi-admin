@@ -7,6 +7,7 @@
 // import from Convex and from the Next app. Contract: docs/post-editing.md.
 
 import { v, type Infer } from "convex/values";
+import { reelDesign } from "./reel";
 
 const texts = v.record(v.string(), v.string());
 
@@ -57,7 +58,10 @@ export const carouselDesign = v.object({
   setId: v.string(),
 });
 
-export const mediaDesign = v.union(graphicDesign, carouselDesign);
+/** A reel rendered in the Studio's reel editor: its whole recipe (convex/lib/reel.ts, docs/reel-editor.md). */
+export { reelDesign, type ReelDesign } from "./reel";
+
+export const mediaDesign = v.union(graphicDesign, carouselDesign, reelDesign);
 
 export type GraphicDesign = Infer<typeof graphicDesign>;
 export type CarouselDesign = Infer<typeof carouselDesign>;
@@ -68,6 +72,7 @@ export type MediaDesign = Infer<typeof mediaDesign>;
 export const designView = v.union(
   graphicDesign,
   v.object({ ...carouselDesign.fields, listingSlug: v.union(v.string(), v.null()) }),
+  reelDesign,
 );
 export type DesignView = Infer<typeof designView>;
 

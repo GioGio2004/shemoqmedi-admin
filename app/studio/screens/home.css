@@ -66,8 +66,18 @@
 .st-home-use-main > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st-home-use svg { flex: none; color: var(--st-ink-2); }
 
+/* ── Ready to render: Claude's reel drafts, each a row into the reel editor ── */
+.st-home-drafts { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 900px) { .st-home-drafts { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); } }
+.st-home-use.st-home-draft { min-height: 76px; padding: 8px 14px 8px 8px; }
+.st-home-draft-pic { position: relative; flex: none; width: 40px; height: 60px; border-radius: 10px; overflow: hidden; background: var(--st-ph); box-shadow: var(--st-ring); }
+.st-home-draft-pic img, .st-home-draft-pic video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.st-home-draft-icon { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; display: grid; place-items: center; border-radius: 50%; color: var(--st-media-ink); background-color: var(--st-glass-media); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.st-home-draft-icon svg { color: inherit; }
+.st-home-drafts-all { align-self: flex-start; }
+
 @media (prefers-reduced-motion: reduce) {
   .st .st-home-tile.is-pressed, .st .st-home-sp.is-pressed { --sx: 1; --sy: 1; }
   .st a.st-home-tile:active { transform: none; }
-  .st-home-use, .st-home-pic { transition-duration: .01ms !important; }
+  .st-home-use, .st-home-pic, .st-home-draft { transition-duration: .01ms !important; }
 }

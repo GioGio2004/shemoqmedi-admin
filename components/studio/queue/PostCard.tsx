@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { captionsDiffer, type Captions } from "@/lib/studio/captions";
 import { KIND_LABEL, captionDrafts, staleCaptionDraft } from "@/lib/studio/queue";
+import { firstReelIndex, reelChipText } from "@/lib/studio/reelPost";
 import { relativeTime } from "@/lib/studio/time";
 import { useDraft } from "../hooks";
-import { CheckIcon, ClockIcon, ExternalIcon } from "../icons";
+import { CheckIcon, ClockIcon, ExternalIcon, ReelIcon } from "../icons";
 import { Lightbox } from "../Lightbox";
 import { Carousel, type CarouselControl } from "./Carousel";
 import { usePostControls } from "./controls";
@@ -64,6 +65,10 @@ export function PostCard({ post, now, channels, eager, onOpen }: { post: Post; n
   const car = useRef<CarouselControl>(null);
   const [near, setNear] = useState(eager);
   const [viewer, setViewer] = useState<{ index: number; el: HTMLElement } | null>(null);
+  // A reel shows a chip with its length (read from the video once it loads).
+  const reelAt = firstReelIndex(post.media);
+  const [reelSec, setReelSec] = useState<{ url: string; sec: number } | null>(null);
+  const reelUrl = reelAt >= 0 ? post.media[reelAt].url : null;
 
   // Pictures load once the card comes within a screen or so.
   useEffect(() => {
@@ -119,8 +124,17 @@ export function PostCard({ post, now, channels, eager, onOpen }: { post: Post; n
             <>
               <StatusChip status={key} />
               {story && <span className="st-mchip">Story</span>}
+              {reelUrl && (
+                <span className="st-mchip">
+                  <ReelIcon size={14} />
+                  <span className="st-tnum">{reelChipText(reelSec?.url === reelUrl ? reelSec.sec : null)}</span>
+                </span>
+              )}
             </>
           }
+          onVideoMeta={(i, sec) => {
+            if (i === reelAt && reelUrl) setReelSec({ url: reelUrl, sec });
+          }}
           bottom={
             <div className="st-mchip st-queue-pill">
               {nets.map((n) => (

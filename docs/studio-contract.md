@@ -74,6 +74,13 @@ tests/push.test.ts)
 - `app/manifest.ts` per host (reads `headers()`), maskable icon; remove `metadata.manifest`
   link to crow.webmanifest and delete that file.
 
+## Reels (reel editor)
+- Contract: docs/reel-editor.md (recipe, engine, editor, backend, MCP); how reels meet posts:
+  docs/post-editing.md section 7.
+- Routes: `/reels` (the tab), `/reels?draft=<id>`, `/reels?draft=<id>&post=<postId>&item=<i>`,
+  `/reels?new=1[&post=<postId>]` (`lib/studio/reelPost.ts` `parseReelTarget`, `reelEditorHref`,
+  `newReelHref`). Push links for Claude's drafts use `studioReelUrl` (`lib/hosts.ts`).
+
 ## Shared rules
 - Read AGENTS.md (Next 16 differs; docs in node_modules/next/dist/docs).
 - No secrets printed; no deploy, no push, no `convex dev/deploy`; `npx convex codegen` is fine.

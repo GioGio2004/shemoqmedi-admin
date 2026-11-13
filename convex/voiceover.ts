@@ -1,14 +1,17 @@
 import { ConvexError, v } from "convex/values";
-import { action, internalAction, internalQuery, mutation, query } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { ActionCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { requireAdmin } from "./authHelpers";
 import { cleanDuration, mediaRow, mediaUrl } from "./lib/media";
 import { R2_SOCIAL_KEY, deleteObject, headObject, presignPut, r2Configured, r2PublicUrl } from "./lib/r2";
+import { captionWord } from "./lib/reel";
 import {
   MAX_REEL_BYTES,
   WORDS_PER_SECOND,
+  alignmentToWords,
+  base64Bytes,
   cleanScript,
   mp3Seconds,
   mp4Duration,
@@ -18,6 +21,8 @@ import {
   targetWords,
   urlRangeReader,
   wordCount,
+  type Alignment,
+  type TimedWord,
 } from "./lib/voiceover";
 
 // Voiceover reels for the social desk. Claude (or Giorgi) writes a short
@@ -112,7 +117,7 @@ export const voices = action({
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** A URL the browser and Convex can fetch: ImageKit originals cost no video processing units. */
-async function fetchableVideoUrl(ctx: QueryCtx, listing: Doc<"listings">) {
+export async function fetchableVideoUrl(ctx: QueryCtx, listing: Doc<"listings">) {
   if (!listing.videoId) return null;
   const url = await mediaUrl(ctx, listing.videoId);
   const row = await mediaRow(ctx, listing.videoId);
@@ -220,7 +225,70 @@ async function narrate(text: string, voiceId: string): Promise<ArrayBuffer> {
   return audio;
 }
 
-type Narration = { audioUrl: string; durationSec: number };
+/**
+ * ElevenLabs text-to-speech with timestamps: MP3 bytes and the spoken time
+ * of every word (for the reel editor's captions). One call, same credits.
+ */
+async function narrateTimed(text: string, voiceId: string): Promise<{ audio: Uint8Array; words: TimedWord[] }> {
+  const url = new URL(`${ELEVENLABS}/v1/text-to-speech/${encodeURIComponent(voiceId)}/with-timestamps`);
+  url.searchParams.set("output_format", OUTPUT_FORMAT);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "xi-api-key": need("ELEVENLABS_API_KEY"), "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ text, model_id: process.env.ELEVENLABS_MODEL?.trim() || DEFAULT_MODEL }),
+  });
+  if (!res.ok) {
+    const detail = (await res.text()).slice(0, 300);
+    throw new ConvexError(`ElevenLabs refused the narration (HTTP ${res.status}): ${detail}`);
+  }
+  const body = (await res.json()) as {
+    audio_base64?: string;
+    alignment?: Alignment | null;
+    normalized_alignment?: Alignment | null;
+  };
+  const audio = body.audio_base64 ? base64Bytes(body.audio_base64) : new Uint8Array(0);
+  if (audio.byteLength < 512) throw new ConvexError("ElevenLabs returned an empty narration.");
+  // The alignment of the text as sent; the normalized one (numbers spelled out) when that is missing.
+  const words = alignmentToWords(body.alignment);
+  return { audio, words: words.length ? words : alignmentToWords(body.normalized_alignment) };
+}
+
+/** Slug of a listing (any listing: a narration needs no preview video), or null. */
+export const listingSlug = internalQuery({
+  args: { listingId: v.id("listings") },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, { listingId }) => (await ctx.db.get(listingId))?.slug ?? null,
+});
+
+/** Records a stored narration or music track (reelAudio). */
+export const recordAudio = internalMutation({
+  args: {
+    kind: v.union(v.literal("voice"), v.literal("music")),
+    key: v.string(),
+    contentType: v.string(),
+    size: v.number(),
+    durationSec: v.optional(v.number()),
+    title: v.optional(v.string()),
+    listingId: v.optional(v.id("listings")),
+    script: v.optional(v.string()),
+    voice: v.optional(v.string()),
+    words: v.optional(v.array(captionWord)),
+    userId: v.optional(v.id("users")),
+  },
+  returns: v.id("reelAudio"),
+  handler: async (ctx, args) => await ctx.db.insert("reelAudio", { ...args, createdAt: Date.now() }),
+});
+
+async function storeMp3(key: string, audio: ArrayBuffer | Uint8Array) {
+  const put = await fetch(await presignPut(key), {
+    method: "PUT",
+    headers: { "content-type": "audio/mpeg" },
+    body: audio as BodyInit,
+  });
+  if (!put.ok) throw new ConvexError(`Could not store the narration on R2 (HTTP ${put.status}).`);
+}
+
+type Narration = { audioUrl: string; durationSec: number; narrationId: Id<"reelAudio"> };
 
 async function makeNarration(ctx: ActionCtx, listingId: Id<"listings">, script: string, voice: string): Promise<Narration> {
   // Every check that can fail runs before ElevenLabs is called.
@@ -232,19 +300,25 @@ async function makeNarration(ctx: ActionCtx, listingId: Id<"listings">, script: 
 
   const audio = await narrate(text, narrator.voiceId);
   const key = socialKey(slug, "voiceover", "mp3");
-  const put = await fetch(await presignPut(key), {
-    method: "PUT",
-    headers: { "content-type": "audio/mpeg" },
-    body: audio,
-  });
-  if (!put.ok) throw new ConvexError(`Could not store the narration on R2 (HTTP ${put.status}).`);
+  await storeMp3(key, audio);
   const durationSec = Math.round(mp3Seconds(new Uint8Array(audio), MP3_KBPS) * 10) / 10;
   console.log(`voiceover ${slug}: ${wordCount(text)} words, ${text.length} chars, voice ${narrator.name}, ~${durationSec}s`);
-  return { audioUrl: r2PublicUrl(key)!, durationSec };
+  // Kept so the reel editor can use it again (no word timings: its captions are spread evenly).
+  const narrationId: Id<"reelAudio"> = await ctx.runMutation(internal.voiceover.recordAudio, {
+    kind: "voice",
+    key,
+    contentType: "audio/mpeg",
+    size: audio.byteLength,
+    durationSec,
+    listingId,
+    script: text,
+    voice: narrator.name,
+  });
+  return { audioUrl: r2PublicUrl(key)!, durationSec, narrationId };
 }
 
 const narrationArgs = { listingId: v.id("listings"), script: v.string(), voice: v.string() };
-const narrationOut = v.object({ audioUrl: v.string(), durationSec: v.number() });
+const narrationOut = v.object({ audioUrl: v.string(), durationSec: v.number(), narrationId: v.id("reelAudio") });
 
 /**
  * MCP (create_voiceover): voice a script for a listing. Returns the MP3 on
@@ -266,6 +340,106 @@ export const generate = action({
   handler: async (ctx, { listingId, script, voice }): Promise<Narration> => {
     await ctx.runQuery(internal.users.assertAdmin, {});
     return makeNarration(ctx, listingId, script, voice);
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Narration with captions (the reel editor; spends ElevenLabs credits)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const narrationView = v.object({
+  id: v.id("reelAudio"),
+  url: v.string(),
+  durationSec: v.number(),
+  script: v.union(v.string(), v.null()),
+  voice: v.union(v.string(), v.null()),
+  listingId: v.union(v.id("listings"), v.null()),
+  /** Spoken word timings; null when made without them (spread the script with lib/reel/timeline.ts estimateWords). */
+  words: v.union(v.array(captionWord), v.null()),
+  createdAt: v.number(),
+});
+export type NarrationView = typeof narrationView.type;
+
+/**
+ * Reel editor ("Generate voice"): voice a script with word timings, store the
+ * MP3 on R2 (social/<listing slug or "reels">/...-voiceover-....mp3) and keep
+ * it in reelAudio. Any listing, or none (a reel may mix several). Spends
+ * ElevenLabs credits: the Studio asks first.
+ */
+export const generateTimed = action({
+  args: { script: v.string(), voice: v.string(), listingId: v.optional(v.id("listings")) },
+  returns: narrationView,
+  handler: async (ctx, { script, voice, listingId }): Promise<NarrationView> => {
+    await ctx.runQuery(internal.users.assertAdmin, {});
+    // Every check that can fail runs before ElevenLabs is called.
+    const text = cleanScript(script);
+    const narrator = resolveVoice(parseVoices(process.env.ELEVENLABS_VOICES), voice);
+    need("ELEVENLABS_API_KEY");
+    if (!r2Configured()) throw new ConvexError("R2 is not configured on this Convex deployment.");
+    const slug: string | null = listingId ? await ctx.runQuery(internal.voiceover.listingSlug, { listingId }) : null;
+    if (listingId && !slug) throw new ConvexError("Listing not found.");
+
+    const { audio, words } = await narrateTimed(text, narrator.voiceId);
+    const key = socialKey(slug ?? "reels", "voiceover", "mp3");
+    await storeMp3(key, audio);
+    const measured = mp3Seconds(audio, MP3_KBPS);
+    const spoken = words.length ? words[words.length - 1].endSec : 0;
+    const durationSec = Math.round(Math.max(measured, spoken) * 100) / 100;
+    console.log(`narration ${slug ?? "reels"}: ${wordCount(text)} words, ${words.length} timed, voice ${narrator.name}, ~${durationSec}s`);
+    const id: Id<"reelAudio"> = await ctx.runMutation(internal.voiceover.recordAudio, {
+      kind: "voice",
+      key,
+      contentType: "audio/mpeg",
+      size: audio.byteLength,
+      durationSec,
+      listingId,
+      script: text,
+      voice: narrator.name,
+      words: words.length ? words : undefined,
+    });
+    return {
+      id,
+      url: r2PublicUrl(key)!,
+      durationSec,
+      script: text,
+      voice: narrator.name,
+      listingId: listingId ?? null,
+      words: words.length ? words : null,
+      createdAt: Date.now(),
+    };
+  },
+});
+
+/** Reel editor: earlier narrations newest first (optionally one listing's), to use again. Limit 1-100 (default 30). */
+export const narrations = query({
+  args: { listingId: v.optional(v.id("listings")), limit: v.optional(v.number()) },
+  returns: v.array(narrationView),
+  handler: async (ctx, { listingId, limit }) => {
+    await requireAdmin(ctx);
+    const n = Math.min(Math.max(Math.floor(limit ?? 30), 1), 100);
+    const rows = await ctx.db
+      .query("reelAudio")
+      .withIndex("by_kind", (q) => q.eq("kind", "voice"))
+      .order("desc")
+      .take(500);
+    const out: NarrationView[] = [];
+    for (const row of rows) {
+      if (row.invalid || (listingId && row.listingId !== listingId)) continue;
+      const url = r2PublicUrl(row.key);
+      if (!url) continue;
+      out.push({
+        id: row._id,
+        url,
+        durationSec: row.durationSec ?? 0,
+        script: row.script ?? null,
+        voice: row.voice ?? null,
+        listingId: row.listingId ?? null,
+        words: row.words ?? null,
+        createdAt: row.createdAt,
+      });
+      if (out.length >= n) break;
+    }
+    return out;
   },
 });
 

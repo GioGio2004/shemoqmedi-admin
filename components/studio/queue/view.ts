@@ -5,6 +5,7 @@ import type { FunctionReturnType } from "convex/server";
 import type { api } from "@/convex/_generated/api";
 import { NETWORKS, NETWORK_LABEL, STORY_NETWORKS, captionedNetworks, type Captions, type Network } from "@/lib/studio/captions";
 import { KIND_LABEL, STATUS_LABEL, type PostActions } from "@/lib/studio/queue";
+import { isReelItem } from "@/lib/studio/reelPost";
 import { formatTbilisi } from "@/lib/studio/time";
 
 export type Post = FunctionReturnType<typeof api.social.queue>[number];
@@ -36,11 +37,11 @@ export function postTitle(post: Post, captions: Captions | undefined = (post as 
   return post.listing?.title ?? headline ?? captionTitle(captions) ?? KIND_LABEL[post.kind] ?? "Post";
 }
 
-/** "Story", "Carousel · 6", "Video", "Feed". */
+/** "Story", "Carousel · 6", "Reel", "Video", "Feed". */
 export function formatText(post: Post) {
   if (post.placement === "story") return "Story · 9:16";
   if (post.media.length > 1) return `Carousel · ${post.media.length}`;
-  if (post.media[0]?.kind === "video") return "Video";
+  if (post.media[0]?.kind === "video") return isReelItem(post.media[0]) ? "Reel" : "Video";
   return "Feed post";
 }
 

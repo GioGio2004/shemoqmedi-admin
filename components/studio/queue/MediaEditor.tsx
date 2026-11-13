@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { showAlert, showError } from "@/components/admin/Alerts";
 import { editResetText as resetText } from "@/lib/studio/postEdit";
 import type { PostActions } from "@/lib/studio/queue";
+import { draftMadeFromVideo, newReelHref, reelAction, reelEditorHref, reelOffers, recipeFromVideo, reelTitleFor } from "@/lib/studio/reelPost";
 import { useMedia } from "../hooks";
-import { AlertIcon, PlusIcon, TrashIcon } from "../icons";
+import { AlertIcon, PlusIcon, ReelIcon, TrashIcon } from "../icons";
 import { Lightbox } from "../Lightbox";
 import { ikUrl } from "../media";
 import { ConfirmSheet, Segmented, SheetError, Skel } from "../ui";
@@ -35,6 +38,7 @@ import {
   type PostDetailData,
 } from "./mediaEdit";
 import { PickSheet, type PickMode } from "./PickSheet";
+import { ReelOffers } from "./ReelOffers";
 
 type Edit = { media?: MediaItem[]; placement?: "feed" | "story" };
 type Ask = { title: string; body: ReactNode; label: string; edit: Edit; base: string[]; picked: Picked[]; done: string };
@@ -44,9 +48,11 @@ const saving = new Map<string, Picked>();
 
 /**
  * The post sheet's media editor (docs/post-editing.md): each image or video
- * with Open, Edit design (Create in edit mode), Replace, Move earlier / later
- * (or drag, with a mouse), Remove; Add: a new design, listing screenshots,
- * recent renders or an image from the device; the Feed / Story switch. Every
+ * with Open, Edit design (Create in edit mode), Edit reel / Make a reel (the
+ * reel editor, docs/reel-editor.md section 6), Replace, Move earlier / later
+ * (or drag, with a mouse), Remove; Add: a new design, a new reel, listing
+ * screenshots, recent renders or an image from the device; renders of this
+ * post's reels that aren't in it yet; the Feed / Story switch. Every
  * change saves at once through social.update with the whole media list (and
  * the list it was made from, so an edit over a newer version is refused),
  * shown at once (optimistic). A change to an approved, scheduled or failed
@@ -83,9 +89,16 @@ export function useMediaEditor({ detail, actions, title, locked }: { detail: Pos
   const moveBtns = useRef(new Map<string, HTMLButtonElement>());
   const refocus = useRef<{ type: "move"; key: string; dir: "earlier" | "later" } | { type: "remove"; index: number } | null>(null);
   const mouse = useMedia("(pointer: fine)");
+  const router = useRouter();
+  const openFromMedia = useMutation(api.reels.openFromMedia);
+  const createReel = useMutation(api.reels.create);
+  // Reel drafts, to offer renders made for this post (or of its reels) that aren't in it yet.
+  const drafts = useQuery(api.reels.list, actions.edit && detail ? { limit: 100 } : "skip");
+  // The item whose reel is opening in the editor (a draft is found or made first).
+  const [opening, setOpening] = useState<number | null>(null);
 
   const editable = actions.edit && !!detail;
-  const off = locked || busy;
+  const off = locked || busy || opening !== null;
 
   /** Saves the edit; throws (after showing it) so a confirm sheet stays open with the reason. */
   async function apply(edit: Edit, base: string[], picked: Picked[], done: string) {
@@ -107,8 +120,8 @@ export function useMediaEditor({ detail, actions, title, locked }: { detail: Pos
     }
   }
 
-  /** A change: asked first when it is destructive (`confirm`) or sends the post back to waiting. */
-  function change(edit: Edit, done: string, confirm?: { title: string; body: ReactNode; label: string }) {
+  /** A change: asked first when it is destructive (`confirm`) or sends the post back to waiting. `picked`: what new items are, for the optimistic copy. */
+  function change(edit: Edit, done: string, confirm?: { title: string; body: ReactNode; label: string }, picked: Picked[] = []) {
     if (!detail) return;
     // The media the edit was made from: refused by the server if the post changed meanwhile.
     const base = detail.media.map((m) => m.url);
@@ -126,12 +139,12 @@ export function useMediaEditor({ detail, actions, title, locked }: { detail: Pos
         label: confirm?.label ?? "Save",
         edit,
         base,
-        picked: [],
+        picked,
         done,
       });
       return;
     }
-    apply(edit, base, [], done).catch(() => {});
+    apply(edit, base, picked, done).catch(() => {});
   }
 
   const media = detail?.media ?? [];
@@ -140,6 +153,39 @@ export function useMediaEditor({ detail, actions, title, locked }: { detail: Pos
   const instagram = !!detail?.captions.instagram?.trim();
   const tooMany = detail ? addProblem(media.length, story) : null;
   const keys = itemKeys(media);
+  const offers = detail && actions.edit ? reelOffers(detail.id, media, details, drafts) : [];
+
+  /**
+   * Edit reel: the draft behind this reel (or a new one from its recipe);
+   * Make a reel: the draft already made from this video for this post, else a
+   * new draft with this video as its one clip. Then the reel
+   * editor, from this post and item: its render can replace this item.
+   */
+  async function openReel(i: number) {
+    if (!detail || off) return;
+    const m = media[i];
+    const d = details[i];
+    const act = reelAction(m, d);
+    if (!act) return;
+    setOpening(i);
+    setError(null);
+    try {
+      let id: Id<"reelDrafts"> | null;
+      if (act.type === "edit") {
+        id = await openFromMedia({ url: m.url, postId: detail.id });
+        if (!id) throw new Error("This video has no reel recipe now. Use Make a reel instead.");
+      } else {
+        id =
+          draftMadeFromVideo(drafts, detail.id, m.url)?.id ??
+          (await createReel({ recipe: recipeFromVideo(m, d, detail), title: reelTitleFor(detail), postId: detail.id })).id;
+      }
+      router.push(reelEditorHref(id, { postId: detail.id, item: i }));
+    } catch (err) {
+      showError(err);
+      setError(err);
+      setOpening(null);
+    }
+  }
 
   // Keyboard and screen-reader focus stays with the item that moved (or the next one after a remove), once the buttons are enabled again.
   useEffect(() => {
@@ -259,6 +305,7 @@ export function useMediaEditor({ detail, actions, title, locked }: { detail: Pos
             const name = itemTitle(m, d);
             const notes = itemNotes(m, d, { instagram, story });
             const label = editLabel(m, d);
+            const reel = reelAction(m, d);
             const set = d?.design?.kind === "carousel" ? carouselSet(details, i).length : 0;
             const dragging = drag?.from === i;
             const over = drag && drag.over === i && drag.from !== i ? (drag.from < i ? "after" : "before") : undefined;
@@ -319,6 +366,11 @@ export function useMediaEditor({ detail, actions, title, locked }: { detail: Pos
                   </span>
                 )}
                 <div className="st-qm-acts">
+                  {reel && (
+                    <button type="button" className="st-btn st-btn-ghost st-btn-sm" onClick={() => openReel(i)} disabled={off} data-busy={opening === i || undefined}>
+                      {reel.label}
+                    </button>
+                  )}
                   {label && (
                     <Link
                       className="st-btn st-btn-ghost st-btn-sm"
@@ -371,6 +423,17 @@ export function useMediaEditor({ detail, actions, title, locked }: { detail: Pos
         </ol>
       )}
 
+      {detail && offers.length > 0 && (
+        <ReelOffers
+          offers={offers}
+          count={media.length}
+          story={story}
+          off={off}
+          onReplace={(index, pick) => change({ media: replaceItem(media, index, pick) }, "Replaced with the new render.", undefined, [pick])}
+          onAdd={(pick) => change({ media: appendItems(media, [pick]) }, "Reel added.", undefined, [pick])}
+        />
+      )}
+
       {detail && (
         <div className="st-qm-add">
           {tooMany ? (
@@ -379,6 +442,9 @@ export function useMediaEditor({ detail, actions, title, locked }: { detail: Pos
             <>
               <Link className="st-btn st-btn-ghost st-btn-sm" href={addHref(detail.id)} onClick={noLink} aria-disabled={off || undefined}>
                 <PlusIcon size={17} /> New design
+              </Link>
+              <Link className="st-btn st-btn-ghost st-btn-sm" href={newReelHref(detail.id)} onClick={noLink} aria-disabled={off || undefined}>
+                <ReelIcon size={17} /> New reel
               </Link>
               <button type="button" className="st-btn st-btn-ghost st-btn-sm" onClick={() => setPick({ type: "add" })} disabled={off}>
                 Add images

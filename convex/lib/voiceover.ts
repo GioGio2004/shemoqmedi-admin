@@ -186,3 +186,61 @@ export function urlRangeReader(url: string, fetcher: typeof fetch = fetch): Rang
     return whole.subarray(offset, offset + length);
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Word timings (ElevenLabs text-to-speech "with-timestamps")
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** ElevenLabs' character alignment: one start / end time per character of the text. */
+export type Alignment = {
+  characters: string[];
+  character_start_times_seconds: number[];
+  character_end_times_seconds: number[];
+};
+
+export type TimedWord = { text: string; startSec: number; endSec: number };
+
+const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+/**
+ * Characters → words: runs of non-space characters, each from its first
+ * character's start to its last character's end. Bad or missing timings
+ * give no words (captions then fall back to an even spread).
+ */
+export function alignmentToWords(alignment: Alignment | null | undefined): TimedWord[] {
+  if (!alignment) return [];
+  const { characters: chars, character_start_times_seconds: starts, character_end_times_seconds: ends } = alignment;
+  if (!Array.isArray(chars) || !Array.isArray(starts) || !Array.isArray(ends)) return [];
+  if (chars.length !== starts.length || chars.length !== ends.length) return [];
+  const words: TimedWord[] = [];
+  let text = "";
+  let start = 0;
+  let end = 0;
+  const flush = () => {
+    if (text) words.push({ text, startSec: round3(start), endSec: round3(Math.max(end, start + 0.01)) });
+    text = "";
+  };
+  for (let i = 0; i < chars.length; i++) {
+    const c = chars[i];
+    const s = starts[i];
+    const e = ends[i];
+    if (typeof c !== "string" || !Number.isFinite(s) || !Number.isFinite(e)) return [];
+    if (/\s/.test(c)) {
+      flush();
+      continue;
+    }
+    if (!text) start = s;
+    text += c;
+    end = e;
+  }
+  flush();
+  return words;
+}
+
+/** Base64 → bytes (atob exists in Convex's runtime and in Node). */
+export function base64Bytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}

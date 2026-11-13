@@ -20,8 +20,10 @@ mutation that records the file):
 - MCP `render_graphic` / `render_carousel` (`internal.graphics.render` / `renderCarousel`)
 - `media.registerSocial({ ..., design? })` for a JPEG the browser uploads itself
 
-Screenshots, uploads registered without `design`, reels and every render made
-before this change have `design: null`.
+Screenshots, uploads registered without `design`, quick voiceover reels and
+every render made before this change have `design: null`. Reels rendered in the
+reel editor have `design: { kind: "reel", recipe, draftId?, title? }` (section 7,
+docs/reel-editor.md).
 
 Types (import from `@/convex/lib/design`):
 
@@ -238,3 +240,42 @@ never the normal `create` draft.
   with the change, `update_post` with the whole media list (new URL in place, roles and
   networks kept), show Giorgi, never approve or publish without a new yes.
 - `update_post` follows the same media rules as `social.update` (no `baseMedia` there).
+
+## 7. Reels (the reel editor)
+
+The reel editor is in docs/reel-editor.md; this is how it meets posts.
+
+- **Recipe.** A reel rendered in the editor is a video media row with
+  `design: { kind: "reel", recipe, draftId?, title? }` (`social.get().mediaDetails[i].design`).
+  Create's `seedFromRecipe` refuses it: reels open in the reel editor, never in Create.
+- **Post sheet** (`components/studio/queue/MediaEditor.tsx`, helpers in `lib/studio/reelPost.ts`):
+  - a video with a reel recipe shows **Edit reel**: `reels.openFromMedia({ url, postId })`
+    (the draft behind it, or a new draft rebuilt from the recipe), then
+    `/reels?draft=<id>&post=<postId>&item=<i>`;
+  - any other https video shows **Make a reel**: `reels.create({ recipe: recipeFromVideo(...), title, postId })`
+    (one clip: a listing preview is a silent `listingVideo`, anything else an `upload-video`
+    with its sound on), then the same URL;
+  - the Add row has **New reel**: `/reels?new=1&post=<postId>` (the draft is created with that `postId`);
+  - renders not in the post yet (`reelOffers`, status `rendered` only): **Use it** replaces the
+    item whose recipe names that draft, **Add** appends a reel made for this post (`draft.postId`),
+    **Not for this post** clears `draft.postId`. Both save through `social.update` with `baseMedia`
+    (section 3), with the usual back-to-Waiting confirm;
+  - labels: reels are "Reel" (`itemTitle`, `formatText`, the "Reel · 24 s" chip on the card).
+- **Routes** (`app/studio/reels/page.tsx`, read on the client from the address bar):
+  - `/reels`: the Reels tab (reel drafts, recent reels, the quick voiceover reel);
+  - `/reels?draft=<id>`: the editor with that draft (Claude's push links land here);
+  - `/reels?draft=<id>&post=<postId>&item=<i>`: from a post; after rendering, **Replace in post** =
+    `social.update({ id, media: <item i → { kind: "video", url, role: "reel", networks: old.networks }>, baseMedia })`
+    (confirm first when the post is approved, scheduled or failed: it goes back to Waiting), then
+    `router.replace("/queue?post=<postId>")`. If item i is no longer a video the reel is added instead;
+  - `/reels?new=1[&post=<postId>]`: a new reel (for that post: **Add to post** appends it).
+  - A new reel's first save rewrites `?new=1` to `?draft=<id>` with `history.replaceState(null, …)`
+    (Next syncs it; the editor stays mounted). Back from the editor goes to the post, else to `/reels`.
+- **New posts from a render**: "Post as reel" / "Post as story" (story: 9:16, 3 to 60 s) make a
+  waiting `custom` post with `media: [{ kind: "video", url, role: "reel" }]` and draft captions from
+  the reel's one listing. Nothing is approved or published.
+- **MCP**: `create_reel_draft` / `update_reel_draft` (status "ready", push "Reel draft ready to
+  render" → `/reels?draft=<id>`), `get_reel_draft`, `list_reel_drafts`, and
+  `attach_reel { postId, draftId, replaceIndex?, keepOthers?, networks? }` (refused unless the draft
+  is rendered and unchanged since; `update_post` rules). Claude cannot render: Giorgi renders a draft
+  when he opens it. Home shows those drafts in "Ready to render".

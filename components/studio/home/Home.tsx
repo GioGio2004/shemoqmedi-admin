@@ -9,6 +9,7 @@ import { api } from "@/convex/_generated/api";
 import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 import { NETWORK_LABEL, NETWORK_SHORT, type Network } from "@/lib/studio/captions";
 import { KIND_LABEL, nextScheduled } from "@/lib/studio/queue";
+import { draftHref, draftLine, firstReelIndex, newReelHref, readyDrafts } from "@/lib/studio/reelPost";
 import { formatTbilisi, relativeTime } from "@/lib/studio/time";
 import { useAmbient } from "../Ambient";
 import { ArrowIcon, BellIcon, ExternalIcon, PlusIcon, ReelIcon } from "../icons";
@@ -21,6 +22,7 @@ import { FadeImg, firstImage, StoryIcon, Thumb } from "./media";
 
 type Post = FunctionReturnType<typeof api.social.recent>[number];
 type Channel = FunctionReturnType<typeof api.social.channels>[number];
+type Draft = FunctionReturnType<typeof api.reels.list>[number];
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -54,6 +56,7 @@ export function Home() {
       <div className="st-bento st-in">
         <QueueTile />
         <NextTile now={now} scheduled={scheduled} next={next} />
+        <ReelsTile now={now} />
         <QuickTile />
         <RecentSection now={now} recent={recent} />
         <ChannelsTile now={now} />
@@ -160,7 +163,7 @@ function QuickTile() {
         <Link href="/create?output=story" className="st-btn st-btn-ghost">
           <StoryIcon /> New story
         </Link>
-        <Link href="/reels" className="st-btn st-btn-ghost">
+        <Link href={newReelHref()} className="st-btn st-btn-ghost">
           <ReelIcon /> New reel
         </Link>
         <Link href="/reminders?new=1" className="st-btn st-btn-ghost">
@@ -168,6 +171,65 @@ function QuickTile() {
         </Link>
       </div>
     </section>
+  );
+}
+
+/**
+ * Reel drafts Claude made or changed, waiting to be checked and rendered
+ * (status "ready"). Shown only when there are some; each opens in the reel editor.
+ */
+function ReelsTile({ now }: { now: number }) {
+  const drafts = useQuery(api.reels.list, { status: "ready", limit: 20 });
+  const ready = readyDrafts(drafts);
+  if (ready.length === 0) return null;
+  const shown = ready.slice(0, 3);
+  return (
+    <section className="st-tile st-span-2 st-d-2" aria-labelledby="home-reels">
+      <div className="st-between">
+        <p id="home-reels" className="st-eyebrow">
+          Ready to render
+        </p>
+        <span className="st-badge" data-tone="ink" aria-live="polite">
+          {ready.length === 1 ? "1 reel" : `${ready.length} reels`}
+        </span>
+      </div>
+      <ul className="st-home-drafts">
+        {shown.map((d) => (
+          <li key={d.id}>
+            <DraftRow draft={d} now={now} />
+          </li>
+        ))}
+      </ul>
+      <Link href="/reels" className="st-link st-home-drafts-all">
+        {ready.length > shown.length ? `All ${ready.length} in Reels` : "Open Reels"}
+      </Link>
+    </section>
+  );
+}
+
+function DraftRow({ draft, now }: { draft: Draft; now: number }) {
+  const by = draft.createdBy === "claude" ? "From Claude" : "Changed by Claude";
+  return (
+    <Link href={draftHref(draft)} className="st-home-use st-home-draft lq">
+      <span className="st-home-draft-pic" aria-hidden="true">
+        {draft.cover &&
+          (draft.cover.kind === "video" ? (
+            <video src={`${draft.cover.url}#t=0.1`} muted playsInline preload="metadata" tabIndex={-1} />
+          ) : (
+            <FadeImg url={draft.cover.url} width={160} widths={[120, 240]} sizes="48px" />
+          ))}
+        <span className="st-home-draft-icon">
+          <ReelIcon size={16} />
+        </span>
+      </span>
+      <span className="st-home-use-main">
+        <span className="st-list-title">{draft.title}</span>
+        <span className="st-list-meta st-tnum">{draftLine(draft)}</span>
+        <span className="st-list-meta">{draft.note ?? `${by} · ${relativeTime(draft.updatedAt, now)}`}</span>
+      </span>
+      <ArrowIcon size={16} />
+      <span className="sr-only">, open it in the reel editor</span>
+    </Link>
   );
 }
 
@@ -273,7 +335,7 @@ function RecentSection({ now, recent }: { now: number; recent: Post[] | undefine
                     <span className="st-home-pic-none">{KIND_LABEL[p.kind] ?? "Post"}</span>
                   )}
                   <div className="st-media-top" aria-hidden="true">
-                    <span className="st-mchip">{p.placement === "story" ? "Story" : (KIND_LABEL[p.kind] ?? p.kind)}</span>
+                    <span className="st-mchip">{p.placement === "story" ? "Story" : media.length === 1 && firstReelIndex(media) === 0 ? "Reel" : (KIND_LABEL[p.kind] ?? p.kind)}</span>
                     {media.length > 1 && <span className="st-mchip">{media.length}</span>}
                   </div>
                 </div>

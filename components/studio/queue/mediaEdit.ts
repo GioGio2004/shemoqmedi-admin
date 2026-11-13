@@ -9,6 +9,7 @@
 import type { FunctionReturnType } from "convex/server";
 import type { api } from "@/convex/_generated/api";
 import { NETWORK_LABEL, type Network } from "@/lib/studio/captions";
+import { isReelItem, reelDesignOf } from "@/lib/studio/reelPost";
 
 export type PostDetailData = FunctionReturnType<typeof api.social.get>;
 export type MediaItem = PostDetailData["media"][number];
@@ -145,11 +146,12 @@ const ROLE_WORD: Record<string, string> = {
   voiceover: "Reel",
 };
 
-/** "Graphic", "Slide 2 of 6", "Screenshot", "Video". */
+/** "Graphic", "Slide 2 of 6", "Screenshot", "Reel", "Video". */
 export function itemTitle(m: MediaItem, d: MediaDetail | undefined) {
   const design = d?.design;
   if (design?.kind === "carousel") return `Slide ${design.slideIndex + 1} of ${design.total}`;
   if (design?.kind === "graphic") return "Graphic";
+  if (isReelItem(m, d)) return "Reel";
   if (m.kind === "video") return "Video";
   if (m.role && ROLE_WORD[m.role]) return ROLE_WORD[m.role];
   if (/\/listings\//.test(m.url)) return "Screenshot";
@@ -170,6 +172,7 @@ export function itemNotes(m: MediaItem, d: MediaDetail | undefined, opts: { inst
   if (d?.width && d.height) out.push(`${d.width}x${d.height}`);
   if (m.kind === "video" && d?.durationSec) out.push(`${Math.round(d.durationSec)} s`);
   if (m.kind === "image") out.push(d?.design ? "Design saved" : "No design saved");
+  if (m.kind === "video" && reelDesignOf(d)) out.push("Recipe saved");
   const nets = networksText(m.networks as Network[] | undefined);
   if (nets) out.push(nets);
   if (!opts.story && opts.instagram && paddedOnInstagram(d)) out.push("Padded with white on Instagram");
@@ -193,6 +196,7 @@ export function itemKeys(media: readonly MediaItem[]) {
 /** What Remove says about getting the item back: only renders are in Recent renders. */
 export function removeNote(m: MediaItem, d: MediaDetail | undefined, hasListing: boolean) {
   const what = m.kind === "video" ? "video" : "image";
+  if (reelDesignOf(d)?.draftId) return "It leaves this post. Its draft stays in Reels.";
   if (m.kind === "image" && (d?.design || m.role === "graphic" || m.role === "carousel")) return "It leaves this post. It stays in Recent renders.";
   if (hasListing && (m.role === "screenshot" || m.role === "preview" || /\/listings\//.test(m.url))) return `It leaves this post. You can add it back from Listing while the listing still has this ${what}.`;
   return `It leaves this post. You can't add this ${what} back here.`;

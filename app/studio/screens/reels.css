@@ -37,6 +37,29 @@
 .st-reels-done { display: grid; gap: 14px; }
 .st-reels-attach { display: grid; gap: 10px; }
 
+/* ── The tab: the Reel editor / Quick reel switch ─────────────────────── */
+.st-reels-views { margin-bottom: 18px; }
+.st-reels-view { display: grid; gap: 16px; min-width: 0; }
+.st-reels-quick-lede { margin: 0; max-width: 72ch; }
+.st-reels-filter { justify-self: start; max-width: 100%; }
+
+/* Reel drafts: a row per draft (cover, title, line, status), the row opens the editor; Copy and Delete beside it. */
+.st-reels-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 900px) { .st-reels-list { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); } }
+.st-reels-row { display: flex; align-items: center; gap: 4px; min-width: 0; padding-right: 4px; border-radius: 18px; background: var(--st-inset-bg); box-shadow: inset 0 0 0 .5px var(--st-hair), inset 0 1px 0 var(--st-sheen); }
+.st-reels-row-main { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; min-height: 76px; padding: 8px 8px 8px 8px; border-radius: 18px; color: var(--st-ink); text-decoration: none; }
+.st-reels-row-main .st-badge { flex: none; }
+.st-reels-cover { position: relative; display: grid; place-items: center; flex: none; width: 40px; height: 60px; overflow: hidden; border-radius: 10px; color: var(--st-ink-3); background: var(--st-ph); box-shadow: var(--st-ring); }
+.st-reels-cover img, .st-reels-cover video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.st-reels-row-acts { display: flex; flex: none; }
+.st-reels-row-acts .st-icon-btn { color: var(--st-ink-2); }
+
+/* Recent reels: the rendered videos, flush in their frames. */
+.st-reels-recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 14px; margin: 0; padding: 0; list-style: none; }
+.st-reels-recent-card { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.st-reels-recent-card .st-reels-video { max-height: 46dvh; }
+.st-reels-recent-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+
 @media (min-width: 1000px) {
   .st-panel.st-reels-panel { padding: 22px; }
   .st-reels-panel .st-btn-block { width: auto; justify-self: start; min-width: 220px; }
@@ -44,4 +67,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .st-reels-meter > span { transition-duration: .01ms; }
+  .st-reels-row-main { transition-duration: .01ms !important; }
 }

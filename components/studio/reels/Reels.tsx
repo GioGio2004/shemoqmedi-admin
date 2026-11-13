@@ -1,29 +1,56 @@
 "use client";
 
 import "@/app/studio/screens/reels.css";
-import { useEffect, useId, useMemo, useState, useSyncExternalStore } from "react";
-import { useRouter } from "next/navigation";
-import { useAction, useMutation, useQuery } from "convex/react";
+import Link from "next/link";
+import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useAction, useConvex, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import type { DraftSummary } from "@/convex/reels";
 import { showAlert, showError } from "@/components/admin/Alerts";
 import { errorMessage } from "@/components/admin/format";
+import { releaseProbes } from "@/lib/reel/probe";
+import type { ReelAspect } from "@/lib/reel/recipe";
 import { storefrontSiteUrl } from "@/lib/storefront";
 import { buildReel, uploadReel } from "@/lib/voiceoverMux";
 import { captionsForSave } from "@/lib/studio/captions";
 import { draftCaptions } from "@/lib/studio/drafts";
 import { createDraftStore } from "@/lib/studio/persist";
 import { reelBuilds, type BuildStage, type ReelBuildState } from "@/lib/studio/reelBuild";
+import { storyFits } from "@/lib/studio/reelEditor";
+import {
+  draftHref,
+  draftLine,
+  draftStatusText,
+  newReelHref,
+  recentRenders,
+  reelCloseHref,
+  reelCaptions,
+  reelTargetFrom,
+  reelTargetKey,
+  type ReelTarget,
+} from "@/lib/studio/reelPost";
+import { relativeTime } from "@/lib/studio/time";
 import { storyVideoProblem } from "@/convex/lib/socialApi";
-import { useCanEncode } from "../hooks";
-import { AlertIcon, ReelIcon } from "../icons";
-import { ConfirmSheet, PageHead, Skel } from "../ui";
+import { FadeImg } from "../home/media";
+import { useCanEncode, useNow } from "../hooks";
+import { AlertIcon, PlusIcon, ReelIcon, TrashIcon } from "../icons";
+import { ConfirmSheet, ErrorBoundary, PageHead, Segmented, Skel } from "../ui";
+import { ReelEditor } from "./editor/ReelEditor";
+import { DuplicateIcon } from "./editor/icons";
 
-// Reels: a listing's preview video with a spoken narration (ElevenLabs),
-// built into an Instagram-safe MP4 in this browser (lib/voiceoverMux.ts,
-// WebCodecs) and uploaded to R2. One tap turns it into a post. The build runs
-// outside the page (lib/studio/reelBuild.ts) and the form is kept on this
-// device, so leaving Reels mid-build loses nothing.
+// Reels (docs/reel-editor.md section 6). /reels is the tab: "New reel", the
+// reel drafts (Claude's "Ready to render" first), recent renders, and the
+// quick voiceover reel (one listing's preview with a narration, the first
+// Reels flow, kept as it was). /reels?draft=, ?new=1 and &post=&item= open
+// the reel editor (components/studio/reels/editor), from a post when named.
+//
+// The quick reel: a listing's preview video with a spoken narration
+// (ElevenLabs), built into an Instagram-safe MP4 in this browser
+// (lib/voiceoverMux.ts, WebCodecs) and uploaded to R2. One tap turns it into
+// a post. The build runs outside the page (lib/studio/reelBuild.ts) and the
+// form is kept on this device, so leaving Reels mid-build loses nothing.
 
 const WORDS_PER_SECOND = 2.5;
 
@@ -41,7 +68,8 @@ function isVertical(w: number, h: number) {
   return Math.abs(w / h - 9 / 16) < 0.02;
 }
 
-export function Reels() {
+/** The quick reel: one listing's preview and a narration (the first Reels flow, kept as it was). */
+function QuickReel() {
   const router = useRouter();
   const canEncode = useCanEncode();
   const listings = useQuery(api.voiceover.listings, {});
@@ -169,12 +197,9 @@ export function Reels() {
 
   return (
     <>
-      <PageHead
-        index="04"
-        section="Reels"
-        title="Reels."
-        lede={`A listing's preview with a spoken narration. Write about ${WORDS_PER_SECOND} words a second: a longer narration holds the last frame, a shorter one ends in silence.`}
-      />
+      <p className="st-note st-reels-quick-lede">
+        A listing&apos;s preview with a spoken narration, in two steps. Write about {WORDS_PER_SECOND} words a second: a longer narration holds the last frame, a shorter one ends in silence. For several clips, music, captions and transitions, make a reel in the editor.
+      </p>
 
       {canEncode === false && (
         <div className="st-callout st-reels-warn">
@@ -414,5 +439,297 @@ export function Reels() {
         onConfirm={onGenerate}
       />
     </>
+  );
+}
+
+// ── The route: the tab, or the editor ────────────────────────────────────
+
+/** /reels: the Reels tab, or the reel editor when the address names a draft (or ?new=1). */
+export function ReelsRoute() {
+  const params = useSearchParams();
+  const target = reelTargetFrom(params);
+  if (!target) return <Reels />;
+  return <ReelEditorScreen key={reelTargetKey(target)} target={target} />;
+}
+
+/** The reel editor for a link; Back goes to the post it came from, or to Reels. */
+export function ReelEditorScreen({ target }: { target: ReelTarget }) {
+  const router = useRouter();
+  const back = reelCloseHref(target);
+  const onClose = useCallback(() => router.push(back), [router, back]);
+  const postId = target.post?.id ?? null;
+  const item = target.post?.item ?? null;
+  // One object per post and item, so the editor's memoised parts keep it.
+  const post = useMemo(() => (postId ? { id: postId as Id<"socialPosts">, item } : null), [postId, item]);
+  // The source files the editor opened for lengths, filmstrips and exact frames close when it does.
+  useEffect(() => () => releaseProbes(), []);
+  return (
+    <ErrorBoundary
+      fallback={
+        <div className="st-empty st-in" role="alert">
+          <strong>This reel can&apos;t be opened.</strong>
+          It may have been deleted, or the link is wrong. Its rendered reel and posts stay.
+          <Link href={back} className="st-btn st-btn-ghost st-btn-sm">
+            {target.post ? "Back to the post" : "Back to Reels"}
+          </Link>
+        </div>
+      }
+    >
+      <ReelEditor draftId={target.draftId as Id<"reelDrafts"> | null} post={post} onClose={onClose} />
+    </ErrorBoundary>
+  );
+}
+
+// ── The tab ───────────────────────────────────────────────────────────────
+
+type View = "editor" | "quick";
+const views = createDraftStore<View>("reels-view");
+
+export function Reels() {
+  // The last view chosen on this device (the page mounts after the admin gate: client only).
+  const [view, setView] = useState<View>(() => (views.get("view") === "quick" ? "quick" : "editor"));
+  const pick = (v: View) => {
+    setView(v);
+    views.set("view", v);
+  };
+  return (
+    <>
+      <PageHead
+        index="04"
+        section="Reels"
+        title="Reels."
+        lede="Reels from listing videos, screenshots, graphics and your own files, with a voice, music and captions. Every choice is yours. Nothing is posted until you approve it."
+        actions={
+          <Link href={newReelHref()} className="st-btn st-btn-sm">
+            <PlusIcon size={17} /> New reel
+          </Link>
+        }
+      />
+      <Segmented
+        label="Reels"
+        value={view}
+        onChange={pick}
+        className="st-reels-views"
+        options={[
+          { value: "editor", label: "Reel editor", id: "reels-tab-editor", controls: "reels-panel" },
+          { value: "quick", label: "Quick reel", id: "reels-tab-quick", controls: "reels-panel" },
+        ]}
+      />
+      <div id="reels-panel" role="tabpanel" aria-labelledby={`reels-tab-${view}`} className="st-reels-view">
+        {view === "editor" ? <Library /> : <QuickReel />}
+      </div>
+    </>
+  );
+}
+
+type Filter = "all" | DraftSummary["status"];
+const FILTERS: { value: Filter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "ready", label: "Ready" },
+  { value: "draft", label: "Drafts" },
+  { value: "rendered", label: "Rendered" },
+];
+
+/** Reel drafts (Claude's ready ones first) and the latest renders. */
+function Library() {
+  const router = useRouter();
+  const convex = useConvex();
+  const drafts = useQuery(api.reels.list, { limit: 100 });
+  const duplicate = useMutation(api.reels.duplicate);
+  const remove = useMutation(api.reels.remove);
+  const createPost = useMutation(api.social.create);
+  const now = useNow(30_000);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [removing, setRemoving] = useState<DraftSummary | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function copy(d: DraftSummary) {
+    setBusy(`copy-${d.id}`);
+    try {
+      await duplicate({ id: d.id });
+      showAlert("Copy made. It is at the top of the list.", "success");
+    } catch (err) {
+      showError(err);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** A new waiting post with this reel's last render (feed reel or story), opened in the queue. Never approved here. */
+  async function post(d: DraftSummary, placement: "feed" | "story") {
+    if (!d.renderedUrl) return;
+    setBusy(`${placement}-${d.id}`);
+    try {
+      const found = await Promise.all(d.listingIds.slice(0, 6).map((id) => convex.query(api.reels.listingSources, { listingId: id })));
+      const listings = found.filter((x): x is NonNullable<typeof x> => !!x);
+      const l = listings.length === 1 ? listings[0] : null;
+      const captions = reelCaptions(listings, placement, d.title, storefrontSiteUrl);
+      const created = await createPost({
+        kind: "custom",
+        listingId: l ? l.id : undefined,
+        captions: captionsForSave(captions),
+        media: [{ kind: "video", url: d.renderedUrl, role: "reel" }],
+        placement,
+      });
+      router.push(`/queue?post=${created.id}`);
+    } catch (err) {
+      showError(err);
+      setBusy(null);
+    }
+  }
+
+  if (drafts === undefined) {
+    return (
+      <div className="st-reels-list" aria-busy="true">
+        {[0, 1, 2].map((i) => (
+          <Skel key={i} style={{ height: 76, borderRadius: 18 }} />
+        ))}
+      </div>
+    );
+  }
+
+  if (drafts.length === 0) {
+    return (
+      <div className="st-empty st-in">
+        <strong>No reels yet.</strong>
+        Put listing videos, screenshots, graphics or your own files on a timeline, add a voice, music and captions, then render it here in the browser.
+        <Link href={newReelHref()} className="st-btn st-btn-sm">
+          <PlusIcon size={17} /> New reel
+        </Link>
+      </div>
+    );
+  }
+
+  const count = (f: Filter) => (f === "all" ? drafts.length : drafts.filter((d) => d.status === f).length);
+  // Claude's drafts waiting for a render come first; the rest as listed (last changed first).
+  const ordered = [...drafts].sort((a, b) => Number(b.status === "ready") - Number(a.status === "ready"));
+  const shown = filter === "all" ? ordered : ordered.filter((d) => d.status === filter);
+  const recent = recentRenders(drafts);
+
+  return (
+    <div className="st-stack-lg st-in">
+      {recent.length > 0 && (
+        <section className="st-sec" aria-labelledby="reels-recent">
+          <div className="st-sec-head">
+            <h2 id="reels-recent" className="st-h3">
+              Recent reels
+            </h2>
+          </div>
+          <ul className="st-reels-recent">
+            {recent.map((d) => {
+              const current = d.status === "rendered";
+              const story = current && storyFits(d.aspect as ReelAspect, d.durationSec);
+              return (
+                <li key={d.id} className="st-reels-recent-card">
+                  <div className="st-reels-frame">
+                    <video src={d.renderedUrl ?? undefined} className="st-reels-video" controls playsInline preload="metadata" aria-label={`${d.title}, the rendered reel`} />
+                    {!current && (
+                      <div className="st-media-top" aria-hidden="true">
+                        <span className="st-mchip st-glass-media">Older version</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="st-list-main">
+                    <span className="st-list-title">{d.title}</span>
+                    <span className="st-list-meta st-tnum">
+                      {current ? draftLine(d) : "Changed since this render"}
+                      {d.renderedAt ? ` · ${relativeTime(d.renderedAt, now)}` : ""}
+                    </span>
+                  </div>
+                  <div className="st-reels-recent-acts">
+                    <Link href={draftHref(d)} className="st-btn st-btn-ghost st-btn-sm">
+                      Edit
+                    </Link>
+                    <button type="button" className="st-btn st-btn-ghost st-btn-sm" onClick={() => post(d, "feed")} disabled={busy !== null} data-busy={busy === `feed-${d.id}` || undefined}>
+                      Post as reel
+                    </button>
+                    {story && (
+                      <button type="button" className="st-btn st-btn-ghost st-btn-sm" onClick={() => post(d, "story")} disabled={busy !== null} data-busy={busy === `story-${d.id}` || undefined}>
+                        Post as story
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="st-note">A new post waits in the queue with draft captions. Nothing goes out until you approve it.</p>
+        </section>
+      )}
+
+      <section className="st-sec" aria-labelledby="reels-drafts">
+        <div className="st-sec-head">
+          <h2 id="reels-drafts" className="st-h3">
+            Reel drafts
+          </h2>
+        </div>
+        <Segmented
+          kind="radio"
+          size="sm"
+          label="Show"
+          value={filter}
+          onChange={setFilter}
+          className="st-reels-filter"
+          options={FILTERS.map((f) => ({ value: f.value, label: f.label, count: count(f.value), disabled: f.value !== "all" && f.value !== filter && count(f.value) === 0 }))}
+        />
+        {shown.length === 0 ? (
+          <p className="st-note">Nothing here.</p>
+        ) : (
+          <ul className="st-reels-list">
+            {shown.map((d) => (
+              <li key={d.id} className="st-reels-row">
+                <Link href={draftHref(d)} className="st-reels-row-main lq">
+                  <span className="st-reels-cover" aria-hidden="true">
+                    {d.cover ? (
+                      d.cover.kind === "video" ? (
+                        <video src={`${d.cover.url}#t=0.1`} muted playsInline preload="metadata" tabIndex={-1} />
+                      ) : (
+                        <FadeImg url={d.cover.url} width={160} widths={[120, 240]} sizes="48px" />
+                      )
+                    ) : (
+                      <ReelIcon size={18} />
+                    )}
+                  </span>
+                  <span className="st-list-main">
+                    <span className="st-list-title">{d.title}</span>
+                    <span className="st-list-meta st-tnum">{draftLine(d)}</span>
+                    <span className="st-list-meta">{d.note ?? `${d.createdBy === "claude" ? "From Claude · " : ""}${relativeTime(d.updatedAt, now)}`}</span>
+                  </span>
+                  <span className="st-badge" data-tone={d.status === "ready" ? "ink" : d.status === "draft" ? "mute" : undefined}>
+                    {draftStatusText(d)}
+                  </span>
+                  <span className="sr-only">, open it in the reel editor</span>
+                </Link>
+                <div className="st-reels-row-acts">
+                  <button type="button" className="st-icon-btn is-plain" aria-label={`Copy ${d.title}`} onClick={() => copy(d)} disabled={busy !== null}>
+                    <DuplicateIcon size={19} />
+                  </button>
+                  <button type="button" className="st-icon-btn is-plain" aria-label={`Delete ${d.title}`} onClick={() => setRemoving(d)} disabled={busy !== null}>
+                    <TrashIcon size={19} />
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <ConfirmSheet
+        open={removing !== null}
+        onClose={() => setRemoving(null)}
+        title="Delete this reel draft?"
+        confirmLabel="Delete"
+        body={
+          <>
+            <strong>{removing?.title}</strong> goes. A rendered reel and the posts that use it stay.
+          </>
+        }
+        onConfirm={async () => {
+          if (!removing) return;
+          await remove({ id: removing.id });
+          showAlert("Draft deleted.", "success");
+        }}
+      />
+    </div>
   );
 }

@@ -6,6 +6,18 @@ import { z } from "zod";
 import { api } from "@/convex/_generated/api";
 import { THREADS_MAX, threadsLength } from "@/convex/lib/socialApi";
 import type { Id } from "@/convex/_generated/dataModel";
+import {
+  CAPTION_POSITIONS,
+  CAPTION_STYLES,
+  FITS,
+  LIMITS as REEL_LIMITS,
+  MOTIONS,
+  SOURCE_KINDS,
+  TEXT_POSITIONS,
+  TEXT_SIZES,
+  TEXT_STYLES,
+  TRANSITIONS,
+} from "@/lib/reel/recipe";
 import { publicOrigin, serviceCredential, verifyOAuthToken } from "./oauth";
 import {
   FORMAT_ENUM,
@@ -95,7 +107,7 @@ What the database does by itself: when an award is announced (Honorable Mention,
 
 Your daily loop when Giorgi asks "what's waiting?":
 1. social_queue (status waiting). For each post read its facts (get_post; get_listing for jury comments and more).
-2. Make the graphics. Always attach graphics, not only screenshots. For award and new-listing posts render the storytelling carousel (render_carousel with the listing's slug) and use its slides for Instagram, Facebook and LinkedIn (media items with networks ["instagram","facebook","linkedin"]); add the carousel's first (hook) slide once more with networks ["threads"] for Threads. For calls, roundups and announcements render one graphic (render_graphic) in ig_portrait or square: Instagram only takes images between 4:5 and 1.91:1, so story, reel_cover and link graphics get padded with white for Instagram (keep those for other networks via the media item's networks). Pick a style for each post (list_styles): glass is the frosted look over a blurred backdrop of the site; swiss, kinetic, magazine and bento are flat and render fast. Keep one style across a post's slides and vary styles between posts so the feed doesn't repeat itself; pass the same style to render_graphic and render_carousel. A preview video can go first instead when Giorgi wants a reel (voiceovers: list_voices, create_voiceover, then he builds the reel on the Studio's Reels page).
+2. Make the graphics. Always attach graphics, not only screenshots. For award and new-listing posts render the storytelling carousel (render_carousel with the listing's slug) and use its slides for Instagram, Facebook and LinkedIn (media items with networks ["instagram","facebook","linkedin"]); add the carousel's first (hook) slide once more with networks ["threads"] for Threads. For calls, roundups and announcements render one graphic (render_graphic) in ig_portrait or square: Instagram only takes images between 4:5 and 1.91:1, so story, reel_cover and link graphics get padded with white for Instagram (keep those for other networks via the media item's networks). Pick a style for each post (list_styles): glass is the frosted look over a blurred backdrop of the site; swiss, kinetic, magazine and bento are flat and render fast. Keep one style across a post's slides and vary styles between posts so the feed doesn't repeat itself; pass the same style to render_graphic and render_carousel. A preview video can go first instead when Giorgi wants a reel (voiceovers: list_voices, create_voiceover, then he builds the reel on the Studio's Reels page; or cut a fuller reel with create_reel_draft, see Reels below).
 3. Write captions for the networks that fit: instagram, facebook, threads, linkedin. Save captions and media with update_post.
 4. Show him every caption in full and the rendered image URLs it will use, then ask. Only call approve_post after he says yes to that exact post. If he asks for changes, edit and show again.
 5. Approving publishes: at once, or at the post's publish time (publishAt), to every network that has a caption and a connected account. publish_post does it in one step (now, or at a time Giorgi gives); unschedule_post takes a scheduled post back to waiting. Check list_channels when unsure what is connected. Afterwards get_post shows each network's result and link; a failed network can be sent again with retry_post (networks already sent are never sent twice).
@@ -105,6 +117,13 @@ Editing a drafted post (Giorgi asks to change a post you or he made, e.g. "make 
 2. Change the recipe and render again with the same inputs plus the change. design.kind "graphic": render_graphic with its template, format, style, palette, glass, fields and imageUrls. design.kind "carousel": render_carousel with listingSlug (design.listingSlug), facts, palette, style and story; it renders the whole set again (a carousel's slides share design.setId; design.slideIndex is the slide's place in it). When design is null, rebuild it as best you can from the post's facts (template from the post kind, the listing's screenshot as the image) and tell Giorgi it is a redesign.
 3. update_post with the whole media list: the new URL in place of the old item (keep its role and networks), or the carousel's new slides in place of the old set (and the new hook slide for Threads). Keep every other item as it was. Captions stay unless he asked to change them.
 4. Show him the new image URLs and ask again. Editing an approved, scheduled or failed post sends it back to waiting (a scheduled publish is cancelled): say so before you change one, and only approve or publish after he says yes again.
+
+Reels (the Studio's reel editor): you can cut a reel yourself as a REEL RECIPE and Giorgi renders it. You cannot render video; the reel is rendered in his browser when he opens it in the Studio (studio.shemoqmedi.space/reels).
+1. Pick the clips: listing preview videos (source kind listingVideo with listingSlug), listing screenshots (kind screenshot with listingSlug and shot, 0 = cover) shown with a Ken Burns move, rendered graphics as title cards (kind graphic with the image url from render_graphic or list_media), and Giorgi's uploads (kind upload-video / upload-image with their url). Several listings can share one reel.
+2. For each clip choose what fits: trim (inSec/outSec, seconds of the source video), speed 0.5-2, how long a still shows (durationSec), motion, fit (fill crops to fill, blur fits it over a blurred copy, letterbox fits it on black), a short text overlay, and the transition into it (cut, crossfade, dipBlack, dipWhite, morph, slide*, push*) with its length. Defaults are fine for anything you leave out.
+3. Narration: write a script that fits the reel (about 2.5 words a second) as audio.voice.script with a narrator (list_voices). Giorgi voices it in the editor (it spends ElevenLabs credits, so he decides); or, after he approved the script, create_voiceover and pass its narrationId. Captions are made from the voice automatically.
+4. create_reel_draft with the recipe and a title (and the postId when it is for a post). Giorgi gets a push "Reel draft ready to render". Show him what you made (clips, texts, script) in a few lines. Change it with update_reel_draft (send the whole recipe from get_reel_draft with your changes).
+5. After he rendered it (get_reel_draft status "rendered"), attach_reel puts it in a post. Then show him and ask before any approval. Never approve or publish on your own.
 
 Stories: a post with placement "story" (set on create_post or update_post) is exactly one 9:16 image (render_graphic with format story, in any style) or video (find_reel finds a listing's latest reel). It goes to Instagram and the Facebook Page as a story; Threads and LinkedIn have no stories and are skipped. Stories show no text, so a short caption for instagram and/or facebook only picks where it goes. list_templates, list_palettes, list_styles and list_media help pick and reuse graphics.
 
@@ -538,10 +557,219 @@ const handler = createMcpHandler(
       {
         title: "Create voiceover",
         description:
-          "Voice a narration script for a listing's preview video with ElevenLabs and return the MP3 URL and its length. Spends ElevenLabs credits: only after Giorgi approved the script and the voice. The reel itself (the muted preview with this narration) is built by Giorgi on the Studio Reels page (studio.shemoqmedi.space/reels), which uploads it; then attach the reel's URL to the post as a video.",
+          "Voice a narration script for a listing's preview video with ElevenLabs and return the MP3 URL, its length and its narrationId. Spends ElevenLabs credits: only after Giorgi approved the script and the voice. The reel itself is built by Giorgi in the Studio (studio.shemoqmedi.space/reels): either the quick reel (the muted preview with this narration) or a reel draft you made with create_reel_draft, passing this narrationId as audio.voice.narrationId.",
         inputSchema: z.object({ listingSlug: slug, script: z.string().min(1).max(2000), voice: z.string().min(1).max(80).describe("Narrator name from list_voices") }),
       },
       async (args, ctx) => run(() => convex.action(api.mcp.createVoiceover, { ...auth(ctx), ...args })),
+    );
+
+    // Reel drafts (Studio reel editor): Claude writes the recipe, Giorgi renders it.
+
+    const reelSource = z
+      .object({
+        kind: z.enum(SOURCE_KINDS).describe("listingVideo: a listing's preview video; screenshot: a listing's screenshot; graphic: a rendered graphic (title card); upload-video / upload-image: Giorgi's uploads"),
+        listingSlug: slug.optional().describe("listingVideo / screenshot: the listing (url is then looked up)"),
+        shot: z.number().int().min(0).max(20).optional().describe("screenshot: which of the listing's screenshots, 0 = cover"),
+        url: z.string().url().optional().describe("Public https URL of the file (needed for graphic and uploads)"),
+        label: z.string().max(REEL_LIMITS.labelChars).optional(),
+        mediaId: z.string().optional(),
+        listingId: z.string().optional(),
+        width: z.number().positive().optional(),
+        height: z.number().positive().optional(),
+        durationSec: z.number().positive().optional(),
+      })
+      .describe("Where the clip comes from");
+    const captionWord = z.object({ text: z.string(), startSec: z.number().min(0), endSec: z.number().min(0) });
+    const reelClip = z.object({
+      id: z.string().max(40).optional().describe("Keep the id from get_reel_draft when editing; new clips need none"),
+      source: reelSource,
+      inSec: z.number().min(0).optional().describe("Videos: trim start, seconds into the source (default 0)"),
+      outSec: z.number().positive().optional().describe("Videos: trim end, seconds into the source (default: the whole video, at most 15 s)"),
+      durationSec: z
+        .number()
+        .min(0)
+        .max(REEL_LIMITS.stillMaxSec)
+        .optional()
+        .describe("Stills: seconds on screen, 0.5-30 (default 3). Videos: instead of outSec, how long from inSec"),
+      speed: z.number().min(REEL_LIMITS.speedMin).max(REEL_LIMITS.speedMax).optional().describe("Videos: 0.5-2 (default 1)"),
+      motion: z.enum(MOTIONS).optional().describe("Ken Burns move (stills default zoomIn, videos none)"),
+      fit: z.enum(FITS).optional().describe("fill: crop to fill; blur: whole picture over a blurred copy; letterbox: whole picture on black (default: fill when the shape matches, else blur)"),
+      text: z
+        .object({
+          text: z.string().max(REEL_LIMITS.textChars),
+          on: z.boolean().optional(),
+          position: z.enum(TEXT_POSITIONS).optional(),
+          style: z.enum(TEXT_STYLES).optional().describe("glass (frosted pill), solid (black box), light (white box), shadow, headline (big display)"),
+          size: z.enum(TEXT_SIZES).optional(),
+        })
+        .optional()
+        .describe("A short overlay, a few words"),
+      transitionIn: z
+        .object({ type: z.enum(TRANSITIONS), durationSec: z.number().min(0).max(REEL_LIMITS.transitionMaxSec).optional() })
+        .optional()
+        .describe("How this clip comes in (default crossfade 0.4 s; the first clip always starts with a cut)"),
+      audio: z.object({ on: z.boolean(), gain: z.number().min(0).max(2).optional() }).optional().describe("Videos: keep the clip's own sound (previews are silent; default off, uploads on)"),
+    });
+    const reelRecipe = z
+      .object({
+        reel: z.object({ aspect: z.enum(["9:16", "4:5", "1:1", "16:9"]).describe("9:16 for reels and stories (default)") }).optional(),
+        clips: z.array(reelClip).min(1).max(REEL_LIMITS.clips),
+        audio: z
+          .object({
+            voice: z
+              .object({
+                script: z.string().max(REEL_LIMITS.scriptChars).optional().describe("The narration to voice, about 2.5 words a second of reel"),
+                voice: z.string().max(80).optional().describe("Narrator name from list_voices"),
+                narrationId: z.string().optional().describe("A narration already voiced (create_voiceover's narrationId)"),
+                url: z.string().url().optional(),
+                durationSec: z.number().positive().optional(),
+                startSec: z.number().min(0).optional().describe("Where on the reel it starts (default 0)"),
+                gain: z.number().min(0).max(2).optional(),
+                captions: z
+                  .object({
+                    on: z.boolean().optional(),
+                    style: z.enum(CAPTION_STYLES).optional(),
+                    position: z.enum(CAPTION_POSITIONS).optional(),
+                    lines: z
+                      .array(z.object({ text: z.string().max(REEL_LIMITS.captionLineChars), startSec: z.number().min(0), endSec: z.number().min(0), words: z.array(captionWord).optional() }))
+                      .max(REEL_LIMITS.captionLines)
+                      .optional()
+                      .describe("Leave out: made from the voice. Keep them as get_reel_draft gave them when editing"),
+                  })
+                  .optional(),
+              })
+              .nullable()
+              .optional(),
+            music: z
+              .object({
+                url: z.string().url().describe("An MP3/M4A Giorgi uploaded in the editor"),
+                title: z.string().max(REEL_LIMITS.labelChars).optional(),
+                audioId: z.string().optional(),
+                durationSec: z.number().positive().optional(),
+                offsetSec: z.number().min(0).optional(),
+                gain: z.number().min(0).max(2).optional().describe("Default 0.5"),
+                loop: z.boolean().optional(),
+                duck: z.object({ on: z.boolean(), amount: z.number().min(0).max(1) }).optional().describe("Lower the music under the voice (default on, 0.6)"),
+              })
+              .nullable()
+              .optional(),
+            clipGain: z.number().min(0).max(2).optional(),
+            evenLoudness: z.boolean().optional().describe("Bring the mix to Instagram's level, -14 LUFS (default on)"),
+          })
+          .optional(),
+        fades: z
+          .object({
+            videoInSec: z.number().min(0).max(5).optional(),
+            videoOutSec: z.number().min(0).max(5).optional(),
+            audioInSec: z.number().min(0).max(5).optional(),
+            audioOutSec: z.number().min(0).max(5).optional(),
+          })
+          .optional(),
+      })
+      .describe("The REEL RECIPE: clips in order, audio and fades. Anything left out gets the editor's default.");
+    const reelDraftId = z.string().describe("Reel draft id from create_reel_draft or list_reel_drafts");
+
+    server.registerTool(
+      "create_reel_draft",
+      {
+        title: "Create reel draft",
+        description:
+          "Cut a reel as a recipe for the Studio's reel editor: clips (listing preview videos, screenshots with a Ken Burns move, rendered graphics as title cards, Giorgi's uploads) with trims, speed, texts and transitions, a narration script, music and fades. You cannot render: Giorgi gets a push and renders it in his browser when he opens it (status ready, then rendered). Returns the draft with its full recipe, problems (what stops a render, e.g. the script is not voiced yet) and warnings. Nothing is published.",
+        inputSchema: z.object({
+          title: z.string().max(REEL_LIMITS.titleChars).optional().describe("Default: the first listing's title + reel"),
+          recipe: reelRecipe,
+          postId: postId.optional().describe("The post this reel is for, if any"),
+          note: z.string().max(500).optional().describe("A note for Giorgi, shown with the draft"),
+        }),
+      },
+      async (args, ctx) =>
+        run(() =>
+          convex.mutation(api.mcp.createReelDraft, {
+            ...auth(ctx),
+            title: args.title,
+            recipe: args.recipe,
+            note: args.note,
+            postId: args.postId as Id<"socialPosts"> | undefined,
+          }),
+        ),
+    );
+
+    server.registerTool(
+      "update_reel_draft",
+      {
+        title: "Update reel draft",
+        description:
+          "Change a reel draft: recipe replaces the whole recipe (start from get_reel_draft's recipe, keep clip ids and caption lines, change what Giorgi asked), title and note are optional. A changed recipe makes the draft ready again: Giorgi renders it again. Never publishes.",
+        inputSchema: z.object({
+          id: reelDraftId,
+          recipe: reelRecipe.optional(),
+          title: z.string().max(REEL_LIMITS.titleChars).optional(),
+          note: z.string().max(500).optional(),
+          postId: postId.nullable().optional().describe("The post it is for; null clears it"),
+        }),
+      },
+      async (args, ctx) =>
+        run(() =>
+          convex.mutation(api.mcp.updateReelDraft, {
+            ...auth(ctx),
+            id: args.id as Id<"reelDrafts">,
+            recipe: args.recipe,
+            title: args.title,
+            note: args.note,
+            postId: args.postId as Id<"socialPosts"> | null | undefined,
+          }),
+        ),
+    );
+
+    server.registerTool(
+      "get_reel_draft",
+      {
+        title: "Get reel draft",
+        description:
+          "One reel draft: status (draft: Giorgi is editing; ready: waiting for him to render; rendered: renderedUrl is the MP4 of the current recipe), the full recipe, problems that stop a render and warnings.",
+        inputSchema: z.object({ id: reelDraftId }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.getReelDraft, { ...auth(ctx), id: args.id as Id<"reelDrafts"> })),
+    );
+
+    server.registerTool(
+      "list_reel_drafts",
+      {
+        title: "List reel drafts",
+        description: "Reel drafts, last changed first, optionally by status (draft, ready, rendered): title, clips, length, aspect, who made it, the post it is for and the rendered URL.",
+        inputSchema: z.object({
+          status: z.enum(["draft", "ready", "rendered"]).optional(),
+          limit: z.number().int().min(1).max(100).optional(),
+        }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.listReelDrafts, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "attach_reel",
+      {
+        title: "Attach reel",
+        description:
+          "Put a rendered reel draft into a post as its video (role reel). Default: the reel becomes the post's only media (an Instagram reel); replaceIndex swaps one media item; keepOthers puts it first and keeps the rest (refused when the post already has 10 items or this reel). Same rules as update_post: a story needs a 9:16 reel of 3-60 s, and editing an approved, scheduled or failed post sends it back to waiting. Refused when the draft is not rendered or changed since its render. Never publishes: show Giorgi and ask before approving.",
+        inputSchema: z.object({
+          postId,
+          draftId: reelDraftId,
+          replaceIndex: z.number().int().min(0).max(9).optional(),
+          keepOthers: z.boolean().optional(),
+          networks: z.array(network).optional().describe("Only on these networks (absent = all)"),
+        }),
+      },
+      async (args, ctx) =>
+        run(() =>
+          convex.mutation(api.mcp.attachReel, {
+            ...auth(ctx),
+            postId: args.postId as Id<"socialPosts">,
+            draftId: args.draftId as Id<"reelDrafts">,
+            replaceIndex: args.replaceIndex,
+            keepOthers: args.keepOthers,
+            networks: args.networks,
+          }),
+        ),
     );
 
     server.registerTool(

@@ -37,3 +37,8 @@ export function studioUrl(path = "/") {
 export function studioPostUrl(id: string) {
   return studioUrl(`/queue?post=${encodeURIComponent(id)}`);
 }
+
+/** A reel draft in the Studio's reel editor: where "Reel draft ready to render" pushes link. */
+export function studioReelUrl(id: string) {
+  return studioUrl(`/reels?draft=${encodeURIComponent(id)}`);
+}

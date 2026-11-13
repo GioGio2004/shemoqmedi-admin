@@ -235,6 +235,8 @@ const BASE = { style: "swiss" as Style, palette: "house" as PaletteChoice, glass
 
 /** Create's choices from a saved recipe. `listingId` is the post's listing (by slug), when known. */
 export function seedFromRecipe(design: DesignView, post: Pick<EditablePost, "kind" | "placement" | "listing" | "facts" | "captions">, listingId: string | null): EditSeed {
+  // A reel's recipe opens in the reel editor (docs/reel-editor.md), never in Create.
+  if (design.kind === "reel") throw new Error("A reel is edited in the reel editor.");
   const style = isStyleId(design.style) ? design.style : "glass";
   const palette = isPalette(design.palette) ? design.palette : "auto";
   if (design.kind === "carousel") {
@@ -322,7 +324,7 @@ export function seedFromPost(post: EditablePost, item: number | null, listingId:
 /** The seed for a visit: the item's recipe when it has one, else the best-effort prefill. */
 export function seedForEdit(post: EditablePost, target: EditTarget, listingId: string | null): EditSeed {
   const design = target.item === null ? null : (post.mediaDetails[target.item]?.design ?? null);
-  return design ? seedFromRecipe(design, post, listingId) : seedFromPost(post, target.item, listingId);
+  return design && design.kind !== "reel" ? seedFromRecipe(design, post, listingId) : seedFromPost(post, target.item, listingId);
 }
 
 // ── Rules ─────────────────────────────────────────────────────────────────

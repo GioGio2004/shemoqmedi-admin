@@ -5,7 +5,8 @@
 // social desk's hands: read listings, awards and studios; write, approve,
 // publish, schedule and retry posts (feed posts and stories); see the
 // connected channels (never their tokens); render graphics and voiceovers and
-// find past renders and reels; email studios; broadcast to an audience.
+// find past renders and reels; draft reels for the Studio's reel editor (Claude
+// writes the recipe, Giorgi renders it); email studios; broadcast to an audience.
 
 import { v } from "convex/values";
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
@@ -18,7 +19,10 @@ import { readPillars } from "./lib/scoring";
 import { TIER_NAMES } from "./lib/awards";
 import { folderOf, mediaDetails, mediaEntry, mediaEntryOf, mediaRole, roleOf } from "./lib/mediaEntry";
 import { mediaDetail } from "./lib/design";
-import { socialPlacement, socialPostKind } from "./schema";
+import { socialNetwork, socialPlacement, socialPostKind } from "./schema";
+import { reelDraftStatus } from "./lib/reel";
+import { draftSummary, draftView, insertDraft, patchDraft, resolveLooseRecipe, summarize, viewDraft } from "./reels";
+import { rowUrl } from "./lib/media";
 import {
   approvePost as approve,
   countPosts,
@@ -604,11 +608,136 @@ export const listVoices = action({
 /** Voices a script for a listing (spends ElevenLabs credits): voiceover.create. */
 export const createVoiceover = action({
   args: { token, listingSlug: v.string(), script: v.string(), voice: v.string() },
-  returns: v.object({ audioUrl: v.string(), durationSec: v.number() }),
-  handler: async (ctx, { token, listingSlug, script, voice }): Promise<{ audioUrl: string; durationSec: number }> => {
+  returns: v.object({ audioUrl: v.string(), durationSec: v.number(), narrationId: v.id("reelAudio") }),
+  handler: async (ctx, { token, listingSlug, script, voice }): Promise<{ audioUrl: string; durationSec: number; narrationId: Id<"reelAudio"> }> => {
     await ctx.runQuery(internal.mcp.checkToken, { token });
     const listingId: Id<"listings"> = await ctx.runQuery(internal.mcp.listingIdBySlug, { slug: listingSlug });
     return await ctx.runAction(internal.voiceover.create, { listingId, script, voice });
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reel drafts (convex/reels.ts, docs/reel-editor.md). Claude writes the
+// recipe; the Studio renders it in the browser when Giorgi opens it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A reel draft from a (loose) recipe: status "ready", Giorgi gets a push to open and render it. */
+export const createReelDraft = mutation({
+  args: {
+    token,
+    recipe: v.any(),
+    title: v.optional(v.string()),
+    note: v.optional(v.string()),
+    postId: v.optional(v.id("socialPosts")),
+  },
+  returns: draftView,
+  handler: async (ctx, { token, recipe, ...rest }) => {
+    const user = await requireTokenAdmin(ctx, token);
+    const full = await resolveLooseRecipe(ctx, recipe);
+    const id = await insertDraft(ctx, { ...rest, recipe: full, createdBy: "claude", userId: user._id });
+    return await viewDraft(ctx, (await ctx.db.get(id))!);
+  },
+});
+
+/** Changes a draft: a new recipe replaces the old one whole and makes it "ready" again (needs a new render). */
+export const updateReelDraft = mutation({
+  args: {
+    token,
+    id: v.id("reelDrafts"),
+    recipe: v.optional(v.any()),
+    title: v.optional(v.string()),
+    note: v.optional(v.string()),
+    postId: v.optional(v.union(v.id("socialPosts"), v.null())),
+  },
+  returns: draftView,
+  handler: async (ctx, { token, id, recipe, ...rest }) => {
+    await requireTokenAdmin(ctx, token);
+    const full = recipe === undefined ? undefined : await resolveLooseRecipe(ctx, recipe);
+    await patchDraft(ctx, id, { ...rest, recipe: full }, "claude");
+    return await viewDraft(ctx, (await ctx.db.get(id))!);
+  },
+});
+
+export const getReelDraft = query({
+  args: { token, id: v.id("reelDrafts") },
+  returns: draftView,
+  handler: async (ctx, { token, id }) => {
+    await requireTokenAdmin(ctx, token);
+    const d = await ctx.db.get(id);
+    if (!d) fail("Reel draft not found.");
+    return await viewDraft(ctx, d);
+  },
+});
+
+export const listReelDrafts = query({
+  args: { token, status: v.optional(reelDraftStatus), limit: v.optional(v.number()) },
+  returns: v.array(draftSummary),
+  handler: async (ctx, { token, status, limit }) => {
+    await requireTokenAdmin(ctx, token);
+    const n = Math.min(Math.max(Math.floor(limit ?? 20), 1), 100);
+    const rows = status
+      ? await ctx.db.query("reelDrafts").withIndex("by_status", (q) => q.eq("status", status)).order("desc").take(n)
+      : await ctx.db.query("reelDrafts").withIndex("by_updated").order("desc").take(n);
+    return await Promise.all(rows.map((d) => summarize(ctx, d)));
+  },
+});
+
+/**
+ * Puts a draft's rendered reel into a post (update_post rules: a story needs
+ * a 9:16 reel of 3-60 s; editing an approved/scheduled/failed post sends it
+ * back to waiting). Default: the reel becomes the post's only media;
+ * replaceIndex swaps one item; keepOthers puts it first and keeps the rest
+ * (refused when the post already has 10 items or this reel).
+ * Never publishes.
+ */
+export const attachReel = mutation({
+  args: {
+    token,
+    postId: v.id("socialPosts"),
+    draftId: v.id("reelDrafts"),
+    replaceIndex: v.optional(v.number()),
+    keepOthers: v.optional(v.boolean()),
+    networks: v.optional(v.array(socialNetwork)),
+  },
+  returns: postView,
+  handler: async (ctx, { token, postId, draftId, replaceIndex, keepOthers, networks }) => {
+    await requireTokenAdmin(ctx, token);
+    const draft = await ctx.db.get(draftId);
+    if (!draft) fail("Reel draft not found.");
+    const row = draft.mediaId ? await ctx.db.get(draft.mediaId) : null;
+    if (draft.status !== "rendered" || !row || row.invalid) {
+      fail(
+        draft.mediaId && draft.status !== "rendered"
+          ? "This reel changed since its last render. Ask Giorgi to open it in the Studio (Reels) and render it again."
+          : "This reel is not rendered yet. Ask Giorgi to open it in the Studio (Reels) and render it.",
+      );
+    }
+    const post = await ctx.db.get(postId);
+    if (!post) fail("Post not found.");
+    const item = { kind: "video" as const, url: rowUrl(row), role: "reel", ...(networks?.length ? { networks } : {}) };
+    const current = post.media ?? [];
+    let media;
+    if (replaceIndex !== undefined) {
+      const i = Math.floor(replaceIndex);
+      if (!(i >= 0 && i < current.length)) fail(`The post has ${current.length} media items: replaceIndex is 0-${Math.max(0, current.length - 1)}.`);
+      const old = current[i];
+      media = current.map((m, j) => (j === i ? { ...item, networks: networks?.length ? networks : old.networks } : m));
+    } else if (keepOthers) {
+      if (current.some((m) => m.url === item.url)) fail("This reel is already in the post. Use replaceIndex to move or change it.");
+      if (current.length >= 10) fail(`The post has ${current.length} media items, the most it can have. Use replaceIndex to swap one for the reel.`);
+      media = [item, ...current];
+    } else {
+      media = [item];
+    }
+    const clean = media.map((m) => ({
+      kind: m.kind,
+      url: m.url,
+      ...(m.role ? { role: m.role } : {}),
+      ...(m.networks?.length ? { networks: m.networks } : {}),
+    }));
+    await editPost(ctx, postId, { media: clean });
+    await ctx.db.patch(draftId, { postId });
+    return await viewPost(ctx, (await ctx.db.get(postId))!);
   },
 });
 

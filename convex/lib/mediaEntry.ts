@@ -68,7 +68,7 @@ export const mediaEntryWithDesign = v.object({ ...mediaEntry.fields, design: v.u
 export async function designViewOf(ctx: QueryCtx, row: Doc<"media">): Promise<DesignView | null> {
   const d = row.design;
   if (!d) return null;
-  if (d.kind === "graphic") return d;
+  if (d.kind === "graphic" || d.kind === "reel") return d;
   const listing = d.listingId ? await ctx.db.get(d.listingId) : null;
   return { ...d, listingSlug: listing?.slug ?? null };
 }

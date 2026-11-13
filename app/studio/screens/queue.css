@@ -180,6 +180,9 @@
 .st-qm-add { display: flex; flex-wrap: wrap; gap: 8px; }
 .st-qm-add > .st-btn { flex: 1 1 140px; }
 .st-qm-add > a[aria-disabled="true"] { opacity: .42; pointer-events: none; }
+/* Reel renders waiting to go into the post (ReelOffers). */
+.st-qm-thumb.is-still { cursor: default; }
+.st-qm-thumb.is-still video { pointer-events: none; }
 @media (min-width: 760px) {
   .st-qm-item { grid-template-columns: 64px minmax(0, 1fr) auto auto; grid-template-areas: "thumb tx acts grip"; }
   .st-qm-acts { flex-wrap: nowrap; }

@@ -1,6 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { mediaDesign } from "./lib/design";
+import { captionWord, reelDraftStatus, reelRecipe } from "./lib/reel";
 
 /**
  * Listing lifecycle:
@@ -692,4 +693,50 @@ export default defineSchema({
     jobId: v.optional(v.id("_scheduled_functions")),
     createdAt: v.number(),
   }).index("by_user_done_at", ["userId", "done", "at"]),
+
+  // The Studio's reel editor (convex/reels.ts, docs/reel-editor.md): a reel's
+  // whole edit as a REEL RECIPE, made in the Studio or by Claude (MCP). It is
+  // rendered in the browser; the render's media row keeps the same recipe.
+  //   draft     being edited
+  //   ready     Claude made or changed it: waiting for Giorgi to open and render it
+  //   rendered  the current recipe has a render (renderedUrl / mediaId)
+  // Editing a rendered reel puts it back to draft (the last render is kept).
+  reelDrafts: defineTable({
+    title: v.string(),
+    recipe: reelRecipe,
+    listingIds: v.array(v.id("listings")), // the listings its clips show, first appearance first
+    status: reelDraftStatus,
+    createdBy: v.union(v.literal("studio"), v.literal("claude")),
+    userId: v.optional(v.id("users")),
+    note: v.optional(v.string()), // Claude's note to Giorgi ("for Friday's SOTD post")
+    postId: v.optional(v.id("socialPosts")), // the post it is meant for, if any
+    renderedUrl: v.optional(v.string()),
+    mediaId: v.optional(v.id("media")),
+    renderedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_updated", ["updatedAt"])
+    .index("by_status", ["status", "updatedAt"]),
+
+  // Sound for reels on R2 (social/<folder>/…): ElevenLabs narrations (kind
+  // voice, with the script and word timings for captions) and uploaded music.
+  reelAudio: defineTable({
+    kind: v.union(v.literal("voice"), v.literal("music")),
+    key: v.string(), // R2 object key; the URL follows R2_PUBLIC_URL
+    contentType: v.string(),
+    size: v.number(),
+    durationSec: v.optional(v.number()),
+    title: v.optional(v.string()), // music: the file's name
+    listingId: v.optional(v.id("listings")),
+    script: v.optional(v.string()), // voice
+    voice: v.optional(v.string()), // narrator name
+    // Spoken timing of each word (ElevenLabs with-timestamps); absent on narrations made without it.
+    words: v.optional(v.array(captionWord)),
+    invalid: v.optional(v.boolean()), // failed the R2 check
+    userId: v.optional(v.id("users")),
+    createdAt: v.number(),
+  })
+    .index("by_kind", ["kind", "createdAt"])
+    .index("by_key", ["key"]),
 });
