@@ -15,6 +15,8 @@ import { Segmented, SheetError, Sheet, Switch } from "../ui";
 import { Carousel, type CarouselControl } from "./Carousel";
 import { usePostControls, type PostControls } from "./controls";
 import { NetGlyph } from "./glyphs";
+import { useMediaEditor } from "./MediaEditor";
+import type { PostDetailData } from "./mediaEdit";
 import { useCaptionDraft, type OpenFrom } from "./PostCard";
 import { Preview } from "./Preview";
 import { accountName, formatText, listNames, postTitle, statusKey, statusWord, targetNetworks, type Channels, type Post, type StatusKey } from "./view";
@@ -29,7 +31,7 @@ export function PostDetail({ id, initial, open, onClose, now, channels, from }: 
   const live = useQuery(api.social.get, { id: id as Id<"socialPosts"> });
   const post = live ?? initial;
   if (!post) return null;
-  return <DetailSheet post={post} open={open} onClose={onClose} now={now} channels={channels} from={from} />;
+  return <DetailSheet post={post} detail={live} open={open} onClose={onClose} now={now} channels={channels} from={from} />;
 }
 
 /** The card's picture flies into the sheet's (phones; the sheet slides up meanwhile). */
@@ -64,7 +66,7 @@ function flyGhost(src: HTMLElement, tgt: HTMLElement) {
 
 type Net2 = "instagram" | "facebook";
 
-function DetailSheet({ post, open, onClose, now, channels, from }: { post: Post; open: boolean; onClose: () => void; now: number; channels: Channels; from: OpenFrom | null }) {
+function DetailSheet({ post, detail, open, onClose, now, channels, from }: { post: Post; detail: PostDetailData | undefined; open: boolean; onClose: () => void; now: number; channels: Channels; from: OpenFrom | null }) {
   const c = usePostControls(post, now, { onRejected: onClose });
   const { draft, setDraft, captions, dirty } = useCaptionDraft(post);
   const uid = useId();
@@ -79,6 +81,7 @@ function DetailSheet({ post, open, onClose, now, channels, from }: { post: Post;
   const story = post.placement === "story";
   const title = postTitle(post);
   const busyAny = busy !== null;
+  const media = useMediaEditor({ detail, actions, title, locked: busyAny });
 
   // The shared-element feel: the tapped card's picture flies into place.
   useEffect(() => {
@@ -145,6 +148,8 @@ function DetailSheet({ post, open, onClose, now, channels, from }: { post: Post;
               </p>
             )}
             {post.results.length > 0 && <Results post={post} />}
+
+            {media.section}
 
             <section className="st-queue-sec" aria-labelledby={`${uid}-pvh`}>
               <div className="st-sec-head">
@@ -228,6 +233,7 @@ function DetailSheet({ post, open, onClose, now, channels, from }: { post: Post;
       </Sheet>
 
       {c.sheets}
+      {media.sheets}
       {viewer && (
         <Lightbox
           items={post.media.map((m) => ({ url: m.url, kind: m.kind }))}

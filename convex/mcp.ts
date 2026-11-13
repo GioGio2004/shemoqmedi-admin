@@ -16,17 +16,20 @@ import { fail, slugify } from "./lib/listingHelpers";
 import { mergeSocials, normalizeEmail } from "./lib/contacts";
 import { readPillars } from "./lib/scoring";
 import { TIER_NAMES } from "./lib/awards";
-import { rowUrl } from "./lib/media";
+import { folderOf, mediaDetails, mediaEntry, mediaEntryOf, mediaRole, roleOf } from "./lib/mediaEntry";
+import { mediaDetail } from "./lib/design";
 import { socialPlacement, socialPostKind } from "./schema";
 import {
   approvePost as approve,
   countPosts,
   captionsValidator,
   createPost as create,
+  detailPost,
   editPost,
   listingFacts,
   listPosts,
   mediaValidator,
+  postDetailView,
   postView,
   publishPost as publish,
   readStatus,
@@ -39,7 +42,6 @@ import { channelView, type ChannelView } from "./channels";
 import { audience, deliver, type Message } from "./emails";
 import { ensureListingClaimUrl, newClaimToken } from "./claimLinks";
 import { siteUrl } from "./seo";
-import { MEDIA_ROLES, type MediaRole } from "../lib/mediaRoles";
 
 const token = v.string();
 
@@ -331,14 +333,15 @@ export const socialQueue = query({
   },
 });
 
+/** One post, with `mediaDetails`: each media item's size and design recipe (to edit a graphic: re-render from it). */
 export const getPost = query({
   args: { token, id: v.id("socialPosts") },
-  returns: postView,
+  returns: postDetailView,
   handler: async (ctx, { token, id }) => {
     await requireTokenAdmin(ctx, token);
     const post = await ctx.db.get(id);
     if (!post) fail("Post not found.");
-    return await viewPost(ctx, post);
+    return await detailPost(ctx, post);
   },
 });
 
@@ -501,57 +504,7 @@ export const renderCarousel = action({
 // Media: past renders, reels, screenshots (the media table)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const mediaRole = v.union(...MEDIA_ROLES.map((r) => v.literal(r)));
-
-/**
- * What a media row is, from where it was stored:
- *   /social/graphics/…               graphic   (render_graphic, Studio renders)
- *   /social/carousels/<label>-<id>/  carousel  (render_carousel slides)
- *   /social/<slug>/<slug>-reel-….mp4 reel      (built on the Voiceover page, R2)
- *   /listings/<slug>/…               screenshot (image) or preview (video)
- */
-export function roleOf(row: Pick<Doc<"media">, "filePath" | "kind">): MediaRole {
-  const path = row.filePath;
-  if (path.startsWith("/social/graphics/")) return "graphic";
-  if (path.startsWith("/social/carousels/")) return "carousel";
-  if (/^\/social\/[a-z0-9-]+\/[a-z0-9_-]*-reel-[a-z0-9_-]+\.mp4$/.test(path) && row.kind === "video") return "reel";
-  if (path.startsWith("/listings/")) return row.kind === "video" ? "preview" : "screenshot";
-  return "other";
-}
-
-/** The folder of a file path ("/social/graphics/a.jpg" → "/social/graphics"). */
-export function folderOf(filePath: string) {
-  const cut = filePath.lastIndexOf("/");
-  return cut > 0 ? filePath.slice(0, cut) : "/";
-}
-
-const mediaEntry = v.object({
-  id: v.id("media"),
-  kind: v.union(v.literal("image"), v.literal("video")),
-  role: mediaRole,
-  url: v.string(),
-  folder: v.string(),
-  contentType: v.string(),
-  size: v.number(),
-  width: v.union(v.number(), v.null()),
-  height: v.union(v.number(), v.null()),
-  createdAt: v.number(),
-});
-
-function mediaEntryOf(row: Doc<"media">) {
-  return {
-    id: row._id,
-    kind: row.kind,
-    role: roleOf(row),
-    url: rowUrl(row),
-    folder: folderOf(row.filePath),
-    contentType: row.contentType,
-    size: row.size,
-    width: row.width ?? null,
-    height: row.height ?? null,
-    createdAt: row.createdAt,
-  };
-}
+export { folderOf, roleOf };
 
 /** How far back list_media looks (newest rows first); the media table has no kind or role index. */
 const MEDIA_SCAN = 2000;
@@ -582,6 +535,20 @@ export const listMedia = query({
       )
       .slice(0, n)
       .map(mediaEntryOf);
+  },
+});
+
+/** At most this many URLs per getDesigns call. */
+const DESIGNS_MAX = 50;
+
+/** Size and design recipe of each URL, in order (nulls for a file we don't hold, or a render from before recipes). */
+export const getDesigns = query({
+  args: { token, urls: v.array(v.string()) },
+  returns: v.array(mediaDetail),
+  handler: async (ctx, { token, urls }) => {
+    await requireTokenAdmin(ctx, token);
+    if (urls.length > DESIGNS_MAX) fail(`At most ${DESIGNS_MAX} URLs at once.`);
+    return await mediaDetails(ctx, urls);
   },
 });
 

@@ -100,6 +100,12 @@ Your daily loop when Giorgi asks "what's waiting?":
 4. Show him every caption in full and the rendered image URLs it will use, then ask. Only call approve_post after he says yes to that exact post. If he asks for changes, edit and show again.
 5. Approving publishes: at once, or at the post's publish time (publishAt), to every network that has a caption and a connected account. publish_post does it in one step (now, or at a time Giorgi gives); unschedule_post takes a scheduled post back to waiting. Check list_channels when unsure what is connected. Afterwards get_post shows each network's result and link; a failed network can be sent again with retry_post (networks already sent are never sent twice).
 
+Editing a drafted post (Giorgi asks to change a post you or he made, e.g. "make the graphic darker", "change the headline", "swap the second slide"): never start over and never publish while editing.
+1. get_post. Its mediaDetails[i] describes media[i]: size and design, the recipe the graphic was rendered from (null for screenshots, uploads and renders made before recipes were kept). get_designs reads the recipe of any URL, e.g. from list_media.
+2. Change the recipe and render again with the same inputs plus the change. design.kind "graphic": render_graphic with its template, format, style, palette, glass, fields and imageUrls. design.kind "carousel": render_carousel with listingSlug (design.listingSlug), facts, palette, style and story; it renders the whole set again (a carousel's slides share design.setId; design.slideIndex is the slide's place in it). When design is null, rebuild it as best you can from the post's facts (template from the post kind, the listing's screenshot as the image) and tell Giorgi it is a redesign.
+3. update_post with the whole media list: the new URL in place of the old item (keep its role and networks), or the carousel's new slides in place of the old set (and the new hook slide for Threads). Keep every other item as it was. Captions stay unless he asked to change them.
+4. Show him the new image URLs and ask again. Editing an approved, scheduled or failed post sends it back to waiting (a scheduled publish is cancelled): say so before you change one, and only approve or publish after he says yes again.
+
 Stories: a post with placement "story" (set on create_post or update_post) is exactly one 9:16 image (render_graphic with format story, in any style) or video (find_reel finds a listing's latest reel). It goes to Instagram and the Facebook Page as a story; Threads and LinkedIn have no stories and are skipped. Stories show no text, so a short caption for instagram and/or facebook only picks where it goes. list_templates, list_palettes, list_styles and list_media help pick and reuse graphics.
 
 Voice and rules:
@@ -288,7 +294,8 @@ const handler = createMcpHandler(
       "get_post",
       {
         title: "Get post",
-        description: "One social post: kind, status, facts, captions, media, publish time, note, and per-network publish results (sent/failed/skipped, links to the live posts, errors).",
+        description:
+          "One social post: kind, status, facts, captions, media, publish time, note, per-network publish results (sent/failed/skipped, links to the live posts, errors), and mediaDetails: for each media item in order its size and design recipe (how the graphic was rendered: re-render from it to edit the graphic; null when there is none).",
         inputSchema: z.object({ id: postId }),
       },
       async (args, ctx) => run(() => convex.query(api.mcp.getPost, { ...auth(ctx), id: args.id as Id<"socialPosts"> })),
@@ -299,7 +306,7 @@ const handler = createMcpHandler(
       {
         title: "Update post",
         description:
-          "Save captions, media, publish time or a note on a post that isn't published yet. Editing an approved, scheduled or failed post sends it back to waiting (a scheduled publish is cancelled). publishAt: ISO date-time, Tbilisi time when no offset; null = as soon as approved.",
+          "Save captions, media, publish time or a note on a post that isn't published yet. Never publishes. media replaces the whole list: to edit a graphic, send the list with the re-rendered URL in place of the old item (keep the others, their roles and networks). Editing an approved, scheduled or failed post sends it back to waiting (a scheduled publish is cancelled). A story needs exactly one 9:16 image or a 3-60 s video. publishAt: ISO date-time, Tbilisi time when no offset; null = as soon as approved.",
         inputSchema: z.object({
           id: postId,
           captions: captions.optional(),
@@ -449,6 +456,17 @@ const handler = createMcpHandler(
     );
 
     server.registerTool(
+      "get_designs",
+      {
+        title: "Get designs",
+        description:
+          "For image or video URLs (e.g. from list_media or a post's media): each one's size and design recipe, in order, or nulls for a file we don't hold. design.kind graphic: render_graphic's arguments; design.kind carousel: render_carousel's (listingSlug, facts, palette, style, story) plus slideIndex, slideName, total and setId. Re-render from it with changes to edit a graphic.",
+        inputSchema: z.object({ urls: z.array(z.string().url()).min(1).max(50) }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.getDesigns, { ...auth(ctx), urls: args.urls })),
+    );
+
+    server.registerTool(
       "find_reel",
       {
         title: "Find reel",
@@ -464,7 +482,7 @@ const handler = createMcpHandler(
       {
         title: "Render graphic",
         description:
-          "Render one post graphic (JPEG, uploaded to ImageKit) and return its public URL and size, to attach with update_post (kind image, role graphic). list_templates shows every template's fields and every format. For an Instagram feed post use ig_portrait or square (it takes 4:5 to 1.91:1; story, reel_cover and link are padded with white there); for a story post use story. fields are the template's texts, e.g. { tier: \"SOTD\", title, studio, date, awardSlug, url } for award; imageUrls the template's images in order (award: [screenshot, badge], others: [screenshot]).",
+          "Render one post graphic (JPEG, uploaded to ImageKit) and return its public URL and size, to attach with update_post (kind image, role graphic). Its recipe (these arguments) is kept with the file: get_post / get_designs show it as design, so the graphic can be edited later by rendering again with changes. list_templates shows every template's fields and every format. For an Instagram feed post use ig_portrait or square (it takes 4:5 to 1.91:1; story, reel_cover and link are padded with white there); for a story post use story. fields are the template's texts, e.g. { tier: \"SOTD\", title, studio, date, awardSlug, url } for award; imageUrls the template's images in order (award: [screenshot, badge], others: [screenshot]).",
         inputSchema: z.object({
           template: z.enum(TEMPLATE_ENUM),
           format: z.enum(FORMAT_ENUM),
@@ -483,7 +501,7 @@ const handler = createMcpHandler(
       {
         title: "Render carousel",
         description:
-          "Render a listing's storytelling carousel (6-8 JPEG slides, 1080x1350) in a style from its facts, screenshots, award and jury, and return the slide URLs in order (the first is the hook slide) with the slide names. Attach the slides with update_post (networks instagram, facebook, linkedin) and the hook slide for Threads. facts override or supply texts (title, studio, url, tagline, kicker, date, tier, awardSlug, score, quote, juror, role, cta, ...); story adds chips/notes for the detail slides, the last slide's cta, glass, and screenshot overrides.",
+          "Render a listing's storytelling carousel (6-8 JPEG slides, 1080x1350) in a style from its facts, screenshots, award and jury, and return the slide URLs in order (the first is the hook slide) with the slide names. Each slide keeps its recipe (these arguments, its place in the set and the set id): get_post shows it as design, so the carousel can be edited by rendering it again with changes. Attach the slides with update_post (networks instagram, facebook, linkedin) and the hook slide for Threads. facts override or supply texts (title, studio, url, tagline, kicker, date, tier, awardSlug, score, quote, juror, role, cta, ...); story adds chips/notes for the detail slides, the last slide's cta, glass, and screenshot overrides.",
         inputSchema: z.object({
           listingSlug: slug.optional(),
           facts: z.record(z.string(), z.string()).optional(),

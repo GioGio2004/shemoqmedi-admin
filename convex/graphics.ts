@@ -9,6 +9,7 @@ import { readPillars } from "./lib/scoring";
 import { signUpload, vUploadAuth } from "./media";
 import { FORMATS, STYLES, TEMPLATES, graphicsQuery, isFormat, isStyle, isTemplate } from "../lib/graphics/spec";
 import { PALETTE_IDS } from "../lib/palettes";
+import type { CarouselStory, GraphicDesign, MediaDesign } from "./lib/design";
 
 // Social post graphics. The pictures are drawn by the admin app's
 // /api/graphics routes (satori + sharp; templates in lib/graphics); these
@@ -23,6 +24,10 @@ import { PALETTE_IDS } from "../lib/palettes";
 // Called by the MCP tools render_graphic / render_carousel (mcp.ts) and by
 // the Studio (renderForPost, and finalUploadAuth + media.registerSocial for a
 // JPEG the browser uploads itself).
+//
+// Every render records its recipe on its media row (media.design,
+// convex/lib/design.ts): what it was made from, so it can be opened again and
+// edited (docs/post-editing.md).
 
 const FOLDER = "/social/graphics";
 const GLASS = ["frost", "liquid", "tint"];
@@ -98,7 +103,12 @@ export function unpackSlides(body: ArrayBuffer) {
   return { slides, width: header.width, height: header.height };
 }
 
-async function store(ctx: ActionCtx, body: Blob, fileName: string, folder: string, tags: string[], width: number, height: number) {
+/** `o` without its undefined values (stored recipes hold only what was given). */
+function defined<T extends Record<string, unknown>>(o: T): T {
+  return Object.fromEntries(Object.entries(o).filter(([, x]) => x !== undefined)) as T;
+}
+
+async function store(ctx: ActionCtx, body: Blob, fileName: string, folder: string, tags: string[], width: number, height: number, design: MediaDesign) {
   const file = await uploadToImageKitFromServer(body, { fileName, folder, tags: ["social", ...tags] });
   const mediaId: Id<"media"> = await ctx.runMutation(internal.media.registerInternal, {
     fileId: file.fileId,
@@ -109,6 +119,7 @@ async function store(ctx: ActionCtx, body: Blob, fileName: string, folder: strin
     size: file.size,
     width: file.width ?? width,
     height: file.height ?? height,
+    design,
   });
   return { url: file.url, mediaId };
 }
@@ -144,7 +155,8 @@ async function renderOne(ctx: ActionCtx, { template, format, palette, fields = {
   const label = fields.title || fields.headline || fields.site || template;
   const { width, height } = FORMATS[format];
   const name = `shemoqmedi-${slugify(template)}-${slugify(label, "graphic")}-${format}.jpg`;
-  const saved = await store(ctx, jpeg, name, FOLDER, [template, format, palette, style ?? "glass"], width, height);
+  const design: GraphicDesign = defined({ kind: "graphic" as const, template, format, style: style ?? "glass", palette, glass, fields, imageUrls });
+  const saved = await store(ctx, jpeg, name, FOLDER, [template, format, palette, style ?? "glass"], width, height, design);
   return { ...saved, width, height };
 }
 
@@ -323,8 +335,22 @@ async function renderStory(ctx: ActionCtx, { listingId, facts = {}, palette, sty
 
   const label = slugify(q.get("title") ?? "carousel", "carousel");
   const folder = `/social/carousels/${label}-${Date.now().toString(36)}`;
+  const recipe = {
+    kind: "carousel" as const,
+    ...(listingId ? { listingId } : {}),
+    palette,
+    style: style ?? "glass",
+    facts,
+    story: defined(story) as CarouselStory,
+    total: slides.length,
+    setId: folder,
+  };
   const saved = await mapLimit(slides, CAROUSEL_CONCURRENCY, ({ name, blob }, i) =>
-    store(ctx, blob, `shemoqmedi-${label}-${String(i + 1).padStart(2, "0")}-${name}.jpg`, folder, ["carousel", name, palette, style ?? "glass"], width, height),
+    store(ctx, blob, `shemoqmedi-${label}-${String(i + 1).padStart(2, "0")}-${name}.jpg`, folder, ["carousel", name, palette, style ?? "glass"], width, height, {
+      ...recipe,
+      slideIndex: i,
+      slideName: name,
+    }),
   );
   return { urls: saved.map((s) => s.url), mediaIds: saved.map((s) => s.mediaId), slides: slides.map((s) => s.name), width, height };
 }
@@ -368,12 +394,15 @@ export const renderCarousel = internalAction({
  * Admin: the final graphic for a post (the Studio's "Render final"). The
  * same arguments as render; with `carousel: true` the storytelling carousel
  * instead, of `listingId` and/or `fields` (as facts), with `imageUrls` as its
- * screenshots when given. Always a list: one URL per image.
+ * screenshots when given. `story` (carousel only) carries a carousel
+ * recipe's other options (chips, notes, cta, mobile) when one is rendered
+ * again; `glass` and `imageUrls` win over its glass and shots. Always a
+ * list: one URL per image. Each image's recipe is stored with it (media.design).
  */
 export const renderForPost = action({
-  args: { ...renderArgs, carousel: v.optional(v.boolean()), listingId: v.optional(v.id("listings")) },
+  args: { ...renderArgs, carousel: v.optional(v.boolean()), listingId: v.optional(v.id("listings")), story: v.optional(storyOptions) },
   returns: v.object({ urls: v.array(v.string()), mediaIds: v.array(v.id("media")), width: v.number(), height: v.number() }),
-  handler: async (ctx, { carousel, listingId, ...args }): Promise<{ urls: string[]; mediaIds: Id<"media">[]; width: number; height: number }> => {
+  handler: async (ctx, { carousel, listingId, story: options, ...args }): Promise<{ urls: string[]; mediaIds: Id<"media">[]; width: number; height: number }> => {
     await ctx.runQuery(internal.users.assertAdmin, {});
     if (carousel) {
       const story = await renderStory(ctx, {
@@ -381,7 +410,7 @@ export const renderForPost = action({
         facts: args.fields,
         palette: args.palette,
         style: args.style,
-        story: { glass: args.glass, ...(args.imageUrls?.length ? { shots: args.imageUrls } : {}) },
+        story: { ...options, ...(args.glass !== undefined ? { glass: args.glass } : {}), ...(args.imageUrls?.length ? { shots: args.imageUrls } : {}) },
       });
       return { urls: story.urls, mediaIds: story.mediaIds, width: story.width, height: story.height };
     }

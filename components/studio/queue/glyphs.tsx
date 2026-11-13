@@ -94,3 +94,25 @@ export const PlayGlyph = (p: P) => (
     <path d="M8.5 6.5v11l9-5.5z" fill="currentColor" stroke="none" />
   </Svg>
 );
+
+// The media editor's moves (earlier = up the list, later = down) and its drag handle.
+export const EarlierGlyph = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 18.5V5.5M6.5 11 12 5.5l5.5 5.5" />
+  </Svg>
+);
+export const LaterGlyph = (p: P) => (
+  <Svg {...p}>
+    <path d="M12 5.5v13M6.5 13l5.5 5.5 5.5-5.5" />
+  </Svg>
+);
+export const GripGlyph = (p: P) => (
+  <Svg {...p}>
+    <circle cx="9" cy="7" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="7" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="12" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="12" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="17" r="1.2" fill="currentColor" stroke="none" />
+    <circle cx="15" cy="17" r="1.2" fill="currentColor" stroke="none" />
+  </Svg>
+);

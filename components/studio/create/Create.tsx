@@ -25,6 +25,9 @@ import {
   outputAllowed,
   renderArgs,
   renderKey,
+  shotFor,
+  shownCarouselFields,
+  shownFields,
   templatesFor,
   type Design,
   type Fields,
@@ -35,13 +38,33 @@ import {
 } from "@/lib/studio/create";
 import { draftCaptions, storyCaption, type DraftFacts } from "@/lib/studio/drafts";
 import { createDraftStore } from "@/lib/studio/persist";
+import {
+  appendItems,
+  carouselCanRender,
+  describeUpdate,
+  editBlockReason,
+  editDraftId,
+  editFormat,
+  editOutputAllowed,
+  editRenderArgs,
+  editResetText,
+  postTitle,
+  queueUrlFor,
+  replaceItem,
+  sameUrls,
+  targetLabel,
+  targetProblem,
+  type Carry,
+} from "@/lib/studio/postEdit";
+import { postActions } from "@/lib/studio/queue";
 import { formatTbilisi } from "@/lib/studio/time";
 import { useAmbient } from "../Ambient";
 import { CaptionEditor, StoryNetworks } from "../CaptionEditor";
-import { useMedia } from "../hooks";
+import { useMedia, useNow } from "../hooks";
 import { CheckIcon } from "../icons";
 import { TimeSheet } from "../TimeSheet";
 import { ConfirmSheet, PageHead, Segmented } from "../ui";
+import { EditBanner, type EditMode } from "./EditParts";
 import { FinalStep, type Rendered } from "./FinalStep";
 import { AwardPicker, ListingPicker, type AwardRow } from "./Pickers";
 import { PaletteStrip, PreviewStage, StylePicker, type Look } from "./Stage";
@@ -53,6 +76,12 @@ import { ShotPicker, TextField } from "./TextFields";
 // draft. Nothing is sent to the server while designing. The work so far is
 // kept on this device (lib/studio/persist.ts) until it becomes a post, so
 // leaving Create, a reload or iOS discarding the app loses nothing.
+//
+// Edit mode (`edit`, from /create?post=<id>&item=<i> or &mode=add; see
+// EditCreate.tsx and lib/studio/postEdit.ts): the same steps start from the
+// image's design recipe, and "Update post" (instead of captions and
+// publish) renders into the post's media with social.update. Its draft is
+// kept under its own key, never over the normal Create draft.
 
 /** Fields that come from the chosen listing (a new pick replaces any typed over them). */
 const LISTING_KEYS = ["title", "studio", "tagline", "url", "site", "quote", "score"];
@@ -76,10 +105,16 @@ type CreateDraft = {
   rendered: Rendered | null;
   captions: Captions | null;
   storyCaps: Captions | null;
+  /** Edit mode: the post's media URLs the edit started from (social.update refuses it over newer media). */
+  base: string[] | null;
+  /** Edit mode: the recipe's inputs Create has no control for. */
+  carry: Carry | null;
 };
 
 /** One kept draft per way into Create (?output=story starts its own). */
 const createDrafts = createDraftStore<CreateDraft>("create");
+/** Edit mode's drafts, one per post item (or adding to a post): "create-edit:<postId>:<item|add>". */
+const editDrafts = createDraftStore<CreateDraft>("create-edit");
 
 function freshDraft(output: Output): CreateDraft {
   return {
@@ -98,10 +133,32 @@ function freshDraft(output: Output): CreateDraft {
     rendered: null,
     captions: null,
     storyCaps: null,
+    base: null,
+    carry: null,
   };
 }
 
-const FORMAT_LABEL: Partial<Record<FormatId, string>> = { ig_portrait: "Portrait 4:5", square: "Square", link: "Link 1.91:1" };
+/** Edit mode's start: the recipe (or the post) as Create's choices, from the post's media as it is now. */
+function seededDraft(edit: EditMode): CreateDraft {
+  const s = edit.seed;
+  return {
+    ...freshDraft(s.output),
+    source: s.source,
+    template: s.template,
+    format: s.format,
+    style: s.style,
+    palette: s.palette,
+    glass: s.glass,
+    edits: s.edits,
+    carouselEdits: s.carouselEdits,
+    listingId: s.listingId as Id<"listings"> | null,
+    shot: s.shot,
+    base: edit.post.media.map((m) => m.url),
+    carry: s.carry,
+  };
+}
+
+const FORMAT_LABEL: Partial<Record<FormatId, string>> = { ig_portrait: "Portrait 4:5", square: "Square", link: "Link 1.91:1", story: "Tall 9:16", reel_cover: "Reel cover" };
 
 /** One step: a glass section with its large number; `done` turns the number into a check. */
 function Step({ n, title, aside, done, children }: { n: string; title: string; aside?: React.ReactNode; done?: boolean; children: React.ReactNode }) {
@@ -127,14 +184,17 @@ function Step({ n, title, aside, done, children }: { n: string; title: string; a
   );
 }
 
-export function Create({ initialOutput }: { initialOutput: Output }) {
+export function Create({ initialOutput, edit }: { initialOutput: Output; edit?: EditMode }) {
   const router = useRouter();
   const wide = useMedia("(min-width: 1000px)");
 
   // Where the last visit left off (the page mounts after the admin gate, so this is read on the client only).
-  const [kept] = useState(() => createDrafts.get(initialOutput));
+  // Edit mode keeps its own draft per post item, apart from the normal one.
+  const draftStore = edit ? editDrafts : createDrafts;
+  const draftId = edit ? editDraftId(edit.target) : initialOutput;
+  const [kept] = useState(() => draftStore.get(draftId));
   const [restored, setRestored] = useState(kept !== null);
-  const start = { ...freshDraft(initialOutput), ...kept };
+  const start = { ...(edit ? seededDraft(edit) : freshDraft(initialOutput)), ...kept };
   const [source, setSource] = useState<Source>(start.source);
   const [output, setOutput] = useState<Output>(start.output);
   const [template, setTemplate] = useState<TemplateId>(start.template);
@@ -151,17 +211,26 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
   const [rendering, setRendering] = useState<number | null>(null);
   const [captions, setCaptions] = useState<Captions | null>(start.captions);
   const [storyCaps, setStoryCaps] = useState<Captions | null>(start.storyCaps);
-  const [sheet, setSheet] = useState<"publish" | "schedule" | null>(null);
-  const [saving, setSaving] = useState<"now" | "schedule" | "draft" | null>(null);
+  const [base, setBase] = useState<string[] | null>(start.base);
+  const [carry, setCarry] = useState<Carry | null>(start.carry);
+  const [sheet, setSheet] = useState<"publish" | "schedule" | "update" | null>(null);
+  const [saving, setSaving] = useState<"now" | "schedule" | "draft" | "update" | null>(null);
 
   // Kept on this device as it changes, until it becomes a post (finish clears it).
   const finished = useRef(false);
-  const snapshot = JSON.stringify({ source, output, template, format, style, palette, glass, edits, carouselEdits, listingId, award, shot, rendered, captions, storyCaps } satisfies CreateDraft);
+  const snapshot = JSON.stringify({ source, output, template, format, style, palette, glass, edits, carouselEdits, listingId, award, shot, rendered, captions, storyCaps, base, carry } satisfies CreateDraft);
   useEffect(() => {
-    if (!finished.current) createDrafts.set(initialOutput, JSON.parse(snapshot) as CreateDraft);
-  }, [initialOutput, snapshot]);
+    if (!finished.current) draftStore.set(draftId, JSON.parse(snapshot) as CreateDraft);
+  }, [draftStore, draftId, snapshot]);
 
   function startOver() {
+    if (edit) {
+      // From the post as it is now: a new seed and base, from the same media (EditStart remounts this page).
+      finished.current = true;
+      editDrafts.set(draftId, null);
+      edit.restart();
+      return;
+    }
     const d = freshDraft(initialOutput);
     setSource(d.source);
     setOutput(d.output);
@@ -178,6 +247,8 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
     setRendered(d.rendered);
     setCaptions(d.captions);
     setStoryCaps(d.storyCaps);
+    setBase(d.base);
+    setCarry(d.carry);
     setRestored(false);
   }
 
@@ -185,13 +256,21 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
   const renderForPost = useAction(api.graphics.renderForPost);
   const createPost = useMutation(api.social.create);
   const publishPost = useMutation(api.social.publish);
+  const updatePost = useMutation(api.social.update);
+  const now = useNow();
+  const [updated, setUpdated] = useState(false);
 
   // ── What the design is made of ────────────────────────────────────────
   const listing = listingId && detail && detail.id === listingId ? detail : null;
-  const shots = useMemo(() => (listing ? [listing.coverUrl, ...listing.galleryUrls].filter((u): u is string => !!u) : []), [listing]);
-  const shotUrl = shot ?? shots[0] ?? null;
+  const seedShot = edit && edit.seed.listingId === listingId ? edit.seed.shot : null;
+  const shots = useMemo(() => {
+    const own = listing ? [listing.coverUrl, ...listing.galleryUrls].filter((u): u is string => !!u) : [];
+    // Editing: the recipe's own screenshot stays on offer (it may not be one of the listing's now).
+    return seedShot && !own.includes(seedShot) ? [seedShot, ...own] : own;
+  }, [listing, seedShot]);
+  const shotUrl = shotFor(shot, shots);
   const effectiveTemplate: TemplateId = output === "carousel" ? (source === "award" ? "award" : "new_listing") : template;
-  const effectiveFormat = formatFor(output, format);
+  const effectiveFormat = edit ? editFormat(output, format, carry) : formatFor(output, format);
 
   /** Facts the fields start from: the template's defaults, then the listing's and award's. */
   const baseFields = useMemo(() => {
@@ -212,13 +291,8 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
   }, [listing, award]);
 
   /** The template's fields as shown: typed over the facts, over the template's defaults. */
-  const fields = useMemo(() => {
-    const spec = TEMPLATES[effectiveTemplate];
-    const out: Fields = {};
-    for (const f of spec.fields) out[f.key] = edits[effectiveTemplate]?.[f.key] ?? baseFields[f.key] ?? (spec.defaults as Fields)[f.key] ?? "";
-    return out;
-  }, [effectiveTemplate, edits, baseFields]);
-  const carouselFields: Fields = Object.fromEntries(CAROUSEL_FIELDS.map((f) => [f.key, carouselEdits[f.key] ?? (f.key === "quote" ? (listing?.juryNote ?? "") : "")]));
+  const fields = useMemo(() => shownFields(effectiveTemplate, edits[effectiveTemplate], baseFields), [effectiveTemplate, edits, baseFields]);
+  const carouselFields: Fields = shownCarouselFields(carouselEdits, listing?.juryNote);
 
   // A stable object per design, so the palette strip and style cards redraw only when it changes.
   const look: Look = useMemo(
@@ -227,9 +301,10 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
   );
 
   const design: Design = { source, output, template: effectiveTemplate, format: effectiveFormat, style, palette, glass, fields, carouselFields, shot: shotUrl, listingId };
-  const key = renderKey(design);
+  // Edit mode: what it really renders (a kept reel cover format, the carried texts), so any change marks a render stale.
+  const key = edit ? JSON.stringify(editRenderArgs(design, carry)) : renderKey(design);
   const stale = !!rendered && rendered.key !== key;
-  const carouselBlocked = output === "carousel" && !listingId;
+  const carouselBlocked = output === "carousel" && (edit ? !carouselCanRender(design, carry) : !listingId);
 
   // ── Captions ──────────────────────────────────────────────────────────
   const facts: DraftFacts = {
@@ -288,7 +363,7 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
   // ── Server steps ──────────────────────────────────────────────────────
   async function renderFinal() {
     if (carouselBlocked) return;
-    const args = renderArgs(design);
+    const args = edit ? editRenderArgs(design, carry) : renderArgs(design);
     const startedFor = key;
     setRendering(Date.now());
     try {
@@ -342,6 +417,60 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
   const strip = <PaletteStrip look={look} onPick={setPalette} />;
   const { width: fw, height: fh } = FORMATS[effectiveFormat];
   const fresh = !!rendered && !stale && rendering === null;
+
+  // ── Edit mode: what Update post sends ─────────────────────────────────
+  // The post is live (social.get): a publish run, a status change or new media elsewhere shows here at once.
+  const editActions = edit ? postActions(edit.post, now) : null;
+  const changedSince = !!edit && !!base && !updated && saving !== "update" && !sameUrls(base, edit.post.media.map((m) => m.url));
+  const editProblem =
+    !edit || !editActions || updated
+      ? null
+      : (editBlockReason(edit.post, editActions) ??
+        (changedSince ? "This post's images changed since you started. Start over to edit what it has now." : targetProblem(edit.post, edit.target)));
+  let nextMedia: ReturnType<typeof replaceItem> | null = null;
+  if (edit && fresh && rendered && !editProblem) {
+    const rendersAs = output === "carousel" ? "carousel" : "graphic";
+    try {
+      nextMedia =
+        edit.target.item === null
+          ? appendItems(edit.post.media, rendered.urls, rendersAs)
+          : replaceItem(edit.post.media, edit.post.mediaDetails, edit.target.item, rendered.urls, rendersAs);
+    } catch {
+      nextMedia = null;
+    }
+  }
+  const tooMany = !!nextMedia && nextMedia.length > 10;
+  const updateReady = !!nextMedia && !tooMany && saving === null;
+
+  async function saveEdit() {
+    if (!edit || !nextMedia) return;
+    setSaving("update");
+    try {
+      // Only the media change: captions, time and placement stay as they are. Never publishes.
+      await updatePost({ id: edit.post.id, media: nextMedia, baseMedia: base ?? undefined });
+      finished.current = true;
+      setUpdated(true);
+      editDrafts.set(draftId, null);
+      showAlert(editActions?.editResets ? "Post updated. It is waiting for your approval again." : "Post updated.", "success");
+      // Replace, not push: Back from the post sheet must not land in this edit again.
+      router.replace(queueUrlFor(edit.post.id));
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  function onUpdate() {
+    if (editActions?.editResets) setSheet("update");
+    else saveEdit().catch(showError);
+  }
+
+  /** Back to the post, nothing saved (the edit draft goes too). */
+  function cancelEdit() {
+    if (!edit) return;
+    finished.current = true;
+    editDrafts.set(draftId, null);
+    router.replace(queueUrlFor(edit.post.id));
+  }
   const outputHint = OUTPUTS.find((o) => o.id === output)?.hint;
   const carouselNote = !outputAllowed("carousel", source) ? " · a carousel needs a listing" : "";
 
@@ -373,14 +502,21 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
           label="Output"
           value={output}
           onChange={setOutput}
-          options={OUTPUTS.map((o) => ({ value: o.id, label: o.label, disabled: !outputAllowed(o.id, source) }))}
+          options={OUTPUTS.map((o) => ({ value: o.id, label: o.label, disabled: !outputAllowed(o.id, source) || (!!edit && !editOutputAllowed(o.id, edit.post.placement)) }))}
         />
         <p className="st-note">
           {outputHint}
           {carouselNote}
         </p>
         {output === "single" && (
-          <Segmented kind="radio" size="sm" label="Format" value={effectiveFormat} onChange={setFormat} options={FEED_FORMATS.map((f) => ({ value: f, label: FORMAT_LABEL[f] ?? f }))} />
+          <Segmented
+            kind="radio"
+            size="sm"
+            label="Format"
+            value={effectiveFormat}
+            onChange={setFormat}
+            options={[...FEED_FORMATS, ...(edit && carry?.kind === "graphic" && carry.format ? [carry.format] : [])].map((f) => ({ value: f, label: FORMAT_LABEL[f] ?? f }))}
+          />
         )}
         {output !== "carousel" && (
           <div className="st-scroll-x st-create-chips" role="group" aria-label="Template">
@@ -424,67 +560,106 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
         {carouselBlocked && <p className="st-note">A carousel needs a listing.</p>}
       </Step>
 
-      <Step
-        n="06"
-        title={story ? "Where" : "Captions"}
-        aside={networks.length ? networks.map((n) => NETWORK_LABEL[n]).join(" · ") : "No network yet"}
-        done={networks.length > 0 && captionsFit(finalCaptions)}
-      >
-        {story ? (
-          <StoryNetworks value={storyCaptions} onChange={setStoryCaps} label={label} />
-        ) : (
-          <>
-            <CaptionEditor value={feedCaptions} onChange={setCaptions} drafts={drafts} />
-            {captions && (
-              <button type="button" className="st-btn st-btn-quiet st-btn-sm st-create-start" onClick={() => setCaptions(null)}>
-                Back to the drafts
-              </button>
+      {edit ? (
+        <Step n="06" title="Update post" aside={targetLabel(edit.post, edit.target)} done={updated}>
+          <p className="st-create-summary" data-ready={updateReady || undefined} aria-live="polite">
+            {editProblem ? (
+              <span className="st-danger-text">{editProblem}</span>
+            ) : !rendered ? (
+              "Render the final image first."
+            ) : stale ? (
+              "Render again: the design changed."
+            ) : rendering !== null ? (
+              "Rendering…"
+            ) : tooMany ? (
+              <span className="st-danger-text">A post holds at most 10 images or videos.</span>
+            ) : nextMedia ? (
+              <>
+                {describeUpdate(edit.post.media, edit.post.mediaDetails, edit.target, rendered.urls.length)}
+                {editActions?.editResets && ` ${editResetText(edit.post.status)}`}
+              </>
+            ) : (
+              "Render the final image first."
             )}
-          </>
-        )}
-      </Step>
-
-      <Step n="07" title="Publish">
-        <p className="st-create-summary" data-ready={ready || undefined} aria-live="polite">
-          {!rendered ? (
-            "Render the final image first."
-          ) : stale ? (
-            "Render again: the design changed."
-          ) : networks.length === 0 ? (
-            "Give at least one network a caption."
-          ) : !captionsFit(finalCaptions) ? (
-            <span className="st-danger-text">A caption is over its network&apos;s limit.</span>
-          ) : (
-            <>
-              {story ? "A story" : output === "carousel" ? `A carousel of ${rendered.urls.length}` : "One image"} to <strong>{networks.map((n) => NETWORK_LABEL[n]).join(", ")}</strong>.
-            </>
-          )}
-        </p>
-        <div className="st-actions st-create-publish">
-          <button type="button" className="st-btn" disabled={!ready || saving !== null} data-busy={saving === "now"} onClick={() => setSheet("publish")}>
-            Publish now
-          </button>
-          <button type="button" className="st-btn st-btn-ghost" disabled={!ready || saving !== null} data-busy={saving === "schedule"} onClick={() => setSheet("schedule")}>
-            Schedule
-          </button>
-          <button
-            type="button"
-            className="st-btn st-btn-quiet st-span"
-            disabled={!rendered || stale || rendering !== null || saving !== null}
-            data-busy={saving === "draft"}
-            onClick={() => finish("draft").catch(() => {})}
+          </p>
+          <div className="st-actions st-create-publish">
+            <button type="button" className="st-btn" disabled={!updateReady} data-busy={saving === "update"} onClick={onUpdate}>
+              Update post
+            </button>
+            <button type="button" className="st-btn st-btn-ghost" disabled={saving !== null} onClick={changedSince ? startOver : cancelEdit}>
+              {changedSince ? "Start over" : "Cancel"}
+            </button>
+          </div>
+          <p className="st-note">Saves the image to the post. Nothing is published.</p>
+        </Step>
+      ) : (
+        <>
+          <Step
+            n="06"
+            title={story ? "Where" : "Captions"}
+            aside={networks.length ? networks.map((n) => NETWORK_LABEL[n]).join(" · ") : "No network yet"}
+            done={networks.length > 0 && captionsFit(finalCaptions)}
           >
-            Save as draft
-          </button>
-        </div>
-      </Step>
+            {story ? (
+              <StoryNetworks value={storyCaptions} onChange={setStoryCaps} label={label} />
+            ) : (
+              <>
+                <CaptionEditor value={feedCaptions} onChange={setCaptions} drafts={drafts} />
+                {captions && (
+                  <button type="button" className="st-btn st-btn-quiet st-btn-sm st-create-start" onClick={() => setCaptions(null)}>
+                    Back to the drafts
+                  </button>
+                )}
+              </>
+            )}
+          </Step>
+
+          <Step n="07" title="Publish">
+            <p className="st-create-summary" data-ready={ready || undefined} aria-live="polite">
+              {!rendered ? (
+                "Render the final image first."
+              ) : stale ? (
+                "Render again: the design changed."
+              ) : networks.length === 0 ? (
+                "Give at least one network a caption."
+              ) : !captionsFit(finalCaptions) ? (
+                <span className="st-danger-text">A caption is over its network&apos;s limit.</span>
+              ) : (
+                <>
+                  {story ? "A story" : output === "carousel" ? `A carousel of ${rendered.urls.length}` : "One image"} to <strong>{networks.map((n) => NETWORK_LABEL[n]).join(", ")}</strong>.
+                </>
+              )}
+            </p>
+            <div className="st-actions st-create-publish">
+              <button type="button" className="st-btn" disabled={!ready || saving !== null} data-busy={saving === "now"} onClick={() => setSheet("publish")}>
+                Publish now
+              </button>
+              <button type="button" className="st-btn st-btn-ghost" disabled={!ready || saving !== null} data-busy={saving === "schedule"} onClick={() => setSheet("schedule")}>
+                Schedule
+              </button>
+              <button
+                type="button"
+                className="st-btn st-btn-quiet st-span"
+                disabled={!rendered || stale || rendering !== null || saving !== null}
+                data-busy={saving === "draft"}
+                onClick={() => finish("draft").catch(() => {})}
+              >
+                Save as draft
+              </button>
+            </div>
+          </Step>
+        </>
+      )}
     </>
   );
 
   return (
     <>
       <style>{previewFontFaces}</style>
-      <PageHead section="Create" title="Create." />
+      <PageHead section="Create" title={edit ? "Edit." : "Create."} />
+      {edit && (
+        <EditBanner title={postTitle(edit.post)} label={targetLabel(edit.post, edit.target)} note={edit.seed.note} onCancel={cancelEdit} busy={saving !== null} />
+      )}
       {restored && (
         <div className="st-create-restored st-glass" role="status">
           <span>Picked up where you left off.</span>
@@ -516,6 +691,16 @@ export function Create({ initialOutput }: { initialOutput: Output }) {
         }
         onConfirm={() => finish("now")}
       />
+      {edit && (
+        <ConfirmSheet
+          open={sheet === "update"}
+          onClose={() => setSheet(null)}
+          title="Update this post?"
+          confirmLabel="Update post"
+          body={editResetText(edit.post.status)}
+          onConfirm={saveEdit}
+        />
+      )}
       <TimeSheet open={sheet === "schedule"} onClose={() => setSheet(null)} title="Schedule" confirmLabel="Schedule" onPick={(at) => finish("schedule", at)} />
     </>
   );

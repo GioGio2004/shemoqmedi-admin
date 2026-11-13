@@ -52,6 +52,8 @@ import { ensureListingClaimUrl } from "./claimLinks";
 import { creatorPath, siteUrl, sitePath } from "./seo";
 import { pushAdmins } from "./push";
 import { studioUrl } from "../lib/hosts";
+import { mediaDetail } from "./lib/design";
+import { mediaDetails, rowByUrl } from "./lib/mediaEntry";
 
 export type SocialKind = Doc<"socialPosts">["kind"] & string;
 export type PostStatus = "waiting" | "approved" | "scheduled" | "sent" | "failed" | "rejected";
@@ -108,7 +110,7 @@ export async function listingFacts(ctx: QueryCtx, listing: Doc<"listings">) {
   };
 }
 
-function listingMedia(facts: Awaited<ReturnType<typeof listingFacts>>) {
+function mediaOfListing(facts: Awaited<ReturnType<typeof listingFacts>>) {
   return [
     ...facts.screenshots.map((url) => ({ kind: "image" as const, url, role: "screenshot" })),
     ...(facts.videoUrl ? [{ kind: "video" as const, url: facts.videoUrl, role: "preview" }] : []),
@@ -211,7 +213,7 @@ export const queueAward = internalMutation({
         },
         links: links(),
       },
-      media: listingMedia(facts),
+      media: mediaOfListing(facts),
     });
     // No push here: notify.awardAnnounced sends one for the award and this post together.
     return id;
@@ -240,7 +242,7 @@ export const queueNewListings = internalMutation({
         kind: "new_listing",
         listingId: listing._id,
         facts: { ...facts, links: links() },
-        media: listingMedia(facts),
+        media: mediaOfListing(facts),
       });
       queued.push(`New listing: ${listing.title}`);
     }
@@ -411,6 +413,18 @@ export const postView = v.object({
   sentAt: v.union(v.number(), v.null()),
 });
 
+/**
+ * One post with what the Studio's editor and get_post need about its media:
+ * `mediaDetails[i]` describes `media[i]` (its media row's id, size, video
+ * length and design recipe; nulls for a file we don't hold).
+ */
+export const postDetailView = v.object({
+  ...postView.fields,
+  mediaDetails: v.array(mediaDetail),
+  // Why approval would refuse the media for Instagram as they stand (a feed post with an Instagram caption), or null.
+  instagramProblem: v.union(v.string(), v.null()),
+});
+
 /** A post's media; older award rows only have the screenshot in their payload. */
 export function postMedia(post: Doc<"socialPosts">): MediaItem[] {
   if (post.media) return post.media;
@@ -511,9 +525,9 @@ export async function withSizes(ctx: QueryCtx, media: MediaItem[]): Promise<Medi
   );
 }
 
-/** Why Instagram would refuse the post's images (a ratio that can't be padded), or null. */
-async function instagramMediaProblem(ctx: QueryCtx, post: Doc<"socialPosts">) {
-  const media = await withSizes(ctx, mediaFor(postMedia(post), "instagram"));
+/** Why Instagram would refuse these images (a ratio that can't be padded), or null. */
+async function instagramMediaProblem(ctx: QueryCtx, all: MediaItem[]) {
+  const media = await withSizes(ctx, mediaFor(all, "instagram"));
   if (media[0]?.kind !== "image") return null;
   for (const m of media.filter((x) => x.kind === "image")) {
     try {
@@ -544,10 +558,44 @@ async function cancelJob(ctx: MutationCtx, post: Doc<"socialPosts">) {
   if (job && (job.state.kind === "pending" || job.state.kind === "inProgress")) await ctx.scheduler.cancel(post.publishJobId);
 }
 
+/** The longest media role (the MCP tool's limit too). */
+export const MEDIA_ROLE_MAX = 40;
+
+/**
+ * Why a new media list can't be saved as it is, or null: a role too long,
+ * a network named twice, or a file we hold that failed its upload check or
+ * is not the kind the item says (an image saved as a video).
+ */
+async function mediaListProblem(ctx: QueryCtx, media: MediaItem[]) {
+  for (const [i, m] of media.entries()) {
+    const n = i + 1;
+    if (m.role && m.role.length > MEDIA_ROLE_MAX) return `Item ${n}: the role is longer than ${MEDIA_ROLE_MAX} characters.`;
+    if (m.networks && new Set(m.networks).size !== m.networks.length) return `Item ${n} names a network twice.`;
+    const rows = await ctx.db
+      .query("media")
+      .withIndex("by_url", (q) => q.eq("url", m.url))
+      .take(10);
+    if (rows.length === 0) continue;
+    const row = await rowByUrl(ctx, m.url);
+    if (!row) return `Item ${n} failed the upload check (${m.url}). Upload or render it again.`;
+    if (row.kind !== m.kind) return `Item ${n} is ${row.kind === "video" ? "a video" : "an image"}, not ${m.kind === "video" ? "a video" : "an image"} (${m.url}).`;
+  }
+  return null;
+}
+
 /**
  * Captions, media, time or note of a post that isn't published yet. Editing
  * an approved, scheduled or failed post sends it back to waiting (a scheduled
  * post's publish job is cancelled); networks already sent stay sent.
+ *
+ * Media replace the whole list (the Studio and update_post replace, reorder,
+ * remove and add items by sending the new list). A new list is checked
+ * (mediaListProblem), and a story's media always (exactly one 9:16 image or
+ * a 3 to 60 s video). Instagram's feed ratio is left to approval (the
+ * captions can still change; postDetailView.instagramProblem tells the
+ * editor early). `baseMedia`, the media URLs
+ * the edit was made from, refuses an edit when the post's media changed
+ * meanwhile (another tab, the MCP connector).
  */
 export async function editPost(
   ctx: MutationCtx,
@@ -558,6 +606,7 @@ export async function editPost(
     scheduledFor?: number | null;
     note?: string;
     placement?: Placement;
+    baseMedia?: string[];
   },
 ) {
   const post = await ctx.db.get(id);
@@ -565,6 +614,9 @@ export async function editPost(
   const status = readStatus(post.status);
   if (status === "sent" || status === "rejected") fail(`This post is ${status}; it can't be changed any more.`);
   if (isPublishing(post)) fail("This post is being published right now; wait a few minutes.");
+  if (edit.baseMedia && !sameUrls(postMedia(post).map((m) => m.url), edit.baseMedia)) {
+    fail("This post's images changed since you opened it. Look again and redo the change.");
+  }
   const captions = { ...(post.captions ?? {}) };
   for (const network of NETWORKS) {
     const text = edit.captions?.[network];
@@ -582,6 +634,8 @@ export async function editPost(
   if (edit.media) {
     if (edit.media.length > 10) fail("At most 10 images or videos per post.");
     for (const m of edit.media) if (!/^https:\/\//.test(m.url)) fail(`Media must be a public https URL: ${m.url}`);
+    const problem = await mediaListProblem(ctx, edit.media);
+    if (problem) fail(problem);
   }
   // A story is checked as soon as it has media; an empty one is still being made.
   const placement = edit.placement ?? post.placement ?? "feed";
@@ -590,6 +644,8 @@ export async function editPost(
     const problem = await storyMediaProblem(ctx, media);
     if (problem) fail(problem);
   }
+  // Instagram's ratio rule (4:5 to 1.91:1, padded on ImageKit) is checked at approval, not here: the
+  // captions that pick Instagram can still change. postDetailView.instagramProblem shows it early.
   if (edit.scheduledFor != null && edit.scheduledFor < Date.now() - 60_000) fail("The publish time is in the past.");
   if (status === "scheduled") await cancelJob(ctx, post);
   const backToWaiting = status === "approved" || status === "scheduled" || status === "failed";
@@ -647,7 +703,7 @@ export async function approvePost(ctx: MutationCtx, id: Id<"socialPosts">, by: I
     if (problem) fail(problem);
   } else if (captions.instagram) {
     if (!mediaFor(postMedia(post), "instagram").length) fail("Instagram needs an image or a video.");
-    const problem = await instagramMediaProblem(ctx, post);
+    const problem = await instagramMediaProblem(ctx, postMedia(post));
     if (problem) fail(problem);
   }
   // The award or the listing may have changed since the post was queued.
@@ -820,10 +876,26 @@ export async function recentSent(ctx: QueryCtx, limit: number) {
   return await Promise.all(picked.map((p) => viewPost(ctx, p)));
 }
 
+function sameUrls(a: readonly string[], b: readonly string[]) {
+  return a.length === b.length && a.every((url, i) => url === b[i]);
+}
+
 async function viewById(ctx: QueryCtx, id: Id<"socialPosts">) {
   const post = await ctx.db.get(id);
   if (!post) fail("Post not found.");
   return await viewPost(ctx, post);
+}
+
+/** A post with its media details (postDetailView): social.get and the MCP get_post. */
+export async function detailPost(ctx: QueryCtx, post: Doc<"socialPosts">) {
+  const view = await viewPost(ctx, post);
+  const instagram = view.placement === "feed" && !!view.captions.instagram;
+  const noMedia = instagram && mediaFor(view.media, "instagram").length === 0;
+  return {
+    ...view,
+    mediaDetails: await mediaDetails(ctx, view.media.map((m) => m.url)),
+    instagramProblem: noMedia ? "Instagram needs an image or a video." : instagram ? await instagramMediaProblem(ctx, view.media) : null,
+  };
 }
 
 // Admin Social page and the Studio (Clerk session).
@@ -877,12 +949,44 @@ export const retry = mutation({
   },
 });
 
+/** One post, with `mediaDetails` (sizes and design recipes of its media, in media order). */
 export const get = query({
   args: { id: v.id("socialPosts") },
-  returns: postView,
+  returns: postDetailView,
   handler: async (ctx, { id }) => {
     await requireAdmin(ctx);
-    return await viewById(ctx, id);
+    const post = await ctx.db.get(id);
+    if (!post) fail("Post not found.");
+    return await detailPost(ctx, post);
+  },
+});
+
+const listingMediaItem = v.object({
+  kind: v.union(v.literal("image"), v.literal("video")),
+  url: v.string(),
+  role: v.string(),
+  width: v.union(v.number(), v.null()),
+  height: v.union(v.number(), v.null()),
+  durationSec: v.union(v.number(), v.null()),
+});
+
+/**
+ * The current screenshots (cover first, role "screenshot") and preview
+ * video (role "preview") of a post's listing, with their sizes, to add to
+ * the post. Empty for a post without a listing (or whose listing is gone).
+ */
+export const listingMedia = query({
+  args: { id: v.id("socialPosts") },
+  returns: v.array(listingMediaItem),
+  handler: async (ctx, { id }) => {
+    await requireAdmin(ctx);
+    const post = await ctx.db.get(id);
+    if (!post) fail("Post not found.");
+    const listing = post.listingId ? await ctx.db.get(post.listingId) : null;
+    if (!listing) return [];
+    const items = mediaOfListing(await listingFacts(ctx, listing));
+    const details = await mediaDetails(ctx, items.map((m) => m.url));
+    return items.map((m, i) => ({ ...m, width: details[i].width, height: details[i].height, durationSec: details[i].durationSec }));
   },
 });
 
@@ -910,12 +1014,15 @@ export const update = mutation({
     publishAt: v.optional(v.union(v.number(), v.null())), // null: as soon as approved
     note: v.optional(v.string()),
     placement: v.optional(socialPlacement),
+    // The media URLs (in order) this edit was made from: refused when the post's media changed meanwhile.
+    baseMedia: v.optional(v.array(v.string())),
   },
-  returns: postView,
+  // The post as social.get reads it (with mediaDetails), so the editor has the saved state at once.
+  returns: postDetailView,
   handler: async (ctx, { id, publishAt, ...edit }) => {
     await requireAdmin(ctx);
     await editPost(ctx, id, { ...edit, scheduledFor: publishAt });
-    return await viewById(ctx, id);
+    return await detailPost(ctx, (await ctx.db.get(id))!);
   },
 });
 

@@ -21,6 +21,15 @@
 /* "Picked up where you left off": a glass capsule. */
 .st-create-restored { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 14px; padding: 4px 4px 4px 18px; border-radius: 999px; font: 500 14px/1.3 var(--st-font); }
 
+/* Edit mode: "Editing <post> · image 2" with Cancel, a glass capsule (a note under it when the design was guessed). */
+.st-create-editing { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 14px; padding: 6px 6px 6px 18px; border-radius: 26px; font: 500 14px/1.3 var(--st-font); }
+.st-create-editing-text { display: grid; gap: 2px; min-width: 0; }
+.st-create-editing-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-create-editing strong { font-weight: 600; color: var(--st-ink); }
+.st-create-editing-what { color: var(--st-ink-2); }
+.st-create-editing small { font-size: 12px; line-height: 1.35; color: var(--st-ink-2); }
+.st-create-editing > .st-btn { flex: none; }
+
 /* Sideways rows bleed to the section's edges (the section pads 18px). */
 .st .st-create-chips { margin: 0 -18px; padding: 4px 18px 8px; scroll-padding-inline: 18px; }
 

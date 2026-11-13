@@ -157,6 +157,28 @@ export type Design = {
   listingId: string | null;
 };
 
+/**
+ * A template's fields as Create shows and renders them: what was typed (an
+ * empty string included: it stays empty), else the listing's or award's
+ * facts, else the template's defaults.
+ */
+export function shownFields(template: TemplateId, edits: Fields | undefined, base: Fields): Fields {
+  const spec = TEMPLATES[template];
+  const out: Fields = {};
+  for (const f of spec.fields) out[f.key] = edits?.[f.key] ?? base[f.key] ?? (spec.defaults as Fields)[f.key] ?? "";
+  return out;
+}
+
+/** The carousel's four texts: what was typed, else (the quote) the listing's jury note. */
+export function shownCarouselFields(edits: Fields, juryNote: string | null | undefined): Fields {
+  return Object.fromEntries(CAROUSEL_FIELDS.map((f) => [f.key, edits[f.key] ?? (f.key === "quote" ? (juryNote ?? "") : "")]));
+}
+
+/** The graphic's screenshot: the one picked (an empty string is "none"), else the listing's first. */
+export function shotFor(shot: string | null, shots: readonly string[]): string | null {
+  return shot ?? shots[0] ?? null;
+}
+
 /** graphics.renderForPost's arguments for a design (listingId typed by the caller). */
 export function renderArgs(d: Design) {
   const glass = d.style === "glass" ? d.glass : undefined;

@@ -8,6 +8,8 @@ import { LIMITS } from "./lib/taxonomy";
 import { assertMedia, fail, slugify } from "./lib/listingHelpers";
 import { cleanDuration, deleteMedia, mediaUrl, vMediaId, type MediaId } from "./lib/media";
 import { R2_LISTING_KEY, deleteObject, headObject, presignPut, r2Configured, r2PublicUrl } from "./lib/r2";
+import { mediaDesign, mediaDetail } from "./lib/design";
+import { designViewOf, mediaDetails, mediaEntryOf, mediaEntryWithDesign, roleOf } from "./lib/mediaEntry";
 
 // Media pipeline. Screenshots go to ImageKit, preview videos to Cloudflare R2.
 //
@@ -138,9 +140,12 @@ export const SOCIAL_FOLDER = "/social/graphics/";
 
 /**
  * Admin: record a final social graphic the Studio uploaded straight to
- * ImageKit (graphics.finalUploadAuth → browser upload to /social/graphics).
- * Only JPEG or PNG files in that folder of our own account; verified
- * against ImageKit afterwards like any other upload.
+ * ImageKit (graphics.finalUploadAuth → browser upload to /social/graphics):
+ * a JPEG the browser rendered (with its `design` recipe) or an image the
+ * admin picked from the device (no recipe). Only JPEG or PNG files of 5 MB
+ * or less in that folder of our own account; verified against ImageKit
+ * afterwards like any other upload. Registering the same file again returns
+ * its id (and adds the recipe when the row had none).
  */
 export const registerSocial = mutation({
   args: {
@@ -151,6 +156,7 @@ export const registerSocial = mutation({
     width: v.number(),
     height: v.number(),
     contentType: v.string(),
+    design: v.optional(mediaDesign),
   },
   returns: v.id("media"),
   handler: async (ctx, args) => {
@@ -167,7 +173,10 @@ export const registerSocial = mutation({
       .query("media")
       .withIndex("by_fileId", (q) => q.eq("fileId", args.fileId))
       .first();
-    if (existing) return existing._id;
+    if (existing) {
+      if (args.design && !existing.design) await ctx.db.patch(existing._id, { design: args.design });
+      return existing._id;
+    }
     const id = await ctx.db.insert("media", { ...args, kind: "image", uploadedBy: user._id, createdAt: Date.now() });
     await ctx.scheduler.runAfter(0, internal.media.verify, { id, fileId: args.fileId, kind: "image", folder: SOCIAL_FOLDER });
     return id;
@@ -427,9 +436,12 @@ const serverFile = v.object({
   height: v.optional(v.number()),
 });
 
-/** Record an ImageKit file uploaded server-side (importer, CLI); no user session. */
+/**
+ * Record an ImageKit file uploaded server-side (importer, CLI, graphics.ts
+ * renders with their `design` recipe); no user session.
+ */
 export const registerInternal = internalMutation({
-  args: serverFile.fields,
+  args: { ...serverFile.fields, design: v.optional(mediaDesign) },
   returns: v.id("media"),
   handler: async (ctx, args) => {
     checkLimits(args.kind, args.contentType, args.size);
@@ -437,8 +449,60 @@ export const registerInternal = internalMutation({
       .query("media")
       .withIndex("by_fileId", (q) => q.eq("fileId", args.fileId))
       .first();
-    if (existing) return existing._id;
+    if (existing) {
+      if (args.design && !existing.design) await ctx.db.patch(existing._id, { design: args.design });
+      return existing._id;
+    }
     return await ctx.db.insert("media", { ...args, createdAt: Date.now() });
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Design recipes and recent renders (the Studio's post editor)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** At most this many URLs per designs call (a post has at most 10 media). */
+export const DESIGNS_MAX = 50;
+
+/**
+ * Admin: id, size and design recipe of each URL, in the order given (one
+ * entry per URL; mediaId, sizes and design null for a file we don't hold).
+ * The recipe says how the graphic was rendered (convex/lib/design.ts).
+ */
+export const designs = query({
+  args: { urls: v.array(v.string()) },
+  returns: v.array(mediaDetail),
+  handler: async (ctx, { urls }) => {
+    await requireAdmin(ctx);
+    if (urls.length > DESIGNS_MAX) fail(`At most ${DESIGNS_MAX} URLs at once.`);
+    return await mediaDetails(ctx, urls);
+  },
+});
+
+/** How far back recentRenders looks (newest rows first); the media table has no role index. */
+const RENDER_SCAN = 2000;
+
+/**
+ * Admin: rendered and uploaded social images, newest first (role graphic:
+ * /social/graphics, which holds renders and Studio uploads; role carousel:
+ * carousel slides), each with its recipe or null. Never invalid files or
+ * videos. `role` narrows to one of the two; limit 1-100 (default 30).
+ */
+export const recentRenders = query({
+  args: { role: v.optional(v.union(v.literal("graphic"), v.literal("carousel"))), limit: v.optional(v.number()) },
+  returns: v.array(mediaEntryWithDesign),
+  handler: async (ctx, { role, limit }) => {
+    await requireAdmin(ctx);
+    const n = Math.min(Math.max(Math.floor(limit ?? 30), 1), 100);
+    const rows = await ctx.db.query("media").order("desc").take(RENDER_SCAN);
+    const picked = rows
+      .filter((row) => {
+        if (row.invalid || row.kind !== "image") return false;
+        const r = roleOf(row);
+        return role ? r === role : r === "graphic" || r === "carousel";
+      })
+      .slice(0, n);
+    return await Promise.all(picked.map(async (row) => ({ ...mediaEntryOf(row), design: await designViewOf(ctx, row) })));
   },
 });
 

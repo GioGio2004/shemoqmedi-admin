@@ -94,8 +94,11 @@ describe("drafts kept on this device", () => {
     const create = read("components/studio/create/Create.tsx");
     expect(create).toMatch(/createDraftStore<CreateDraft>\("create"\)/);
     // Restored on mount, saved as it changes, cleared once it is a post.
-    expect(create).toMatch(/useState\(\(\) => createDrafts\.get\(initialOutput\)\)/);
-    expect(create).toMatch(/createDrafts\.set\(initialOutput, JSON\.parse\(snapshot\)/);
+    // (Edit mode keeps its own store, "create-edit"; the normal draft stays per output.)
+    expect(create).toMatch(/const draftStore = edit \? editDrafts : createDrafts;/);
+    expect(create).toMatch(/const draftId = edit \? editDraftId\(edit\.target\) : initialOutput;/);
+    expect(create).toMatch(/useState\(\(\) => draftStore\.get\(draftId\)\)/);
+    expect(create).toMatch(/draftStore\.set\(draftId, JSON\.parse\(snapshot\)/);
     expect(create).toMatch(/createDrafts\.set\(initialOutput, null\)/);
     for (const kept of ["rendered", "captions", "storyCaps", "edits", "listingId"]) expect(create).toMatch(new RegExp(`${kept}: [^,]+ \\| null|${kept}: Edits`));
     const card = read("components/studio/queue/PostCard.tsx");

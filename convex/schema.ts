@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { mediaDesign } from "./lib/design";
 
 /**
  * Listing lifecycle:
@@ -184,6 +185,8 @@ export default defineSchema({
     height: v.optional(v.number()),
     // Videos: length in seconds, as the browser measured it (a story video is 3 to 60 s).
     durationSec: v.optional(v.number()),
+    // Social graphics: what it was rendered from (convex/lib/design.ts), so a post's graphic can be edited and rendered again.
+    design: v.optional(mediaDesign),
     uploadedBy: v.optional(v.id("users")), // empty for server-side uploads (importer, migration)
     invalid: v.optional(v.boolean()), // failed the server-side check; not shown
     createdAt: v.number(),
