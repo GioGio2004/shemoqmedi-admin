@@ -74,9 +74,14 @@
 .st-queue-sheet-media { position: relative; overflow: hidden; border-radius: 26px; background: var(--st-ph); transform: translateZ(0); box-shadow: var(--st-ring), var(--st-shadow); }
 .st-queue-sheet-media[data-story="true"] { width: min(100%, 300px); margin-inline: auto; }
 @media (min-width: 900px) {
+  .st-queue-filter > .st-seg { width: auto; }
+}
+/* Two columns only when the sheet itself is wide enough (not the window): a narrower
+   sheet stacks, so the preview column is never squeezed and cut off at the edge. */
+.st-sheet-in:has(> .st-queue-detail) { container-type: inline-size; }
+@container (min-width: 820px) {
   .st-queue-detail { grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 32px; align-items: start; }
   .st-queue-detail-media { position: sticky; top: 0; }
-  .st-queue-filter > .st-seg { width: auto; }
 }
 
 /* When it goes. */

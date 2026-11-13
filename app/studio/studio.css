@@ -625,7 +625,8 @@ a.st-tile:active, button.st-tile:active { transform: scale(.985); transition-dur
   .st-dock-mark .st-crow { width: 30px; height: 30px; }
   .st-sheet[open] { align-items: center; }
   .st-sheet-panel, .st-sheet[data-floating="true"] .st-sheet-panel { width: min(560px, calc(100vw - 64px)); max-height: calc(100dvh - 64px); margin: 0; border-radius: 32px; box-shadow: inset 0 1px 0 var(--st-spec), var(--st-ring), var(--st-shadow-lg); }
-  .st-sheet[data-wide="true"] .st-sheet-panel { width: min(1040px, calc(100vw - 64px)); }
+  /* max-width too: the base panel's 640px cap otherwise wins and the wide sheet stays narrow. */
+  .st-sheet[data-wide="true"] .st-sheet-panel { width: min(1040px, calc(100vw - 64px)); max-width: none; }
   .st-sheet[data-size="large"] .st-sheet-panel { height: min(840px, calc(100dvh - 64px)); }
   .st-sheet-head { cursor: default; touch-action: auto; padding: 22px 24px 12px; }
   .st-sheet-grip { display: none; }
