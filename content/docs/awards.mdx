@@ -1,0 +1,228 @@
+Awards are decided by the jury's score and a scheduled job, not by hand. Every 15 minutes the `awards tick` cron closes ended voting windows, gives Honorable Mentions, picks the Site of the Day, and runs the monthly and yearly rounds. Every decision is written to the `awardAudit` table. Admins can override any result, but each override needs a reason and is logged. The rules live in `convex/lib/awards.ts`, the defaults in `convex/lib/config.ts`, and the score maths in `convex/lib/scoring.ts`. If this page and the code ever disagree, the code wins.
+
+## The tiers
+
+From `AWARDS` in `convex/lib/taxonomy.ts`, highest first.
+
+| Code | Name | How it is won | Once per site? | One winner per period? |
+| --- | --- | --- | --- | --- |
+| `SOTY` | Site of the Year | Yearly jury round over last year's SOTM winners | Yes | Yes, one per year |
+| `SOTM` | Site of the Month | Monthly jury round over last month's SOTD winners | Yes | Yes, one per month |
+| `SOTD` | Site of the Day | Best site in the Site of the Day queue, announced daily | Yes | Yes, one per day |
+| `BSC` | Best Solo Creation | Side award: a `solo` site that scores at least `bscMin` | One per batch week | No |
+| `HM` | Honorable Mention | Any eligible site that scores at least `honorableMentionMin` | One per batch week | No |
+| `F100` | First 100 | Honorary badge, given by hand to the first hundred sites | Yes | One per member number |
+
+`UNIQUE_TIERS` (`SOTD`, `SOTM`, `SOTY`, `F100`) are the tiers a site can hold only once, ever, and that have one active winner per period. BSC sits outside the main ladder. F100 is not a result and is not scored.
+
+Each award row has a `period`:
+
+| Tier | `period` looks like |
+| --- | --- |
+| SOTD | The day, `2026-11-12` |
+| SOTM | The month, `2026-11` |
+| SOTY | The year, `2026` |
+| HM, BSC | The batch week's Monday, `2026-11-02` (or a day, when given by hand) |
+| F100 | The member number, `001` to `100` |
+
+The award's `slug` is `<listing-slug>-<tier>-<period>`, for example `floema-sotd-2026-11-12`. The public award page is `/awards/<slug>`.
+
+## Settings and thresholds
+
+Defaults are in `DEFAULT_CONFIG` in `convex/lib/config.ts`. An admin can change any of them on the admin Awards page (`awards.updateSettings`). Changes are stored in the `settings` table (key `awards`), checked by `checkConfig`, and logged in the audit log with the before and after values.
+
+| Setting | Default | Allowed | Meaning |
+| --- | --- | --- | --- |
+| `minVotes` | 3 | Whole number 1 to 50 | Jury votes a site needs to be eligible for any scored award |
+| `honorableMentionMin` | 6.5 | 1 to 10 | Final score for Honorable Mention |
+| `sotdMin` | 7.0 | 1 to 10, not below the HM score | Final score to enter the Site of the Day queue |
+| `bscMin` | 8.2 | 1 to 10 | Final score for Best Solo Creation |
+| `announceTime` | `00:00` | `HH:MM` | When awards go public, Tbilisi time |
+| `monthlyRoundDays` | 5 | 1 to 27 | Days the SOTM round stays open from the 1st |
+| `yearlyRoundDays` | 10 | 1 to 60 | Days the SOTY round stays open from 1 January |
+| `yearlyAnnounceDate` | `01-20` | `MM-DD` | SOTY announcement date |
+| `resubmitMonths` | 12 | 0 to 60 | Months after its last award before a winner can return as a redesign |
+| `digestTime` | `09:00` | `HH:MM` | When jurors get their daily digest |
+
+All times are Tbilisi time. Georgia is UTC+4 all year with no daylight saving, so `convex/lib/time.ts` uses a fixed offset.
+
+## The score
+
+Only the jury decides awards. Community votes are shown on the site but never decide anything.
+
+A juror scores four pillars from 1 to 10, rounded to one decimal. The weights are in `WEIGHTS` in `convex/lib/scoring.ts`:
+
+| Pillar | Weight |
+| --- | --- |
+| Design | 40% |
+| Usability | 30% |
+| Creativity | 20% |
+| Content | 10% |
+
+- One vote's **weighted score** = Design × 0.4 + Usability × 0.3 + Creativity × 0.2 + Content × 0.1.
+- The listing's **final score** (`finalScore`) is the average of every jury vote's weighted score, rounded to 2 decimals.
+- `editorialScores` is the per-pillar average of the votes. Weighting is linear, so its weighted score equals the final score.
+- `communityAverage` uses the same weights over community votes. It is for display only.
+
+Older rows stored a `code` pillar where newer rows have `content`. `readPillars` treats them as the same pillar until the migration has moved every row.
+
+### Eligibility
+
+`ineligibility` in `convex/lib/awards.ts` says why a site cannot win right now. A site is eligible only when:
+
+1. it is not a Shemoqmedi team site (`byTeam`), and
+2. it has at least `minVotes` jury votes, and
+3. it has a final score.
+
+A score typed in by an admin (`listings.setEditorialScores`) has zero jury votes behind it, so it never makes a site eligible.
+
+### Ties
+
+`compareRanked` sorts candidates: higher final score first. On a tie: more jury votes, then a higher average Design score, then the earlier submission (`createdAt`).
+
+<Callout kind="sensitive">With the default `minVotes` of 3, three jurors decide whether a site is eligible and what it scores. Keep the exact thresholds, the tie-break order and the queue behaviour internal. Someone who knows them could time a submission or lobby a few jurors.</Callout>
+
+## The awards tick
+
+`crons.ts` runs `awards.tick` every 15 minutes. It runs four steps in order. Each step is idempotent: running it again never creates a second winner. Convex mutations are serializable transactions, so "check, then insert" cannot race.
+
+### 1. Close ended voting (`closeEndedVoting`)
+
+Finds up to 100 listings in `in_voting` whose `votingEndsAt` has passed and runs `closeVoting` on each. `listings.closeVotingNow` lets an admin run the same thing early for one site.
+
+`closeVoting`:
+
+1. Reads all jury evaluations and computes the final score. Sets `juryVotes`.
+2. Sets the status to `archived`.
+3. Checks eligibility.
+4. If eligible and the score is at least `sotdMin` and the site never won SOTD: puts it in the Site of the Day queue (`sotdQueuedAt`).
+5. If eligible and the score is at least `honorableMentionMin`: gives **HM**.
+6. If eligible, `creatorTier` is `solo`, and the score is at least `bscMin`: gives **BSC**.
+7. Re-syncs the listing, so it becomes `awarded` if it holds any active award.
+8. Writes a `batch_closed` audit entry with the score, vote count, eligibility, thresholds, awards given and whether it was queued.
+
+So with the defaults, a site at 7.0 or more gets both HM and a place in the SOTD queue.
+
+### 2. Site of the Day (`announceSiteOfTheDay`)
+
+Once `announceTime` has passed on a Tbilisi day:
+
+1. If that day already has an SOTD row, even a revoked one, it does nothing. If the day is already logged as empty, it does nothing.
+2. It ranks the queue (`sotdQueue`) with the tie-break rules.
+3. Queued sites that are no longer eligible (unpublished, team site, too few votes) are taken out of the queue. Each removal is logged as `queue_removed`.
+4. The best remaining site wins SOTD for that day. Its queue place is cleared.
+5. If nobody is left, the day has no winner. It logs `empty_day` and emails and pushes the admins once ("No Site of the Day").
+
+Sites that do not win stay in the queue and carry over to the next day, mixed with later batches and still ordered by score. A revoked SOTD is not re-decided by the cron; give a replacement by hand if needed.
+
+### 3. Open rounds (`openRounds`)
+
+- **Site of the Month.** From `announceTime` on the 1st of each month, a round opens for the previous month. Its candidates are that month's active SOTD winners. It closes `monthlyRoundDays` later and is announced at the close. With the defaults: opens on the 1st, announced on the 6th.
+- **Site of the Year.** In January, from `announceTime` on 1 January, a round opens for the previous year. Its candidates are that year's active SOTM winners. It closes after `yearlyRoundDays` and is announced on the later of the close and `yearlyAnnounceDate`. With the defaults: closes on the 11th, announced on 20 January.
+
+Candidates are fixed when the round opens. A round with no candidates is created already announced and logged as decided with "No candidates". Each opening is logged as `round_opened`.
+
+Jurors score round candidates on the storefront's `/jury/rounds` page (`rounds.vote`), with the same pillars and weights. See the Jury page.
+
+### 4. Announce rounds (`announceRounds`)
+
+For each open round whose announce time has come, `roundResults` scores every candidate from its round votes and blocks any that:
+
+- is a team site,
+- is no longer public,
+- already won this tier, or
+- has fewer than `minVotes` round votes.
+
+The best unblocked candidate wins SOTM or SOTY. If none is left, there is no winner and the admins get an email ("No Site of the Month" or "No Site of the Year"). The round is marked `announced` and the result is logged as `round_decided`.
+
+## What happens when an award is given
+
+Every award, automatic or manual, goes through `grantAward` in `convex/lib/awards.ts`. It:
+
+1. Checks the rules. The site must exist and not be a team site. Scored awards need a public site whose voting has closed (`awarded` or `archived`). The tier and period must not already have an active holder (for unique tiers). The site must not already hold the tier. A manual grant needs a reason.
+2. Inserts the `awards` row with status `active`.
+3. Clears the SOTD queue place if the tier is SOTD.
+4. Re-syncs the listing's `awards` list and status.
+5. Writes a `granted` audit entry.
+6. Schedules `notify.awardAnnounced`.
+7. Pings search engines (IndexNow) about the listing, the award archives and the new award page.
+
+`notify.awardAnnounced` then:
+
+- **Emails the winner**, once (`notifiedAt` is set only after a successful send). The recipient is the listing owner, else the user who claimed the creator profile, else the creator's private `contactEmail`. A claimed site gets the badge embed code. An unclaimed site gets its claim link instead. See the Creators page.
+- **Queues a social post** with status `waiting` (`social.queueAward`). Claude writes the captions through the MCP connector and an admin approves them in the Studio. Not for F100.
+- **Pushes the admins** a short notice that opens the post in the Studio. Not for F100.
+
+## Admin overrides
+
+All on the admin Awards page, all `requireAdmin`, all logged.
+
+| Action | Function | Notes |
+| --- | --- | --- |
+| Give an award by hand | `awards.grant` | Reason required. Period defaults to today, this month or this year. Same rules as automatic awards |
+| Revoke an award | `awards.revoke` | Reason required. The badge stops showing. A revoked F100 frees its number |
+| Take a site out of the SOTD queue | `awards.removeFromQueue` | Reason required |
+| Mark or unmark a team site | `awards.setTeamSite` | Marking revokes all its active awards and removes it from the queue |
+| Change settings | `awards.updateSettings` | Logged with before and after |
+| Give the next First 100 badge | `awards.giveFirst100` | Fails when all 100 are given |
+
+`admin.setLifecycle` cannot set a listing to `awarded`. Awards are only given and revoked here.
+
+## First 100
+
+An honorary badge for the first hundred sites (`FIRST_100 = 100`).
+
+- Given by hand only. The admin has a tracker (`awards.first100`) of who has which number and which public sites could get one.
+- Each badge takes the lowest free member number, `001` to `100`, as its period. So the count can never pass 100.
+- Any public site can get it, including one still in voting. Team sites and hidden sites cannot.
+- A site gets it once. Revoking it frees the number.
+- It is not scored (`score` is null). It survives the voting close and keeps a closed site in `awarded`.
+- It sends the winner email, but no social post and no admin push.
+
+## Badges
+
+Badges are earned only. There is no way to make a badge for an award a site did not win.
+
+- The storefront route `/badge/<slug>` draws the badge image. It looks the award up with `awards.getBySlug`, which returns only an **active** award on a **public** listing. A revoked award, or a site that was unpublished, has no badge.
+- The embed code links the image to `/awards/<slug>` with a followed link. It comes in two shapes: the horizontal "tag" and the round "seal" (`embedCode` in `convex/notify.ts`).
+- Owners copy the code from `/account/badges`. That page uses `awards.mine`, which returns awards only for listings the signed-in user owns (`ownerId`).
+
+## The audit log
+
+`awardAudit` records every award decision and admin action, with its inputs. Rows are never edited. Admins read it with `awards.auditLog`, newest first.
+
+| `kind` | Written when |
+| --- | --- |
+| `batch_closed` | A listing's voting closed: score, eligibility, awards, queue |
+| `granted` | An award was given (automatic or manual) |
+| `revoked` | An admin revoked an award |
+| `empty_day` | No Site of the Day: the queue was empty |
+| `round_opened` | A SOTM or SOTY round opened, with its candidates |
+| `round_decided` | A round was decided, with every candidate's result |
+| `team_site` | An admin marked or unmarked a team site |
+| `queue_removed` | A site left the SOTD queue (by an admin, or because it became ineligible) |
+| `settings` | Award settings changed |
+
+Each entry can carry `tier`, `period`, `listingId`, `awardId`, `roundId`, `actorId` (empty for the cron), `reason` and a free-form `details` object.
+
+## Community votes
+
+`convex/votes.ts` lets signed-in users vote on a site while its voting window is open. One vote per user per site. Users cannot vote on their own site, and only creators who already have a site of their own listed can vote. Community votes are stored as running totals on the listing and shown as `communityAverage`. They never decide an award.
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `convex/crons.ts` | Runs `awards tick` every 15 minutes |
+| `convex/awards.ts` | `tick` and its four steps, public award queries, admin overrides, settings, audit log reader |
+| `convex/lib/awards.ts` | The rules: `grantAward`, `revokeAward`, `closeVoting`, `ineligibility`, `syncListingAwards`, First 100 |
+| `convex/lib/scoring.ts` | Pillar weights, final score, tie-break order |
+| `convex/lib/config.ts` | Default settings and their allowed ranges |
+| `convex/lib/time.ts` | Tbilisi days, weekly batches, round dates |
+| `convex/rounds.ts` | Jurors' SOTM and SOTY round scoring |
+| `convex/notify.ts` | Winner email, empty-day and no-winner alerts |
+| `convex/social.ts` | `queueAward`: the award's social post |
+| `convex/schema.ts` | `awards`, `awardAudit`, `rounds`, `roundVotes`, `settings` tables |
+| `tests/awards.test.ts`, `tests/scoring.test.ts` | The rules as tests |
+| `app/awards` (admin repo) | The admin Awards page |
+| `app/badge/[slug]/route.ts`, `app/(site)/awards/[slug]` (storefront repo) | Badge images and award pages |

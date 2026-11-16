@@ -1,0 +1,143 @@
+Shemoqmedi sends all of its email through Resend, from the Convex backend. Some emails go out by themselves when something happens (an award, a new feature, a daily digest). Others are written by Claude through the MCP connector and only go out after an admin says yes. This page lists every email, what triggers it, how opt-outs work, and where each send is logged.
+
+## How sending works
+
+There are two layers.
+
+- `sendEmail` in `convex/lib/email.ts` is the low-level call. It posts one email to Resend's `/emails` endpoint and returns an error string, or `null` when sent. It never throws for a missing key: it returns the reason instead.
+- `deliver` in `convex/emails.ts` wraps `sendEmail` for every email to people outside the admin team. It lowercases the address, skips anyone who unsubscribed, adds an unsubscribe link, and writes a row to `emailLog`.
+
+Emails to admins (alerts) use plain `sendEmail`. They have no unsubscribe link and are not logged in `emailLog`.
+
+`emailHtml` builds the plain black-and-white body with an optional black pill button. `textToParagraphs` turns plain text (blank line = new paragraph) into HTML and turns bare URLs into links.
+
+### Environment variables
+
+Set these on the Convex deployment, not in Next.
+
+| Variable | Used for |
+| --- | --- |
+| `RESEND_API_KEY` | Required. Without it nothing is sent and the caller gets the reason back. |
+| `RESEND_FROM` | The sender, on a domain verified in Resend. Falls back to an `awards@` address (a `jury@` address for jury invites). |
+| `EMAIL_UNSUBSCRIBE_SECRET` | Signs unsubscribe links. Falls back to `MCP_SERVICE_SECRET` while unset. |
+| `CONVEX_SITE_URL` | Base of the unsubscribe link (the deployment's HTTP actions). |
+
+<Callout kind="warning">`deliver` refuses to email a studio without a working unsubscribe link. If `EMAIL_UNSUBSCRIBE_SECRET` (or its fallback) is missing, the email is logged as `skipped`, and a broadcast throws before sending anything.</Callout>
+
+## Every email the system sends
+
+### To studios, creators and the public
+
+| Email | Trigger | Recipient | Goes through `deliver` |
+| --- | --- | --- | --- |
+| Award winner | `notify.awardAnnounced`, scheduled by `grantAward` in `convex/lib/awards.ts` when an award is given | The site's owner, or whoever claimed its creator profile. If nobody has claimed it, the creator's private contact email | Yes, kind `award` |
+| You're featured | `emails.featured`, scheduled when an admin approves a `new_listing` social post (`approvePost` in `convex/social.ts`) | The studio contact for the listing | Yes, kind `featured` |
+| One-off email | `mcp.sendEmail` with `confirm: true` (MCP tool `send_email`) | A listing's studio, a creator, or any address | Yes, kind `custom` or `outreach` |
+| Broadcast | `mcp.sendBroadcast` with `confirm: true` schedules `emails.broadcast` | An audience (see below) | Logs and unsubscribe links, sent in batches |
+| Jury invite | Admin clicks "Email link" on an unclaimed juror (`EmailClaimLink` calls `claimLinks.emailJuror`) | The juror's email on their profile | No: its own Resend call, not logged |
+| Jury digest | Cron `jury digest` every 30 minutes runs `digest.run`, which schedules `digest.send` | Each active juror with an account | No, but it checks the opt-out list |
+
+Details worth knowing:
+
+- **Award winner.** If the listing is unclaimed, the email carries the listing's claim link and a "Claim your badge" button. If it is claimed, the email carries the badge embed code (tag and round seal) and a link to `/account/badges`. It is sent once: a successful send sets `awards.notifiedAt`. The honorary First 100 tier uses the same email with "is one of the" wording.
+- **You're featured.** Sent at most once per listing: `emails.alreadySent` checks `emailLog` for a `featured` row with status `sent`. Skipped if the listing is no longer public.
+- **One-off email.** The body may contain the placeholder `{claimLink}`, replaced by the listing's claim link. It only works with `listingSlug` on an unclaimed listing. Subject 1 to 200 characters, body up to 10,000.
+- **Jury invite.** The admin's browser asks for confirmation first. The link is private and works once.
+
+### To admins
+
+These go to every user whose `users.role` is `admin` or `super_admin` (`notify.adminEmails`). Each also sends a push to admin devices.
+
+| Email | Trigger |
+| --- | --- |
+| No Site of the Day | `notify.emptyDay`, scheduled by the awards tick when the day's queue is empty |
+| No Site of the Month / Year | `notify.noRoundWinner`, when a round closes without an eligible winner |
+| Posts waiting on the social desk | Cron `social: waiting nudge`, daily at 09:00 Tbilisi (`social.waitingPing`). Only when something is waiting |
+| LinkedIn token expiring or expired | Cron `social: channels`, daily at 08:30 Tbilisi (`channels.daily`). Warns once within 7 days of expiry and once after it expires |
+
+## Digests
+
+The jury digest is one email per juror per day, never one per site. It lists sites in voting that were published since the juror's last digest:
+
+- **In your categories**: sites matching the juror's `interests`.
+- **General queue**: sites no active juror follows. Every juror sees these.
+
+It skips sites where the juror has a conflict (`conflictReason`), jury team sites (`byTeam`), and jurors with nothing new. It only sends after the daily digest time, `digestTime` in the awards config (default `09:00` Tbilisi). Admins can change it on the Awards settings tab. `jurors.lastDigestAt` makes it idempotent, so the 30-minute cron never sends twice. A juror who unsubscribed from any studio or broadcast email gets no digest either.
+
+## Broadcasts
+
+A broadcast sends one message to a whole audience. Audiences come from `emails.audienceEmails`:
+
+| Audience | Who |
+| --- | --- |
+| `users` | Everyone with an account |
+| `studios` | Creator contact emails, people who claimed a creator, and owners of non-rejected listings |
+| `jurors` | Active jurors (their profile email and account email) |
+| `all` | All of the above |
+
+Addresses are lowercased, deduplicated, and anyone on the opt-out list is removed. `emails.broadcast` then sends through Resend's batch endpoint, 100 emails per request (`BATCH_SIZE`). Each email gets its own unsubscribe link. Every recipient gets an `emailLog` row of kind `broadcast` with a shared `broadcastId`. If a batch fails, all of its rows are logged as `failed`.
+
+## Opt-outs and unsubscribe
+
+Every email sent through `deliver` or a broadcast has an unsubscribe link in the footer, plus `List-Unsubscribe` and `List-Unsubscribe-Post` headers for one-click unsubscribe in mail apps.
+
+The link points to the Convex HTTP route `/unsubscribe` in `convex/http.ts`, with the address and a token:
+
+- `GET /unsubscribe` shows a small page with one button. Opening the link alone does not unsubscribe, so link scanners can't do it by accident.
+- `POST /unsubscribe` (the button, or a mail app's one-click) adds the address to `emailOptOuts` via `emails.optOut`.
+
+The token is an HMAC of the address (`unsubscribeToken` / `verifyUnsubscribeToken` in `convex/lib/tokens.ts`), so nobody can unsubscribe someone else. A bad token gets a "Link not valid" page.
+
+An opt-out is global. It stops studio emails, one-off emails, broadcasts and the jury digest. Opted-out sends are logged as `skipped` with the reason "Unsubscribed."
+
+<Callout kind="note">Unsubscribe links must keep working for years. That is why they have their own secret. Rotating `MCP_SERVICE_SECRET` must not break links already sent, so set `EMAIL_UNSUBSCRIBE_SECRET` and don't rotate it.</Callout>
+
+## The email log
+
+`emailLog` in `convex/schema.ts` has one row per attempt through `deliver` or a broadcast:
+
+| Field | Meaning |
+| --- | --- |
+| `to` | Lowercased address |
+| `subject` | Cut to 300 characters |
+| `kind` | `award`, `featured`, `outreach`, `broadcast` or `custom` |
+| `status` | `sent`, `failed` or `skipped` |
+| `error` | Why it failed or was skipped |
+| `listingId`, `creatorId`, `postId`, `broadcastId` | What it was about |
+| `sentAt` | Timestamp |
+
+Indexes: `by_to`, `by_listing_kind` (used for "already sent"), `by_sentAt`. The MCP tool `email_history` (`mcp.emailHistory`) reads it, newest first, optionally for one address.
+
+Admin alerts, jury invites and jury digests are not in this log. Their failures only appear as warnings in the Convex logs.
+
+## The approval rule
+
+Every one-off email and every broadcast needs an explicit human yes before it goes out.
+
+This is enforced in the code, not just by habit:
+
+- `mcp.sendEmail` and `mcp.sendBroadcast` take a `confirm` flag. With `confirm: false` they only return a preview: the exact recipient, subject and text, or the recipient count and the first 10 addresses.
+- The MCP server (`lib/mcp/server.ts`) splits each into two tools. `preview_email` and `preview_broadcast` always pass `confirm: false`. `send_email` and `send_broadcast` require `confirm: true`, and their descriptions say it may only be set after Giorgi saw the preview and said yes.
+
+<Callout kind="sensitive">Never send an email or broadcast that an admin has not approved in that exact form. Preview first, show it, wait for a clear yes. If the text changes after approval, preview and ask again. A broadcast cannot be recalled once it starts.</Callout>
+
+The automatic emails (winner, featured, digest, admin alerts) follow from admin actions or set schedules: giving an award, approving a post, the digest time.
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `convex/lib/email.ts` | `sendEmail` (one Resend call), `emailHtml`, `escapeHtml` |
+| `convex/emails.ts` | `deliver`, opt-outs, `emailLog` writes, broadcast audiences and batches, the featured email |
+| `convex/notify.ts` | Award winner email and admin alerts (empty day, no round winner) |
+| `convex/digest.ts` | The daily jury digest |
+| `convex/claimLinks.ts` | Jury invite email (`emailJuror`) |
+| `convex/social.ts` | Schedules the featured email on approval; the daily "posts waiting" email |
+| `convex/channels.ts` | LinkedIn token warning email |
+| `convex/mcp.ts` | `sendEmail`, `sendBroadcast`, `emailHistory` for the MCP connector |
+| `lib/mcp/server.ts` | The preview, send and history MCP tools |
+| `convex/http.ts` | The `/unsubscribe` page and handler |
+| `convex/lib/tokens.ts` | Signs and checks unsubscribe tokens |
+| `convex/crons.ts` | Schedules the digest, the waiting nudge and the channels check |
+| `convex/schema.ts` | `emailLog`, `emailOptOuts`, `emailKind` |
+| `components/admin/ClaimLink.tsx` | The "Email link" button for jury invites |

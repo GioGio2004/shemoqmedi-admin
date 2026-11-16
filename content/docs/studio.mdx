@@ -1,0 +1,217 @@
+The Studio is where Shemoqmedi's social posts are designed, checked, scheduled and published. It lives at studio.shemoqmedi.space, but it is not a separate project: it is the same Next app as the admin, with the same Convex backend. A request's host decides which app answers. Only platform admins can use it. This page explains how it is wired, what each tab does, and the design rules every Studio screen follows.
+
+## Host routing
+
+One Next app serves two hosts. `proxy.ts` runs on every request and asks `studioRouting()` in `lib/studioRouting.ts` what to do with it.
+
+- **Studio host** (`studio.shemoqmedi.space`, or `studio.localhost` in development): a page path `/x` is rewritten to `app/studio/x`. The address bar keeps `/x`. There is no `/studio` prefix in Studio URLs.
+- **Shared paths** are served as they are on the Studio host: `/api/*`, the Clerk pages (`/sign-in`, `/sign-up`, `/sso-callback`), `/.well-known`, Next internals, the PWA files (`/sw.js`, `/manifest.webmanifest`, `/icons/*`), `/fonts` and any path that ends in a file extension.
+- **Admin host** (everything else): `/studio` and `/studio/*` redirect to the Studio host. Three old admin pages also redirect to their Studio replacements (`MOVED_TO_STUDIO`):
+
+| Old admin page | Studio page |
+| --- | --- |
+| `/social` | `/queue` |
+| `/design` | `/create` |
+| `/voiceover` | `/reels` |
+
+Query strings are kept on every rewrite and redirect. `lib/hosts.ts` holds the two origins (`STUDIO_ORIGIN`, `ADMIN_APP_ORIGIN`) and `isStudioHost()`. Only the two exact Studio host names count, so a look-alike host never gets Studio routing. The routing rules are unit tested in `tests/studioRouting.test.ts`.
+
+### Sign-in and access
+
+Every Studio page needs a Clerk session. Without one, `proxy.ts` redirects to `/sign-in` on the Studio host itself (`studioSignInUrl`), then back to the same address. The sign-in page is shared by both hosts. After signing in with no return address, the Studio opens its home `/`.
+
+A session is not enough. `StudioShell` checks the admin role (`useAdmin`) before any page mounts. A signed-in user who is not an admin sees an access notice instead of the page. On the backend, every Studio Convex function calls `requireAdmin`, which accepts the `admin` and `super_admin` roles.
+
+To run the Studio locally, start the dev server and open `http://studio.localhost:3000`.
+
+## The tabs
+
+`StudioShell` draws the frame: a glass top bar, the floating tab bar (a left dock on screens 900px and wider), the ambient background, toasts and the settings sheet. The tabs are:
+
+| Tab | Path | Page component |
+| --- | --- | --- |
+| Home | `/` | `components/studio/home/Home.tsx` |
+| Queue | `/queue` | `components/studio/queue/Queue.tsx` |
+| Create | `/create` | `components/studio/create/Create.tsx` |
+| Reels | `/reels` | `components/studio/reels/Reels.tsx` |
+| Reminders | `/reminders` | `components/studio/reminders/Reminders.tsx` |
+
+The Queue tab shows a count of waiting posts (`social.waitingCount`). Any other path on the Studio host falls into `app/studio/[...rest]/page.tsx`, which shows the Studio's own not-found page inside the frame.
+
+### Home
+
+Home is the day at a glance: the queue, the next scheduled post, reel drafts that are ready, recent sent posts, channel health, quick actions, links to the Convex, ImageKit and Vercel dashboards, and this device's push switch and install prompt. Times are shown in Tbilisi time.
+
+## The queue
+
+The queue lists social posts by status. The tabs come from `QUEUE_TABS` in `lib/studio/queue.ts`:
+
+| Tab | Status | Meaning |
+| --- | --- | --- |
+| Waiting | `waiting` | Queued, needs a human decision. |
+| Scheduled | `scheduled` | Approved for a later time. |
+| Sent | `sent` | Every attempted network sent. |
+| Failed | `failed` | At least one network failed. |
+| Not connected | `approved` | Approved, but no network could be attempted (no account connected). |
+| Rejected | `rejected` | Turned down. |
+| All | all | Everything. |
+
+`/queue?status=failed` opens a tab. `/queue?post=<id>` opens one post on top; push notifications about posts link there (`studioPostUrl`).
+
+What you can do with a post depends on its status (`postActions`): publish now, schedule, unschedule, reject, edit, or retry. A retry only attempts the networks that have not sent yet. Opening a post shows its media, the caption for each network, and previews that look like the real Instagram and Facebook apps. Where posts come from, the full status flow and the approval rule are on the Social desk page.
+
+### Editing a post's media
+
+Each rendered graphic stores the recipe it was made from (`media.design`). From the queue you can open an image back in Create (`/create?post=<id>&item=<i>`), change it and render it again, or add a new graphic to the post (`/create?post=<id>&mode=add`). Reels open back in the reel editor the same way. The full contract is in `docs/post-editing.md`.
+
+## Create
+
+Create makes a graphic from scratch, top to bottom on one screen:
+
+1. **Source**: a listing, an award, an announcement, a call for submissions, a call for jurors, or free text.
+2. **Style**: glass, swiss, kinetic, magazine or bento.
+3. **Output**: a feed image, a carousel (the site's story over several slides), or a story (9:16).
+4. **Live preview** with every palette beside it, plus the text fields.
+5. **Render final**: the server draws the exact JPEGs.
+6. **Captions**, then publish, schedule, or keep as a draft.
+
+`/create?output=story` starts with the story output (a Home quick action).
+
+### Styles
+
+| Style | Look |
+| --- | --- |
+| `glass` | Frosted glass panels over a blurred, palette-tinted backdrop of the site. The default. Has three treatments: frost, liquid, tint. |
+| `swiss` | Strict 12-column grid, huge grotesk headline, hairline rules, lots of white. |
+| `kinetic` | Type as the image: oversized, split, stacked and cropped words. Works as a reel cover. |
+| `magazine` | A print cover: serif display, issue number, columns. |
+| `bento` | Rounded tiles: screenshot, score, stack, studio and award. |
+
+The list lives in `STYLES` and `STYLE_INFO` in `lib/graphics/spec.ts`. Each style has its own file in `lib/graphics/styles/`. Palettes are in `lib/palettes.ts`, plus `auto`, which takes colours from the screenshot.
+
+### Preview and render
+
+The preview and the final render use the same template components, so what you see is what you get.
+
+- **Preview** (in the browser): `lib/graphics/preview.tsx` renders the templates as HTML. The pictures it needs (the screenshot, the blurred backdrop, the palette) come from `GET /api/graphics/assets`, fetched by `useAssets`. Nothing is saved while you design.
+- **Render final** (on the server): Create calls the `graphics.renderForPost` action. It asks the admin app's `/api/graphics` route (or `/api/graphics/carousel` for carousels) to draw JPEGs with satori and sharp, then stores them on ImageKit. Every render records its recipe on its media row.
+
+`/api/graphics` accepts either a signed-in admin or the `x-render-key` header matching `GRAPHICS_RENDER_KEY`. Convex uses the key and needs `ADMIN_ORIGIN` to know where the admin app is.
+
+Formats: `ig_portrait` 1080×1350, `square` 1080×1080, `story` 1080×1920, `reel_cover` 1080×1920, `link` 1200×627.
+
+Work in progress is kept on the device (`lib/studio/persist.ts`) until it becomes a post, so a reload or iOS closing the app loses nothing.
+
+## Reels
+
+The Reels tab has two views:
+
+- **Editor**: the full reel editor. Drafts, recent reels and a "new reel" button.
+- **Quick reel**: one listing's preview video with a spoken narration, built into one MP4 (`buildReel` in `lib/voiceoverMux.ts`).
+
+### The reel editor
+
+A reel is a JSON **recipe** (`lib/reel/recipe.ts`, mirrored for Convex in `convex/lib/reel.ts`). It holds clips, a voice track, a music track, captions and fades. Each clip has its own trim, speed, motion, fit, text and transition. Clips can come from listings (preview video and screenshots), rendered graphics, or uploaded videos and images. Every option is the editor's choice; the defaults are only a starting point.
+
+All video work happens in the browser with mediabunny, WebCodecs, canvas and Web Audio. There is no render server.
+
+- **Preview**: `components/studio/reels/PreviewPlayer.tsx` draws each frame with the same compositor as the final render (`drawFrame` in `lib/reel/compositor.ts`), so the preview matches the output.
+- **Render**: `lib/reel/render.ts` encodes an H.264 + AAC MP4 at 30 fps. It refuses outputs over 100 MB. It needs a browser that can encode H.264 and AAC; on iPhone the AAC encoder is often missing, so the message asks you to render on a computer in Chrome or Edge.
+- **Upload**: the finished MP4 goes to Cloudflare R2 (`reels.renderUploadUrl`, then `reels.registerRender`). The render keeps running if you leave the page (`lib/studio/reelRender.ts`).
+
+Drafts save automatically about one second after a change (`reels.update`). If someone else changed the draft meanwhile, the editor offers to load the newer version and never overwrites it silently. Draft statuses are `draft`, `ready` (made or changed by Claude through the connector, waiting for a render) and `rendered`.
+
+Addresses: `/reels?draft=<id>` opens a draft, `/reels?new=1` starts a new reel, and adding `&post=<id>` ties it to a post so the render can go into that post.
+
+The detailed contract is `docs/reel-editor.md`.
+
+### Voiceover
+
+Narration comes from ElevenLabs. `voiceover.voices` lists the narrators. `voiceover.generateTimed` turns a script into an MP3 with word timings, stored on R2, and the editor turns the timings into captions. Earlier narrations can be reused (`voiceover.narrations`).
+
+<Callout kind="warning">Generating a voice spends ElevenLabs credits. The editor asks for confirmation before it calls `voiceover.generateTimed`.</Callout>
+
+Convex env: `ELEVENLABS_API_KEY`, and optionally `ELEVENLABS_VOICES` and `ELEVENLABS_MODEL`.
+
+### Loudness target
+
+By default the finished mix is brought to **-14 LUFS**, the level Instagram and Facebook Reels play at. The measurement follows ITU-R BS.1770 integrated loudness, and a look-ahead limiter keeps sample peaks under -1.5 dBFS. It runs inside `mixAudio`, so the preview plays as loud as the render. The recipe field `audio.evenLoudness` turns it off; then volumes play exactly as set. The code is `lib/reel/loudness.ts` (`TARGET_LUFS`).
+
+## Reminders
+
+Reminders are "remind me at" notes for yourself. Write a line (up to 200 characters) and pick a time within the next year. At that time you get a push notification on your own devices.
+
+Each reminder is one scheduled `reminders.fire` job. Removing a reminder cancels the job. You can have up to 100 waiting. Only your own reminders are listed. `/reminders?new=1` opens the new-reminder field.
+
+## Publishing
+
+Publishing is covered in full on the Social desk page. What matters in the Studio:
+
+- **Publish now** and **Schedule** both call `social.publish`. Without a time, or with a time in the past, it publishes now; otherwise the post is scheduled. **Unschedule** (`social.unschedule`) moves it back to waiting.
+- Posts go to every network that has a caption: the Facebook Page, Instagram, Threads and LinkedIn. The calls are made by `convex/publish.ts` and `convex/lib/socialApi.ts` (Meta Graph API).
+- A post's **placement** is `feed` (the default) or `story`. A story has exactly one media item in 9:16. It goes to Instagram and Facebook only; Threads and LinkedIn are recorded as skipped because they have no stories API. A story video must run 3 to 60 seconds.
+
+## Push notifications
+
+The Studio and the admin are both installable PWAs. Each host gets its own manifest from `app/manifest.ts`, so they install as two apps ("Studio" and "Admin"). `public/sw.js` only handles push: it shows the notification and opens its link when tapped.
+
+An admin turns notifications on per device (the switch on Home or in Settings). The browser's subscription is stored with `push.subscribe`. `push.notifyAdmins` sends to every admin's devices, or to one admin for reminders and the test button. Dead subscriptions (404 or 410 from the push service) are deleted. The encrypted send runs in Node in `convex/pushSend.ts`.
+
+Pushes the system sends today:
+
+| Push | Sent from |
+| --- | --- |
+| A post is waiting / N new posts are waiting | `convex/social.ts` |
+| N posts waiting (every morning at 09:00 Tbilisi) | `convex/social.ts`, cron in `convex/crons.ts` |
+| Published / Failed, with the post's name | `convex/publish.ts` |
+| Reel draft ready to render | `convex/reels.ts` |
+| Reminder | `convex/reminders.ts` |
+| Threads token refresh failed, and other channel warnings | `convex/channels.ts` |
+| New submission, new claim, listing draft ready, award notices | `convex/listings.ts`, `convex/claims.ts`, `convex/editorial.ts`, `convex/notify.ts` |
+
+Env: Convex needs `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` and `VAPID_SUBJECT`; Next needs `NEXT_PUBLIC_VAPID_PUBLIC_KEY`. Without them push is switched off: `notifyAdmins` logs and returns, and nothing fails.
+
+## Design language: liquid glass
+
+The Studio looks like an iOS "Liquid Glass" app, light first with a dark mode. The full contract is `docs/studio-glass.md`. The rules a new developer must not break:
+
+- **The accent is black, never blue.** Black in light mode, white in dark mode (`--st-accent`). Colour comes only from the posts' own artwork. A failure is shown in muted red text or a dot only (`--st-danger`).
+- **Use the tokens.** All colours, glass fills, shadows and springs are CSS variables on `.st` in `app/studio/studio.css`. Never hard-code a colour in a screen.
+- **No white bezel.** A glass surface is a translucent fill with blur, a 0.5px hairline, a 1px top highlight, a soft sheen and a shadow. Pictures sit flush in cards.
+- **The crow is the logo** (`.st-crow`), drawn as a mask in the current text colour.
+- **Liquid presses.** Buttons, chips and tabs squash and spring back. One `useLiquid` hook in `StudioShell` handles this for the whole app. With reduced motion, the squash and ripple are off.
+- **Reuse the shared pieces**: `Sheet`, `ConfirmSheet`, `Segmented`, `Switch`, `Droplet` (the stretching selection indicator), `Lightbox`, `TimeSheet` and the glass toasts.
+- **Platform rules**: inputs at least 16px (so iOS does not zoom), touch targets at least 44px, safe-area insets, visible focus rings, no visible scrollbars.
+- Each screen keeps its own styles in `app/studio/screens/<screen>.css`.
+- Copy is English, short and plain, with no emoji in the interface.
+
+<Callout kind="note">The Studio theme (System, Light, Dark) is set in the settings sheet. A small script in `app/studio/layout.tsx` applies it before the first paint, so there is no flash of the wrong theme.</Callout>
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `proxy.ts` | Runs on every request: host routing, session checks, sign-in redirects. |
+| `lib/studioRouting.ts` | Decides pass, rewrite or redirect for a host and path. |
+| `lib/hosts.ts` | The Studio and admin origins, `isStudioHost`, deep-link helpers. |
+| `app/studio/layout.tsx` | The Studio's layout: theme script, `StudioShell`, `studio.css`. |
+| `app/studio/*/page.tsx` | The five tab pages and the not-found catch-all. |
+| `app/studio/studio.css` | Design tokens and shared classes. |
+| `components/studio/StudioShell.tsx` | Top bar, tab bar, admin gate, settings, push state. |
+| `components/studio/queue/` | The queue, post detail, previews, media editing. |
+| `components/studio/create/` | Create: pickers, live preview stage, final render step. |
+| `components/studio/reels/` | Reels tab, quick reel, the reel editor, preview player. |
+| `components/studio/reminders/` | Reminders list and swipe-to-delete rows. |
+| `lib/studio/` | Pure Studio logic: queue actions, Create state, post editing, reel editor state, background builds. |
+| `lib/graphics/` | Graphic templates, styles, preview kit and server rendering. |
+| `app/api/graphics/` | Render routes: single graphic, carousel, preview assets, fonts. |
+| `lib/reel/` | Reel recipe, timeline, compositor, audio mix, loudness, render. |
+| `lib/voiceoverMux.ts` | The quick reel builder and reel upload helper. |
+| `convex/graphics.ts` | Render actions that store JPEGs on ImageKit. |
+| `convex/reels.ts` | Reel drafts, uploads, renders. |
+| `convex/voiceover.ts` | ElevenLabs voices and narrations. |
+| `convex/reminders.ts` | Create, list, remove and fire reminders. |
+| `convex/push.ts`, `convex/pushSend.ts` | Push subscriptions and sending. |
+| `convex/publish.ts`, `convex/lib/socialApi.ts` | Publishing to the networks. |
+| `public/sw.js` | Service worker for push notifications. |
+| `docs/studio-glass.md`, `docs/reel-editor.md`, `docs/post-editing.md` | Detailed design and engineering contracts. |

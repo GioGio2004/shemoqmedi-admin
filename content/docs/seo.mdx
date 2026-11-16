@@ -1,0 +1,116 @@
+Search is the main way people will find Shemoqmedi, so the storefront is built to be crawled and understood. This page covers the technical setup (metadata, canonicals, sitemaps, structured data, 410s, IndexNow), the team rules for links, and the November 2026 baseline we measure progress against.
+
+## The baseline (November 2026)
+
+This is the starting point. Measure every change against it.
+
+- Google had indexed roughly **10 of 104** pages.
+- Bing had indexed **0** pages.
+- Search results still showed **stale Voloo snippets** from the old product on this domain.
+- The brand name **clashes with a monastery** of the same name, so a plain "Shemoqmedi" search is ambiguous.
+
+The work since then targets each point: 410s and redirects to clear Voloo, IndexNow to reach Bing, a full sitemap and prerendered pages for Google, and `sameAs` social profiles to separate the brand from the monastery.
+
+## One canonical host
+
+- The only indexable host is `www.shemoqmedi.space`. Vercel redirects the apex `shemoqmedi.space` to www.
+- `lib/site.ts` defines `SITE_URL` and `absoluteUrl()`. Everything that needs a full URL (canonicals, sitemap, robots, JSON-LD) uses them.
+- `next.config.ts` hard-codes the canonical host on purpose, so an environment typo can never noindex the live site. Any other host, such as a `*.vercel.app` alias or localhost, gets `X-Robots-Tag: noindex`.
+- If the apex is ever attached to the project without a redirect, host rules in `next.config.ts` send every apex URL to its final www address in one hop.
+
+## Metadata
+
+- `app/layout.tsx` sets `metadataBase`, the default title and description (used by the home page), the title template `%s | Shemoqmedi`, default Open Graph fields, a large Twitter card, and the crow icons.
+- Every public page sets `alternates.canonical` to its own path. Relative paths resolve against `metadataBase`.
+- Listing pages build their own titles and descriptions in `generateMetadata` (title up to 60 characters before the suffix, description up to 160).
+- A page that sets its own `openGraph` replaces the root one completely (Next merges one level deep), so it must repeat `siteName`, `locale`, `type` and `images`.
+- The default share image is `app/opengraph-image.tsx`.
+
+### What is noindex
+
+| Page or case | How |
+| --- | --- |
+| All signed-in pages, sign-in and sign-up | `robots: index false` in metadata |
+| 404 page | `robots: index false` |
+| Collections with fewer than 5 sites | `noindex, follow` until they fill up, and left out of the sitemap |
+| Site of the Day archive with fewer than 2 winners | Same |
+| Non-canonical hosts | `X-Robots-Tag: noindex` header |
+| Old Voloo pages | 410 plus `X-Robots-Tag: noindex` |
+
+The thresholds are `MIN_INDEXABLE_COLLECTION` and `MIN_INDEXABLE` in storefront `lib/collections.ts`.
+
+## robots.txt
+
+`app/robots.ts` allows everything and blocks only `/api/`. The signed-in routes are not blocked on purpose: Google can only obey a `noindex` it is allowed to fetch, and a blocked URL linked from every page can still be indexed without content.
+
+## Sitemap
+
+`app/sitemap.ts` builds `/sitemap.xml`, refreshed at most once an hour. It contains:
+
+- Hub pages: home, creators, badges, about, how we score, crow, jury, privacy, terms, `/ka`.
+- The Site of the Day archive and each collection, but only once they pass the thresholds above.
+- Every public listing, with its screenshots (image sitemap) and walkthrough video (video sitemap).
+- Every creator, with the covers of their sites.
+- Public jurors (claimed profiles only).
+- Every award page.
+
+`lastModified` comes from real update times, and hub pages use the newest change among the listings they show.
+
+## Structured data (JSON-LD)
+
+Each public page writes its own `application/ld+json` block. Types in use include `WebSite`, `Organization`, `WebPage`, `AboutPage`, `CollectionPage`, `ItemList`, `BreadcrumbList`, `ProfilePage`, `Person`, `CreativeWork`, `ImageObject`, `VideoObject` and `Place`.
+
+The `Organization` lists the official Instagram and Facebook profiles as `sameAs` (from `SOCIAL_PROFILES` in `lib/site.ts`). This tells search engines which "Shemoqmedi" we are, and is the main lever against the monastery name clash. Add new official profiles there.
+
+## Languages
+
+The site is English only. The one exception is `/ka`, a hand-written Georgian landing page for sites made in Georgia. It and `/collections/georgia` point at each other with `hreflang` alternates (in page metadata and the sitemap), and `next.config.ts` sends `Content-Language: ka` for `/ka`, which Bing reads.
+
+## Redirects and 410s
+
+- Renamed listings: the admin keeps old slugs. An old `/sites/...` URL gets a permanent redirect to the current slug (`lib/slugRedirect.ts`), so links, rankings and embedded badges keep working.
+- Old Voloo URLs with a live equivalent (locale prefixes, `/category/...`, `/collections/sotd`, old NFC sticker links) are permanently redirected in `next.config.ts`.
+- All other Voloo URLs answer **410 Gone** from `proxy.ts`, using `lib/gone.ts`. A 410 is dropped from the index faster than a 404, and avoids the "soft 404" Google gives redirects to the home page.
+
+## Outbound links
+
+Links to listed sites carry `?ref=shemoqmedi.space` so owners see our referrals (`lib/ref.ts`). Links to unclaimed listings are `nofollow`; claiming a listing makes its link followed (`outboundRel` in `lib/ref.ts`).
+
+## IndexNow and Search Console
+
+- **IndexNow** (admin `convex/seo.ts`): when a public page changes, Convex waits about 75 seconds (past the 60-second ISR window), requests each changed page once so it rebuilds, then pings IndexNow. That reaches Bing and engines that use it. Google ignores IndexNow and relies on the sitemap. It runs only where `INDEXNOW_KEY` is set (production), and the key file is served from storefront `public/`.
+- **Google Search Console** is managed in its own dashboard, not in code. Use it to submit the sitemap, inspect URLs and track indexed pages against the baseline.
+
+## Link rules for the team
+
+These are firm rules.
+
+- **Never buy links.**
+- **Never use private blog networks (PBNs).**
+- **Never do link swaps** ("I link you, you link me").
+
+Earn links instead:
+
+- **Badges.** Winners embed a badge (`/badge/...`) that links to their award page. This is the main link engine, so keep badges good-looking and the award pages worth linking to.
+- **Jury.** Jurors get public profile pages and a shareable badge; they link to them from their own sites and profiles.
+- **Press.** Outreach to design media and studios about awards and notable sites.
+
+<Callout kind="warning">Paid or swapped links risk a manual penalty that would wipe out the indexing work above. If someone offers a link deal, decline it.</Callout>
+
+## Where it lives
+
+| File or folder | What it does |
+| --- | --- |
+| storefront `lib/site.ts` | Canonical origin, `absoluteUrl()`, official social profiles |
+| storefront `app/layout.tsx` | Default metadata, title template, icons |
+| storefront `app/opengraph-image.tsx` | Default share image |
+| storefront `app/sitemap.ts` | Sitemap with images and video |
+| storefront `app/robots.ts` | robots.txt |
+| storefront `lib/collections.ts` | Collections and the indexing thresholds |
+| storefront `lib/imageSeo.ts` | Image and video data for pages and the sitemap |
+| storefront `lib/slugRedirect.ts` | Redirects for renamed listings |
+| storefront `lib/gone.ts`, `proxy.ts` | 410 Gone for Voloo pages |
+| storefront `next.config.ts` | Legacy redirects, noindex on other hosts, `Content-Language` for `/ka` |
+| storefront `lib/ref.ts` | Referral parameter and nofollow rules |
+| admin `convex/seo.ts` | IndexNow pings |
+| storefront `public/` | IndexNow key file |

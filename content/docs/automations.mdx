@@ -1,0 +1,141 @@
+Shemoqmedi runs a few jobs on its own. Cron jobs in `convex/crons.ts` close award batches, announce winners, queue social posts and send digests. Other work runs one time, right after something happens, through the Convex scheduler (`ctx.scheduler`). The Convex backend also answers a few HTTP endpoints: the Clerk webhook and the email unsubscribe page. This page lists all of them, what they write, and what they send.
+
+## Cron jobs at a glance
+
+All times are UTC. Tbilisi is UTC+4.
+
+| Name | Schedule | Function | What it does | Sends |
+| --- | --- | --- | --- | --- |
+| `awards tick` | every 15 min | `awards.tick` | Closes ended weekly batches, announces Site of the Day, opens and announces monthly and yearly rounds | Winner email, admin push, queued social post (through `notify.awardAnnounced`) |
+| `jury digest` | every 30 min | `digest.run` | Once a day, after the digest time, emails each active juror the new sites in their categories | Juror emails |
+| `social: new listings` | every 30 min | `social.queueNewListings` | Queues a "new listing" post for each site that went public in the last 3 days | Admin push |
+| `social: call for submissions` | Monday 06:00 | `social.queueCall` | Queues the weekly call for submissions | Admin push |
+| `social: call for jurors` | Thursday 06:00, every other week | `social.queueCall` | Queues the call for jurors | Admin push |
+| `social: weekly roundup` | Sunday 14:00 | `social.queueRoundup` | Queues a roundup of the week's new sites and awards | Admin push |
+| `social: waiting nudge` | daily 05:00 | `social.waitingPing` | Tells admins how many posts wait on the social desk | Admin email and push |
+| `social: channels` | daily 04:30 | `channels.daily` | Picks up new social tokens, refreshes the Threads token, warns before the LinkedIn token expires | Admin email and push (LinkedIn warning only) |
+
+None of the social crons publish anything. They only queue posts with status waiting. A post goes out only after an admin approves it (see the MCP page).
+
+## Cron jobs in detail
+
+### awards tick
+
+`awards.tick` is an internal mutation. It runs four steps in order. Each step is safe to run again.
+
+1. `closeEndedVoting` closes listings whose judging week has ended. It decides Honorable Mention and Best Solo Creation and fills the Site of the Day queue.
+2. `announceSiteOfTheDay` picks the best queued site at the configured announce time (Tbilisi). A day that already has a winner, or is already logged as empty, is left alone. An empty queue means no winner and schedules `notify.emptyDay`, which emails the admins.
+3. `openRounds` opens the Site of the Month round on the 1st of the month, and the Site of the Year round on 1 January.
+4. `announceRounds` announces each round whose announce time has passed. No eligible winner schedules `notify.noRoundWinner`.
+
+Every award it grants goes through `grantAward` in `convex/lib/awards.ts`, which schedules `notify.awardAnnounced`. That action:
+
+- emails the winner once (the site's owner, or the creator's private contact email with a claim link when nobody has claimed it). `awards.notifiedAt` stops a second send.
+- queues a social post for the award (`social.queueAward`). Not for the honorary First 100.
+- pushes a short note to the admins' devices.
+
+Decisions are written to the award audit log, which admins can read on the Awards page.
+
+### jury digest
+
+`digest.run` runs every 30 minutes but does nothing before the configured digest time of the Tbilisi day. After that, each active, claimed juror gets at most one email a day. It lists sites in voting since their last digest in the categories they follow, plus the general queue (sites no juror follows). Sites with a conflict of interest are left out. It writes `jurors.lastDigestAt`. Jurors who unsubscribed from any email are skipped. The emails are sent by `digest.send`, scheduled from `digest.run`.
+
+### Social queue crons
+
+All of these write rows to `socialPosts` with status waiting and plain `facts` for Claude to write captions from.
+
+- `social.queueNewListings` looks at listings in voting published in the last 3 days. It skips any listing that already has a `new_listing` post, so it never doubles up.
+- `social.queueCall` skips when a post of the same kind was made in the last 6 days. With `everyOtherWeek`, it also skips odd weeks.
+- `social.queueRoundup` skips when a roundup was made in the last 6 days, and when the week had no new sites and no awards.
+- `social.waitingPing` emails and pushes every admin when at least one post is waiting. It is not deduplicated: every run sends.
+
+### social: channels
+
+`channels.daily` runs three actions:
+
+1. `channels.sync` reads `META_PAGE_ACCESS_TOKEN`, `THREADS_ACCESS_TOKEN` and `LINKEDIN_ACCESS_TOKEN` from the Convex env. A changed token replaces the stored account. A removed variable removes the account.
+2. `channels.refreshThreads` refreshes the Threads token when it is due.
+3. `channels.warnLinkedin` emails and pushes the admins before the LinkedIn token expires (LinkedIn tokens can't be refreshed automatically). It marks the warning as sent so it is not repeated every day.
+
+## Scheduled functions worth knowing
+
+These run one time, right after (or at a set time after) a mutation. They are not crons.
+
+| Scheduled from | Runs | When | Effect |
+| --- | --- | --- | --- |
+| `grantAward` (`convex/lib/awards.ts`) | `notify.awardAnnounced` | at once | Winner email, social post, admin push |
+| `awards.ts` | `notify.emptyDay`, `notify.noRoundWinner` | at once | Admin email |
+| `social.ts` approve or publish | `publish.post` | at once, or at the post's publish time (`runAt`) | Posts to Facebook, Instagram, Threads, LinkedIn |
+| `social.ts` unschedule or edit | cancels the pending `publish.post` job | at once | Scheduled publish is cancelled |
+| `social.ts` approving a `new_listing` post | `emails.featured` | at once | Emails the studio that it is featured |
+| `mcp.sendBroadcast` | `emails.broadcast` | at once | Emails a whole audience in the background |
+| `push.ts` helpers | `push.notifyAdmins` | at once | Web push to admin devices |
+| `reminders.ts` | `reminders.fire` | at the reminder's time (`runAt`) | Push to the admin who set it; removing the reminder cancels the job |
+| `media.ts` | `media.verify`, `media.verifyVideo` | at once | Re-checks an upload with ImageKit or R2; a bad file is deleted and flagged |
+| `lib/media.ts` | `media.deleteRemote`, `media.deleteR2` | at once | Deletes the file from ImageKit or R2 after its row is removed |
+| `reels.ts`, `voiceover.ts` | `reels.verifyUpload`, `voiceover.verifyReel` | at once | Checks reel and audio uploads on R2 |
+| `seo.scheduleIndexNow` | `seo.pingIndexNow` | about 75 seconds later | Pings IndexNow with changed site paths; does nothing without `INDEXNOW_KEY` |
+
+The IndexNow delay is the storefront's 60 second page revalidation plus 15 seconds, so search engines fetch the fresh page.
+
+## HTTP endpoints
+
+`convex/http.ts` defines the routes. They live on the deployment's `.convex.site` domain, not on the Next apps.
+
+| Method and path | What it does |
+| --- | --- |
+| `POST /clerk-users-webhook` | Clerk user sync. Verifies the Svix signature with `CLERK_WEBHOOK_SECRET`. `user.created` and `user.updated` call `users.upsertFromClerk`. `user.deleted` calls `users.deleteFromClerk`, which also deactivates the person's juror profile. Other events get 200 so Clerk stops retrying. A bad signature gets 401. |
+| `GET /unsubscribe` | Shows a page with one Unsubscribe button. Opening the link does not unsubscribe anyone, so link scanners are harmless. |
+| `POST /unsubscribe` | The button, and mail apps' one-click unsubscribe. Checks the HMAC token for that address, then calls `emails.optOut`. |
+
+The unsubscribe token is signed with `EMAIL_UNSUBSCRIBE_SECRET` (falls back to `MCP_SERVICE_SECRET` while unset). Nobody can unsubscribe another address without a valid token.
+
+The MCP connector is not a Convex HTTP route. It is a Next route in the admin app (`/api/mcp`).
+
+## Pause a job or run one by hand
+
+### Pause a cron
+
+There is no on/off switch in the code. To pause a cron, comment out its line in `convex/crons.ts` and deploy the backend:
+
+```bash
+npx convex deploy
+```
+
+Put the line back and deploy again to resume. The Convex dashboard lists cron jobs and pending scheduled functions, and a pending scheduled function can be cancelled there.
+
+<Callout kind="warning">Pausing `awards tick` stops Site of the Day and round announcements. When you turn it back on, the next tick catches up on anything that is due, so winners can appear late in one burst.</Callout>
+
+### Run one by hand
+
+Internal functions can be run from the CLI. Add `--prod` for production. Without it, you hit your dev deployment.
+
+```bash
+npx convex run awards:tick --prod
+npx convex run social:queueNewListings --prod
+npx convex run social:queueCall '{"kind":"call_submissions"}' --prod
+```
+
+Safe to run again: `awards:tick`, `social:queueNewListings`, `social:queueCall`, `social:queueRoundup`, `digest:run` (each juror at most once a day), `channels:sync`.
+
+Not deduplicated: `social:waitingPing` emails every admin each time. Think before running it.
+
+In Windows PowerShell 5.1 the inner quotes of JSON arguments are stripped. Run these from Git Bash, or escape the quotes.
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `convex/crons.ts` | Every cron and its schedule |
+| `convex/awards.ts` | `tick` and the four award steps, admin award overrides |
+| `convex/lib/awards.ts` | Award rules, `grantAward`, audit log |
+| `convex/notify.ts` | Winner email, empty day and no-winner alerts |
+| `convex/digest.ts` | Juror digest |
+| `convex/social.ts` | Social queue crons, approve, publish scheduling |
+| `convex/publish.ts` | Publishing a post to each network |
+| `convex/channels.ts` | Social tokens: sync, Threads refresh, LinkedIn warning |
+| `convex/reminders.ts` | Admin reminders as scheduled pushes |
+| `convex/seo.ts` | IndexNow pings |
+| `convex/http.ts` | Clerk webhook and unsubscribe routes |
+| `convex/lib/utils.ts` | Svix check for the Clerk webhook |
+| `convex/lib/tokens.ts` | Unsubscribe and service credential signing |

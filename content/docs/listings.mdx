@@ -1,0 +1,248 @@
+A listing is one website in the showcase, stored as a row in the `listings` table and shown at `/sites/<slug>` on the storefront. Most listings are added by hand by an admin with their own screenshots and video. People can also submit their own site from the storefront. Either way, every listing moves through the same statuses: it waits for review, goes public for a jury voting window, and then closes as awarded or archived.
+
+## How a listing is created
+
+There are three ways in. All of them end up in the same table and follow the same rules.
+
+| Path | Who | Function | `source` | Starts as |
+| --- | --- | --- | --- | --- |
+| Admin form (`/listings/new` in the admin app) | Admin | `convex/admin.ts` → `createListing` | `import` | Any status the admin picks: `pending`, `in_voting`, `awarded` or `archived` |
+| URL importer (seed page) | Admin | `convex/importer.ts` → `importUrls` | `import` | `in_voting` if "publish now", else `pending` |
+| Storefront submit form (`/submit`) | Any signed-in user | `convex/listings.ts` → `submit` | `submission` | Always `pending` |
+
+There is also `importer.ts` → `seedFlagship`, which loads a fixed set of flagship listings with `source: "seed"`.
+
+### Admin form (the normal path)
+
+`admin.createListing` is the main way listings get in. The admin fills in the copy, uploads the cover, gallery and video, and picks a status.
+
+- `in_voting`: the listing goes public now. Voting ends at the end of next week by default (see below), or at a date the admin sets. The date must be in the future.
+- `awarded`: the listing is created closed, then each chosen award is given through the normal award rules as a **manual** award. The admin must pick at least one award and give a reason. The reason goes in the award audit log.
+- `archived`: created closed with no awards.
+- `pending`: waits in the review queue like a submission.
+
+Admin-created listings have no owner (`ownerId` is empty). The admin sets `isClaimed` by hand. Unclaimed listings can get a secret claim link later (see "Claims" below).
+
+A listing can be linked to a juror with `jurorId`. Claiming that juror's link then claims the listing too (the "bundle"). It can also be linked to an agent-desk brief with `briefId`.
+
+### Importer
+
+`importer.importUrls` takes up to 10 URLs (`LIMITS.importBatch`). For each URL it captures a desktop screenshot and reads the page title and description. All URLs in a batch share one category, technology list, region, creator tier and "Made by". Imported listings are always unclaimed.
+
+### Storefront submission
+
+`listings.submit` runs when someone uses the `/submit` page. It needs a signed-in user (`requireUser`).
+
+- "Express Fast-Track" is refused for now. Only `standard` is accepted.
+- A user can have at most 5 listings waiting in `pending` at once (`LIMITS.pendingPerUser`).
+- The submitter becomes the owner (`ownerId`), and the listing starts as claimed.
+- If no creator profile exists for the "Made by" name, a new one is created and marked as claimed by the submitter.
+- Every admin gets a push notification ("New submission") that opens the review page.
+
+## Rules that apply to every new listing
+
+- **One active listing per website.** The URL is reduced to a domain key (`convex/lib/domains.ts` → `domainKey`): protocol, `www.` and a trailing slash are stripped. A website that is pending or in voting cannot be added again.
+- **Redesigns.** A website already in the showcase (awarded or archived) can only come back as a significant redesign, linked with `redesignOf`. If the old listing won an award, the redesign is allowed only `resubmitMonths` after its last award (default 12, an award setting).
+- **Text limits** (`LIMITS` in `convex/lib/taxonomy.ts`): title 80 characters, tagline 160, jury note 600, write-up 2000, "Made by" 80, review note 500.
+- **Categories:** 1 to 3, from the fixed `CATEGORIES` list. The first is the primary one.
+- **Technologies:** 1 to 6, from the fixed `TECHNOLOGIES` list.
+- **Slug:** made from the title and kept unique.
+
+## Fields
+
+From `convex/schema.ts` → `listings`. Grouped by purpose.
+
+### Identity and ownership
+
+| Field | Meaning |
+| --- | --- |
+| `slug` | The page address, `/sites/<slug>` |
+| `previousSlugs` | Old slugs, newest last, at most 10. The site sends a 308 redirect from each to the current slug |
+| `ownerId` | The verified owner (a `users` id). Empty for admin imports until claimed |
+| `creatorId` | The creator profile credited for the site |
+| `source` | `submission`, `import` or `seed` |
+| `submissionTier` | `standard` or `express` (express is not open yet) |
+| `isClaimed` | Whether someone owns it |
+| `claimToken` / `claimTokenUsed` | The secret claim link token while unclaimed, and the burned one after |
+| `jurorId` | Pre-created for this juror; claimed together with the juror profile |
+| `domainKey` | The normalized website key used for the one-listing-per-site rule |
+| `redesignOf` | The earlier listing, when this is a redesign |
+
+### Copy and taxonomy
+
+| Field | Meaning |
+| --- | --- |
+| `title`, `tagline` | Name and short description |
+| `writeup` | "About this site", the editorial write-up. Paragraphs are separated by a blank line |
+| `juryNote` | A short public review by the jury |
+| `url` | The live website, normalized |
+| `category` / `categories` | Primary category, and all categories with the primary first. Older rows only have `category` |
+| `technologies` | Technology names |
+| `region` | `georgia` or `global` |
+| `creatorTier` | `solo` or `agency` |
+| `creditName`, `creditUrl` | "Made by" text and link |
+| `isStartup` | Shown in the Startups collection |
+
+### Media
+
+| Field | Meaning |
+| --- | --- |
+| `coverId` | The first screenshot. Required |
+| `galleryIds` | Up to 4 more screenshots (`LIMITS.gallery`), so 5 images in all |
+| `videoId` | Optional short muted preview video |
+
+Each is either an old Convex storage file or a row in the `media` table. Screenshots are stored on ImageKit and videos on Cloudflare R2. See the Media page for the upload pipeline. Limits: 5 MB per stored screenshot, 15 MB per stored video, 60 seconds per video.
+
+### Review, voting and scores
+
+| Field | Meaning |
+| --- | --- |
+| `status` | See the status table below |
+| `reviewNote`, `reviewedBy`, `reviewedAt` | The reason shown to the owner on rejection, and who reviewed it |
+| `publishedAt` | When voting started |
+| `votingEndsAt` | When voting closes |
+| `batchWeek` | The Monday (Tbilisi time) of the week it was approved |
+| `editorialScores` | Per-pillar average of the jury's scores |
+| `editorialAverage`, `finalScore` | The jury's weighted score. Only the jury decides awards |
+| `communityTotals`, `communityVotesCount`, `communityAverage` | Running sums of community votes, for display only |
+| `juryVotes` | How many jury evaluations were counted |
+| `awards` | Active award tiers, highest first. A fast copy of the `awards` table |
+| `awardedAt` | When its latest active award was given |
+| `sotdQueuedAt` | Set while it waits in the Site of the Day queue |
+| `byTeam` | Built by the Shemoqmedi team: shown as such, never eligible for awards |
+
+### Display and links
+
+| Field | Meaning |
+| --- | --- |
+| `isDoFollow` | Outbound link follow state. Empty means automatic: followed once claimed, `nofollow` while unclaimed. An admin can force it either way |
+| `featuredRank` | Position in the home page's featured header (1 is first). Set on the admin `/featured` page. Up to 12 sites |
+
+`votingExtendedAt` is legacy. Nothing sets it any more; it only shows on old rows.
+
+## Statuses
+
+The schema comment in `convex/schema.ts` sums it up. Only `in_voting`, `awarded` and `archived` have a public page (`PUBLIC_STATUSES` in `convex/lib/listingHelpers.ts`).
+
+| Status | Public? | Meaning | How it gets here |
+| --- | --- | --- | --- |
+| `pending` | No | Waiting for admin review | New submission, or admin create/import with "pending" |
+| `in_voting` | Yes | Public; the jury can score it | Admin approves it (`listings.approve`), or creates it as in voting |
+| `archived` | Yes | Voting closed, no active award | Voting closed (`closeVoting`) with no award |
+| `awarded` | Yes | Voting closed, holds at least one active award | Voting closed with an award, or an award was given later |
+| `rejected` | No | Declined or unpublished. The owner sees `reviewNote` | Admin rejects it (`listings.reject`) or unpublishes it |
+
+The normal flow:
+
+1. `pending` → admin approves → `in_voting`
+2. `in_voting` → voting window ends (the awards cron) → `archived`
+3. If it earned any award, `archived` → `awarded` right away. `syncListingAwards` in `convex/lib/awards.ts` keeps `awarded` and `archived` in step with the active awards.
+4. At any point an admin can reject or unpublish it → `rejected`. A rejected listing can be approved again.
+
+Revoking a site's last award moves it back from `awarded` to `archived`. The honorary First 100 badge also counts as an award here, so a closed site that only holds that badge reads as `awarded`.
+
+### The voting window
+
+Approval (`listings.approve`) puts a site into a **weekly batch**. Sites approved Monday 00:00 to Sunday 23:59, Tbilisi time, form one batch, named by its Monday (`batchWeek`). The jury judges the batch the following week. Voting closes at the end of the Sunday one week later (`batchVotingEnds` in `convex/lib/time.ts`). So a site approved on a Monday gets about two weeks of voting, and one approved on a Sunday gets about one week.
+
+The `awards tick` cron closes ended windows every 15 minutes. An admin can also close one early with `listings.closeVotingNow`. Both apply the same award rules. See the Awards page.
+
+<Callout kind="warning">The storefront's `/submit` page still says sites get "a 7-day voting window, extended to 14 days". That text is out of date. The code uses weekly batches as described above, and nothing extends a window any more.</Callout>
+
+### Admin lifecycle override
+
+`admin.setLifecycle` moves a listing to any status by hand and can set its voting end date. Rules:
+
+- It cannot set `awarded`. Awards are given on the Awards page, where each one needs a reason and is logged.
+- A site with active awards (other than First 100) can only be moved to `rejected` until those awards are revoked.
+- Rejecting keeps the award rows on record. They come back if the site is published again. The Site of the Day queue place is lost.
+- Moving to `in_voting` keeps the current window if it was already in voting; otherwise it starts a new batch.
+
+## Categories, technologies and collections
+
+The lists live in `convex/lib/taxonomy.ts`. The storefront keeps an identical copy in its own `lib/taxonomy.ts`; keep the two the same.
+
+- `CATEGORIES`: about 40 slugs such as `portfolio`, `agency`, `saas`, `e-commerce`, `editorial`, `experimental`, `other`. `CATEGORY_GROUPS` sorts them into five menu groups.
+- `TECHNOLOGIES`: a fixed list (Next.js, React, Webflow, Framer, GSAP, Three.js and so on). A technology's `slug` is used in `/collections/<slug>` URLs.
+- `REGIONS`: `georgia` or `global`.
+- `CREATOR_TIERS`: `solo` ("Solo developer") or `agency` ("Agency / team"). Solo sites can win Best Solo Creation.
+
+Juror digests also use categories: jurors pick the categories they want to hear about.
+
+## How a listing appears on the storefront
+
+Public reads go through `toPublic` in `convex/lib/listingHelpers.ts`. It returns `null` for anything that is not `in_voting`, `awarded` or `archived`. It never returns owner ids, emails, review notes or claim tokens.
+
+| Storefront route | What it shows |
+| --- | --- |
+| `/sites/<slug>` | The listing page: screenshots, video, write-up, jury note, scores, jury comments, awards, "Made by" |
+| `/` | Home, with the featured header (`featuredRank`) |
+| `/creators/<slug>` | All public listings of one creator |
+| `/collections/<tag>` | Collections such as a technology or Startups |
+| `/site-of-the-day`, `/awards/<slug>` | Award archives and award pages |
+
+`listings.listPublic` returns up to 200 public listings, newest first. `listings.resolveSlug` maps an old slug to the current one for the 308 redirect.
+
+Each public listing shows both the jury score and the community score. Only the jury score decides awards.
+
+## Editing
+
+`admin.updateListing` edits any descriptive field. It runs `applyListingEdit`, which is shared with the agent desk and undo.
+
+- Every copy change is saved as a revision in `listingRevisions`, so it can be undone.
+- Changing the slug keeps the old one in `previousSlugs`, so old links redirect.
+- Changing the URL checks that no other listing uses that website.
+- Changing "Made by" relinks the listing to the creator profile with that name, creating one if needed.
+- Setting `isClaimed` to true burns any open claim link.
+
+Media has its own admin mutations in `convex/listings.ts`: `replaceMedia` (cover or video), `addGalleryImage`, `removeGalleryImage`, `setGalleryOrder` and `makeGalleryCover`. `admin.removeMedia` removes the preview video (the cover cannot be removed). A replaced file is deleted from storage.
+
+Scores: `listings.setEditorialScores` lets an admin type in a jury score, but only while the listing has no jury evaluations. `admin.clearEditorialScores` removes it. `admin.resetVotes` wipes community votes, for example after abuse. A hand-typed score never makes a site eligible for awards, because eligibility counts real jury votes.
+
+## Deleting
+
+- Admin: `listings.remove`.
+- Owner: `listings.withdraw` deletes their own listing at any stage.
+
+Both call `deleteListing` in `convex/lib/listingHelpers.ts`. It deletes the media files, community votes, claims and jury evaluations, then the listing. It does not delete rows in `awards` or `awardAudit`; those stay on record, and award pages for a missing listing simply stop showing. Search engines are pinged so they see the removed page.
+
+Prefer `rejected` (unpublish) over delete when you might want the site back.
+
+## Claims
+
+An unclaimed listing can be taken over by its real owner in two ways.
+
+### Claim link
+
+An admin mints a secret link with `claimLinks.link` (the admin Outreach page lists everything unclaimed). The link looks like `https://www.shemoqmedi.space/claim/<token>`. The token is 64 random hex characters and works once.
+
+Whoever opens it, signs in and confirms becomes the owner (`claimLinks.claim`). The listing gets `ownerId` and `isClaimed: true`, its links become followed, and the token moves to `claimTokenUsed` so the old link redirects instead of failing. Pending claim requests for the same listing are rejected. A juror's link also claims every unclaimed listing pre-created for that juror.
+
+Award and "featured" emails to an unclaimed studio include this claim link automatically.
+
+### Claim request ("This is mine")
+
+On the storefront's claim page (`/claim/<slug>`, the same route that also accepts claim-link tokens), a signed-in user can request ownership of an unclaimed public listing or creator profile (`claims.submit`). They write a message (up to 1000 characters) and can add a proof link. A user can have at most 10 pending claims. Admins get a push notification.
+
+An admin reviews it on `/claims` in the admin app:
+
+- `claims.approve` hands ownership to the claimant and rejects competing pending claims.
+- `claims.reject` needs a reason, which the claimant sees.
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `convex/schema.ts` | `listings` table, `listingStatus`, `claims` table |
+| `convex/listings.ts` | Public reads, `submit`, `withdraw`, review queue, `approve`, `reject`, `closeVotingNow`, `remove`, media swaps |
+| `convex/admin.ts` | `createListing`, `updateListing` / `applyListingEdit`, `setLifecycle`, score resets, featured |
+| `convex/importer.ts` | URL importer with screenshot capture, flagship seed |
+| `convex/lib/listingHelpers.ts` | `toPublic`, `PUBLIC_STATUSES`, `deleteListing`, `findOrCreateCreator`, `claimedListingPatch`, validation |
+| `convex/lib/domains.ts` | One listing per website, redesign rules |
+| `convex/lib/time.ts` | Tbilisi time, `weekOf`, `batchVotingEnds` |
+| `convex/lib/taxonomy.ts` | Categories, technologies, regions, tiers, `LIMITS` |
+| `convex/lib/revisions.ts` | Copy revisions and undo |
+| `convex/claims.ts` | "This is mine" requests and admin review |
+| `convex/claimLinks.ts` | Secret claim links |
+| `app/listings/new`, `app/review`, `app/claims`, `app/featured` (admin repo) | Admin screens |
+| `app/(site)/sites/[slug]`, `app/(auth)/submit`, `app/(auth)/claim/[key]` (storefront repo) | Public listing page, submit form, claim page |

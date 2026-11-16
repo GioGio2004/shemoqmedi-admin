@@ -1,0 +1,172 @@
+The jury is the only group whose scores decide awards. Membership is invite-only: an admin pre-creates a private juror profile and sends its secret claim link, by hand or by email through Resend. Whoever claims the link becomes that juror. Jurors then score sites on the storefront with the Evaluate button during each site's voting window, and score the monthly and yearly rounds. This page covers the roles, the invite flow, evaluating, conflicts of interest and the admin controls.
+
+## Roles
+
+Sign-in is Clerk. A Clerk webhook keeps the `users` table in sync (`http.ts` → `users.upsertFromClerk`).
+
+| Role | Stored as | Can do |
+| --- | --- | --- |
+| User | A `users` row with no `role` | Submit sites, vote as community, claim things |
+| Juror | A `jurors` row with `userId` set, claimed and `active` | Everything a user can, plus evaluate sites and score rounds |
+| Admin | `users.role` = `admin` | Everything in the admin app and admin Convex functions |
+| Super admin | `users.role` = `super_admin` | Same as admin, plus grant or remove super admin |
+
+A juror is not a role on the user. It is a separate `jurors` row linked to the user.
+
+### Auth helpers
+
+`convex/authHelpers.ts` has the two guards. Call one at the top of every query or mutation that needs a signed-in caller.
+
+- `requireUser(ctx)` returns the caller's `users` row. It throws "Unauthenticated" with no session, and a clear error if the Clerk webhook has not synced the user yet.
+- `requireAdmin(ctx)` does the same and also throws "Forbidden" unless `role` is `admin` or `super_admin`.
+
+`convex/jury.ts` adds a third:
+
+- `requireJuror(ctx)` needs a signed-in user whose juror row is claimed and active. Otherwise: "Only jury members can do this."
+
+### Changing roles
+
+`admin.setUserRole` (admin `/users` page) grants or removes admin. Nobody can change their own role, so the panel never locks everyone out. Only a super admin can grant super admin or change a super admin's role. Roles are managed in Convex only; Clerk data never overwrites them.
+
+## Juror profiles
+
+From `convex/schema.ts` → `jurors`.
+
+| Field | Public? | Meaning |
+| --- | --- | --- |
+| `slug` | Yes | Page address, `/jury/<slug>`. Kept when the name changes |
+| `name`, `title` | Yes | Name and role, for example "Creative director at Studio X" |
+| `category` | Yes | Panel: `design`, `engineering`, `venture` or `academic` |
+| `location`, `website`, `linkedinUrl`, `bio` | Yes | Profile details. Bio up to 400 characters |
+| `experience`, `work` | Yes | Up to 8 entries each |
+| `avatarId` | Yes | Photo uploaded by an admin |
+| `isFounding` | Yes | "Founding Jury" badge |
+| `email` | **No** | Private; used only to email the claim link |
+| `interests` | No | Categories the juror wants in their digest |
+| `status` | No | `unclaimed` or `claimed`. Rows without a status are from the old invite flow and count as claimed |
+| `userId` | No | The linked account, once claimed |
+| `claimToken`, `claimTokenUsed` | No | The secret link, and the burned one |
+| `active` | No | `false` takes someone off the jury but keeps their evaluations |
+
+A juror page is public only when the juror is claimed and active (`isPublicJuror`). Unclaimed profiles are reachable only through their claim link.
+
+Photo order (`jurorPhoto`): the admin-uploaded avatar while the juror keeps it, else the account photo if the user has a real one, else a grey placeholder. When the juror changes their photo on `/jury/profile`, the admin avatar is dropped.
+
+## Invites and acceptance
+
+The flow, from the header comment of `convex/jury.ts`:
+
+1. **Create.** An admin creates an unclaimed profile on the admin `/jury` page (`jury.createJuror`). The admin sets the panel, photo and details, and can add the person's private email.
+2. **Bundle (optional).** The admin can pre-create the juror's own sites as unclaimed listings linked with `jurorId`. They are claimed together with the profile.
+3. **Get the link.** `claimLinks.link` mints the claim link, `https://www.shemoqmedi.space/claim/<token>`. The token is 64 random hex characters, minted in an action. Passing `rotate` replaces it and the old link stops working.
+4. **Send it.** Either copy the link into a DM or email yourself, or use `claimLinks.emailJuror`, which emails it through Resend. That needs the juror's email on the profile and `RESEND_API_KEY` on the Convex deployment. If the key is missing, the function returns the link and the reason so you can send it by hand.
+5. **Claim.** The person opens the link on the storefront, signs in or signs up, and confirms. `claimLinks.claim` links the profile to their account, sets it `claimed` and `active`, burns the token (moved to `claimTokenUsed`), and claims every bundled listing. They land on `/jury/profile`.
+
+Rules on claiming:
+
+- One account can hold only one jury profile.
+- A link works once. Opening a used link again sends its owner to their profile and shows anyone else "already used".
+- The admin Outreach page (`claimLinks.outreach`) lists every unclaimed juror and listing, with their bundled listings.
+
+The `juryInvites` table is legacy from an older email-invite flow. Nothing writes to it any more.
+
+<Callout kind="note">The claim email text in `claimLinks.ts` (`sendClaimEmail`) still says jurors score "design, usability, creativity and code". The fourth pillar is now Content. Fix the email copy if you touch that file.</Callout>
+
+## What a juror sees and does
+
+### The Evaluate panel
+
+On any public listing page, a juror sees a floating Evaluate button (storefront `components/jury/JuryEvaluate.tsx`). It reads `jury.myEvaluation`, which returns whether they can evaluate and their saved evaluation.
+
+The juror scores four pillars from 1 to 10, rounded to one decimal:
+
+| Pillar | Weight in the final score |
+| --- | --- |
+| Design | 40% |
+| Usability | 30% |
+| Creativity | 20% |
+| Content | 10% |
+
+They can add a comment, up to 1000 characters (`LIMITS.juryComment`). The comment is optional.
+
+`jury.evaluate` saves it. There is one evaluation per juror per listing, and the juror can edit it as often as they like while voting is open. After each save, `recomputeJuryScore` updates the listing's `editorialScores` (per-pillar averages), `finalScore` (the average of each juror's weighted score, rounded to 2 decimals) and `juryVotes`.
+
+A juror can evaluate a site only when:
+
+- the site is `in_voting` and its `votingEndsAt` has not passed,
+- it is not a Shemoqmedi team site, and
+- the juror has no conflict of interest with it (next section).
+
+### Comments are public
+
+Evaluations, with the scores, the weighted average and the comment, are shown on the listing's public page (`jury.reviewsForListing`) and on the juror's own page. Only evaluations by claimed jurors are shown.
+
+### Rounds
+
+On the storefront's `/jury/rounds` page, jurors score the candidates of open Site of the Month and Site of the Year rounds (`rounds.open`, `rounds.vote`). Same pillars and weights. A vote is accepted only while the round is open, and conflict rules apply. Each candidate needs at least `minVotes` round votes to win. See the Awards page.
+
+### Daily digest
+
+`digest.run` runs every 30 minutes. After `digestTime` (default 09:00 Tbilisi) each day, each active juror who has not had today's digest gets one email, if there is anything new. It lists the sites in voting that were approved since their last digest:
+
+- sites in the categories the juror follows (`interests`, set on `/jury/profile`), and
+- the "general queue": sites no active juror follows by category. Everyone gets those.
+
+It is one email per juror, never one per site. A juror's first digest covers the last 7 days. Team sites and sites the juror has a conflict with are left out. A juror who clicked "unsubscribe" in any Shemoqmedi email gets no digest.
+
+### Own profile
+
+Jurors edit their own name, role, location, links, bio, experience, work and interests on `/jury/profile` (`jury.updateProfile`). The admin sets the panel, the avatar and the founding badge.
+
+## Conflicts of interest
+
+A juror never scores a site they built or that belongs to their company. `conflictReason` in `convex/lib/conflicts.ts` blocks a juror when:
+
+- the listing was pre-created for them (`jurorId`),
+- they own the listing (`ownerId`),
+- they claimed the listing's creator profile, or
+- a conflict is recorded in the `conflicts` table.
+
+A conflict can be recorded two ways:
+
+- **By the juror.** From the Evaluate panel (`conflicts.declare`), with an optional reason (default: "I built this site or it belongs to my company.").
+- **By an admin.** On the site's review page (`conflicts.set`). `conflicts.remove` deletes a flag, whoever recorded it. It does not bring back the deleted scores.
+
+Recording a conflict also **deletes** that juror's evaluation of the site and their round votes for it, and recomputes the jury score. Their score never counts.
+
+<Callout kind="sensitive">The automatic checks only catch links the database knows about: ownership, a claimed creator profile, or a bundled listing. A juror who works for a studio but never claimed its profile is not blocked unless they declare it or an admin flags it. Watch for this when a small jury decides a site.</Callout>
+
+## Admin controls
+
+All need `requireAdmin`.
+
+| Action | Function | Where |
+| --- | --- | --- |
+| Create an unclaimed profile | `jury.createJuror` | Admin `/jury` |
+| Edit any profile | `jury.updateJuror` | Admin `/jury` |
+| Delete a profile | `jury.deleteJuror` | Only if unclaimed. Linked listings stay, unlinked |
+| Take someone off the jury, or back | `jury.setJurorActive` | Evaluations stay and keep counting |
+| Get or rotate a claim link | `claimLinks.link` | Admin `/jury`, `/outreach` |
+| Email a claim link | `claimLinks.emailJuror` | Needs Resend |
+| See every site in voting with each juror's evaluation | `jury.nomineesOverview` | Admin `/nominees`. `juryTarget` is `minVotes` |
+| See or remove one evaluation | `jury.evaluationsForListing`, `jury.deleteEvaluation` | Review page. Removing recomputes the score |
+| Flag or clear a conflict | `conflicts.set`, `conflicts.remove` | Review page |
+
+An admin cannot type in a jury score for a site that has evaluations (`listings.setEditorialScores` refuses). Remove evaluations first if a score must change.
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `convex/authHelpers.ts` | `requireUser`, `requireAdmin` |
+| `convex/admin.ts` | `listUsers`, `setUserRole` |
+| `convex/jury.ts` | Profiles, `requireJuror`, `evaluate`, `recomputeJuryScore`, public jury queries, admin controls |
+| `convex/claimLinks.ts` | Claim links: mint, email through Resend, resolve, claim |
+| `convex/conflicts.ts`, `convex/lib/conflicts.ts` | Conflict flags and the rules |
+| `convex/rounds.ts` | SOTM and SOTY round scoring |
+| `convex/digest.ts` | The jurors' daily digest |
+| `convex/lib/scoring.ts` | Pillars, weights, final score |
+| `convex/schema.ts` | `users`, `jurors`, `juryEvaluations`, `conflicts`, `roundVotes`, legacy `juryInvites` |
+| `tests/jury.test.ts`, `tests/awards.test.ts` | The rules as tests |
+| `app/jury`, `app/nominees`, `app/outreach`, `app/users` (admin repo) | Admin screens |
+| `components/jury/JuryEvaluate.tsx`, `app/(auth)/jury/profile`, `app/(auth)/jury/rounds`, `app/(site)/jury` (storefront repo) | Evaluate panel, juror profile, rounds, public jury pages |

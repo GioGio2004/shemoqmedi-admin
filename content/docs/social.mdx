@@ -1,0 +1,151 @@
+The social desk is how Shemoqmedi posts to Facebook, Instagram, Threads and LinkedIn. The database queues posts by itself when something happens (an award, a new listing, a weekly call). Captions are written by Claude through the MCP connector or by an admin in the Studio. Nothing goes out until a human admin approves it. Approval schedules a Convex action that publishes straight to each network's official API.
+
+## The big picture
+
+1. A cron job or an event inserts a row in the `socialPosts` table with status `waiting`. The row carries `facts`: plain data about the site, studio, award and links.
+2. An admin is told by push (and a morning email) that posts are waiting.
+3. Claude (MCP connector) or an admin (Studio queue) writes captions per network and attaches graphics or a reel.
+4. An admin approves. The post becomes `scheduled` and `publish.post` runs now or at the post's publish time.
+5. `publish.post` posts to every network that has a caption and a connected account, then marks the post `sent`, `failed` or `approved`.
+
+<Callout kind="warning">Every approval and every publish needs an explicit yes from a human admin, for that exact post with its final captions and images. Claude never approves or publishes on its own. The MCP instructions in `lib/mcp/server.ts` say this, and editing an approved, scheduled or failed post sends it back to `waiting`, so it needs a fresh yes.</Callout>
+
+## Post kinds
+
+The `kind` field on `socialPosts` is one of these (`socialPostKind` in `convex/schema.ts`). Older rows without a kind read as `award`.
+
+| Kind | Label | How it is queued |
+| --- | --- | --- |
+| `award` | Award | `social.queueAward`, called from `notify.awardAnnounced` when an award is announced. Once per award. Not for the honorary First 100 (`F100`). |
+| `new_listing` | New listing | Cron `social.queueNewListings` every 30 minutes. Any listing that went public (`in_voting`) in the last 3 days and has no new-listing post yet. |
+| `call_submissions` | Call for submissions | Cron `social.queueCall`, Mondays 06:00 UTC (10:00 Tbilisi). |
+| `call_jury` | Call for jurors | Cron `social.queueCall`, Thursdays 06:00 UTC, only on even weeks (every other week). |
+| `roundup` | Weekly roundup | Cron `social.queueRoundup`, Sundays 14:00 UTC (18:00 Tbilisi). Skipped when the week had no new listings and no awards. |
+| `announcement` | Announcement | Created by an admin (Studio or MCP `create_post`). |
+| `custom` | Post | Created by an admin (Studio or MCP `create_post`). |
+
+The calls and the roundup will not queue a second post of the same kind within 6 days. Award and new-listing posts start with the listing's screenshots as media.
+
+### Notifications about waiting posts
+
+- Each queueing run that adds posts sends one push to admins (`pushQueued`), linking the Studio queue.
+- Cron `social: waiting nudge` runs daily at 05:00 UTC (09:00 Tbilisi). If anything is waiting, `social.waitingPing` emails every admin and sends a push.
+
+## Statuses
+
+The status flow is documented on `socialPostStatus` in `convex/schema.ts`:
+
+```text
+waiting ──approve──▶ scheduled ──publish.post──▶ sent | failed ──retry──▶ scheduled
+   └──reject──▶ rejected
+```
+
+| Status | Meaning |
+| --- | --- |
+| `waiting` | Needs captions and an admin's approval. |
+| `scheduled` | Approved. A `publish.post` job is queued (now or at `scheduledFor`). |
+| `sent` | Every network that was tried went out. |
+| `failed` | At least one network failed. The error is in `error` and per network in `results`. |
+| `approved` | Approved, but nothing could be published because no account was connected. Connect, then retry. |
+| `rejected` | Dropped by an admin. Cannot be changed again. |
+| `pending`, `skipped` | Older award rows from before the desk. They read as `waiting` (`readStatus`). |
+
+An `approved` post with no `results` was approved before publishing existed. It may have been posted by hand. It is never retried. To publish it, edit it (back to `waiting`) and approve again.
+
+### Actions on a post
+
+All of these live in `convex/social.ts`. The Studio calls them with a Clerk session (`requireAdmin`). The MCP connector calls the same helpers through `convex/mcp.ts` with an admin service token.
+
+| Action | Function | Rules |
+| --- | --- | --- |
+| Edit | `editPost` | Not for `sent` or `rejected`. Editing `approved`, `scheduled` or `failed` sends it back to `waiting` and cancels the publish job. Networks already sent stay sent. |
+| Approve | `approvePost` | Only from `waiting`. Needs at least one caption. Instagram needs media. The award must still be active and the listing still public. A `new_listing` post also schedules `emails.featured` to the studio. |
+| Publish | `publishPost` | Approve and publish in one step, now or at a given time. Moves a scheduled post's time. |
+| Unschedule | `unschedulePost` | `scheduled` back to `waiting`. Keeps the publish time. |
+| Reject | `rejectPost` | Any status except `sent`. Cancels a scheduled job. |
+| Retry | `retryPost` | For `failed`, `approved`, `sent` with skipped networks, or a `scheduled` post whose run died. Only networks not yet sent are tried. |
+
+Edits and approvals are refused while a publish run holds the post ("being published right now").
+
+## Captions and media
+
+- Captions are per network: `facebook`, `instagram`, `threads`, `linkedin`. A network with a caption gets published. An empty caption removes that network.
+- Caption limits (`CAPTION_MAX`): Facebook 3000, Instagram 2200, Threads 500 (emoji count as their UTF-8 bytes), LinkedIn 3000.
+- At most 10 media items per post. Each must be a public `https` URL. An item can be limited to some networks with `networks`.
+- Media checked against the `media` table must have passed their upload check and match their kind (image or video).
+- Instagram only takes images between 4:5 and 1.91:1. Images on our ImageKit endpoint that fall outside are padded with white on ImageKit (`instagramImageUrl`). Images elsewhere with a bad ratio are refused at approval.
+
+### Feed posts and stories
+
+`placement` is `feed` (the default) or `story`.
+
+- A story is exactly one 9:16 image or video. A story video runs 3 to 60 seconds.
+- Stories go to Instagram and the Facebook Page only. Threads and LinkedIn have no stories API, so they are recorded as `skipped`.
+- Stories show no text. The captions still decide which networks get the story.
+
+## Publishing
+
+`social.approvePost` schedules `publish.post` (in `convex/publish.ts`). One run:
+
+1. Calls `channels.sync` to pick up any newly set token.
+2. `publish.begin` claims the post with a lease (`publishingUntil`, 9.5 minutes) and a run number (`publishRun`). Only the latest run may claim it, and not before its publish time. Networks without an account are recorded as `skipped`.
+3. Each network publishes in parallel. Each result is saved as soon as it is known (`publish.record`).
+4. `publish.finish` sets the status and pushes "Published" or "Failed" to admins, linking the post in the Studio.
+
+A run has a budget of 8.5 minutes so it always ends inside Convex's 10-minute action limit. A network that runs out of time fails with that reason.
+
+### What each network gets
+
+All calls are plain `fetch` in `convex/lib/socialApi.ts`. Tokens go only in headers and are scrubbed from error messages.
+
+| Network | API | Feed behaviour |
+| --- | --- | --- |
+| Facebook Page | Graph API (`graph.facebook.com`, version `GRAPH_VERSION`) | One video, one photo, several photos as one post, or a text post with the page link. Stories via `photo_stories` / `video_stories`. |
+| Instagram | Graph API, Instagram Business account linked to the Page | A video becomes a reel (shared to feed). One image, or a carousel of up to 10 images. Stories via `STORIES` containers. |
+| Threads | `graph.threads.net` | Text and media, 500 character limit. No stories. |
+| LinkedIn | `api.linkedin.com` Posts and Images APIs, Giorgi's personal profile | Images (or text). Video is not built yet: the first image, or text only, is posted with a note. No stories. |
+
+When a post mixes videos and photos, the first item decides. Items that cannot go along are dropped and a note is saved in the result.
+
+### Failures and retries
+
+- A failed network stores its error in `results`. The post's `error` lists every failed network.
+- Retry (`retryPost`, MCP `retry_post`) only attempts networks that are not `sent`. A network is never posted twice.
+- Networks a post can never reach (a story's Threads and LinkedIn, Instagram with no media for it) are not retried.
+- LinkedIn retries once by itself when it refuses a post with fresh images (a 4xx means nothing was created).
+- A run that crashed leaves a `scheduled` post with an expired lease. The Studio shows it as stalled and offers Retry (`lib/socialPublishState.ts`).
+
+## Connected accounts
+
+Accounts live in the `socialAccounts` table, seeded from Convex env vars by `convex/channels.ts`:
+
+| Env var | Network | Notes |
+| --- | --- | --- |
+| `META_PAGE_ACCESS_TOKEN` | Facebook Page and its linked Instagram | Page token that does not expire. |
+| `THREADS_ACCESS_TOKEN` | Threads | 60-day token, refreshed by the daily cron. |
+| `LINKEDIN_ACCESS_TOKEN` | LinkedIn (personal profile) | 60-day token that cannot be refreshed. Admins are emailed a week before it expires and when it has. |
+
+Cron `social: channels` runs daily at 04:30 UTC (`channels.daily`): it syncs env changes, refreshes Threads, and warns about LinkedIn. Unsetting an env var disconnects that network. Tokens never leave internal functions; public views show only ids, names, expiry and the last error.
+
+<Callout kind="sensitive">Tokens are secrets. Set them only on the Convex dashboard. Never paste them into code, docs, chat or posts.</Callout>
+
+### LinkedIn and Threads limits
+
+- LinkedIn is used only to publish approved posts to Giorgi's own profile through the official API. There is no LinkedIn automation beyond that: no DMs, no scraping, no automated connecting or commenting.
+- Threads gets feed posts only, no stories.
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `convex/social.ts` | Queueing (crons and awards), facts, edit, approve, reject, retry, publish, unschedule, the waiting nudge. |
+| `convex/publish.ts` | The publish run: claim, per-network publish, record results, finish and push. |
+| `convex/lib/socialApi.ts` | Facebook, Instagram, Threads and LinkedIn API calls, story and Instagram ratio rules. |
+| `convex/channels.ts` | Connected accounts from env tokens, Threads refresh, LinkedIn expiry emails. |
+| `convex/crons.ts` | Schedules for new listings, calls, roundup, waiting nudge and channel upkeep. |
+| `convex/notify.ts` | `awardAnnounced`, which queues the award post. |
+| `convex/schema.ts` | `socialPosts` and `socialAccounts` tables, kinds, statuses, placement. |
+| `convex/mcp.ts` | MCP-side post functions (create, update, approve, publish, retry, reject). |
+| `lib/mcp/server.ts` | MCP tool definitions and the instructions that require a human yes. |
+| `lib/socialPublishState.ts` | Client-side publishing, stalled and retry state for the queue. |
+| `components/studio/queue/` | The Studio queue where admins edit, approve and retry posts. |

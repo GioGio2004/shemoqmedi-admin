@@ -1,0 +1,98 @@
+Shemoqmedi (shemoqmedi.space) is an awards site and showcase for web design, run by Giorgi. Sites are listed by hand, scored by an invited jury, and the best ones win awards such as Site of the Day. This page explains who uses what, which code runs where, and how a request moves through the system.
+
+## What the product is
+
+- A **showcase**: every public listing has its own page with screenshots, an optional walkthrough video, credits, scores and awards.
+- An **awards program**: Honorable Mention (HM), Site of the Day (SOTD), Site of the Month (SOTM) and Site of the Year (SOTY), plus Best Solo Creation (BSC) and the honorary First 100 badge.
+- A **badge program**: winners can embed a badge on their own site. Badges link back to the award page, which is how the site earns links.
+- A **social desk**: the backend queues social posts for awards and new listings. Admins finish and publish them in the Studio, or through an AI agent over the MCP connector.
+
+## Who uses what
+
+| Person | What they do | Where |
+| --- | --- | --- |
+| Visitor | Browses sites, creators, collections, awards, the jury | Storefront (`www.shemoqmedi.space`) |
+| Creator or studio | Signs in, submits a site, claims an existing listing, embeds badges | Storefront `/submit`, `/claim/...`, `/account` |
+| Juror | Invite-only. Scores sites in voting and monthly or yearly rounds, keeps a public profile | Storefront `/jury/rounds`, `/jury/profile`, the Evaluate button on a listing |
+| Admin | Adds and edits listings, uploads screenshots, runs awards, jury, claims, outreach | Admin app (`admin.shemoqmedi.space`) |
+| Admin (social) | Drafts, edits and publishes social posts, graphics and reels | Studio (`studio.shemoqmedi.space`) |
+| AI agent | Works the social and listing desk on Giorgi's behalf, for admins only | MCP connector at `admin.shemoqmedi.space/api/mcp` |
+
+## The two repos
+
+| Repo | What is in it | Deployed to |
+| --- | --- | --- |
+| `shemoqmedi` (storefront) | The public Next.js site. No `convex/` folder of its own. | Vercel, `www.shemoqmedi.space` |
+| `shemoqmedi-admin` (admin) | The admin app, the Studio, the team docs, the MCP connector, and the shared Convex backend in `convex/` | Vercel (admin, Studio, docs hosts) and Convex (backend) |
+
+Both apps talk to the **same Convex deployment** and the **same Clerk instance**. A change to a Convex function is made in the admin repo, and the storefront must be kept in step by hand (see the storefront page on `convex-helpers-api.ts`).
+
+<Callout kind="note">The storefront has no generated Convex types. Its `convex-helpers-api.ts` is typed by hand. When you change a public Convex function's arguments or return shape in the admin repo, update that file in the storefront too.</Callout>
+
+## Hosts
+
+| Host | Served by | Notes |
+| --- | --- | --- |
+| `www.shemoqmedi.space` | Storefront | The one canonical host. The apex `shemoqmedi.space` redirects to www. |
+| `admin.shemoqmedi.space` | Admin repo | Clerk sign-in required for every page except the landing and sign-in pages. |
+| `studio.shemoqmedi.space` | Admin repo, same Next app | `proxy.ts` and `lib/studioRouting.ts` rewrite `/x` on this host to `app/studio/x`. Installable as a PWA with push notifications. |
+| `docs.shemoqmedi.space` | Admin repo, same Next app | These docs. Admins only. Host listed in `lib/hosts.ts`. |
+| `admin.shemoqmedi.space/api/mcp` | Admin repo | The MCP connector. Clients sign in with OAuth through Clerk; only admins get the tools. |
+| `<deployment>.convex.site` | Convex HTTP actions | Clerk user webhook (`/clerk-users-webhook`) and email unsubscribe (`/unsubscribe`). |
+
+## How a request flows
+
+### Public pages (storefront)
+
+1. A visitor opens, for example, `/sites/some-site`.
+2. Vercel serves cached HTML. Public pages are static with incremental regeneration (ISR): most refresh at most once a minute, a few every five minutes.
+3. When a page is stale, Next rebuilds it in the background. The server code in `lib/listings.ts` calls Convex with `fetchQuery` (an HTTP POST). Because Next treats POST as uncacheable, those pages export `dynamic = "force-static"` plus a `revalidate` time.
+4. Public pages ship no Clerk and no Convex client. The visitor's browser never talks to Convex on a public page.
+
+### Signed-in pages (storefront)
+
+Pages in the `(auth)` route group (`/submit`, `/account`, `/vote/...`, `/claim/...`, the jury pages, sign-in and sign-up) mount `ClerkProvider` and a Convex React client. They read and write Convex live, with the Clerk session token attached. `proxy.ts` sends signed-out visitors to `/sign-in`.
+
+### Admin and Studio
+
+The admin app and Studio use Convex live (reactive queries and mutations from the browser) with Clerk auth. Convex checks the Clerk token (`convex/auth.config.ts`) and looks up the user's role. Clerk sends user changes to Convex through a webhook (`convex/http.ts`).
+
+### Background work
+
+Convex cron jobs (`convex/crons.ts`) run the award calendar every 15 minutes, a juror digest every 30 minutes, and the social desk (new-listing posts, weekly calls and roundup, daily reminders, token checks). Changes to public pages also trigger IndexNow pings (`convex/seo.ts`).
+
+## Glossary
+
+| Term | Meaning |
+| --- | --- |
+| Listing | One site in the showcase. Statuses: `pending`, `in_voting`, `awarded`, `archived`, `rejected`. Only the middle three are public. |
+| Slug | The URL name of a listing, creator, juror or award, e.g. `/sites/kencho-group`. Old listing slugs are kept and redirected. |
+| Creator | The person or studio credited for a site. Has a page at `/creators/...`. |
+| Claim | A request by a real owner to take over an unowned listing or creator profile. Admins approve claims. Claim links (`/claim/...`) can also hand over ownership directly. |
+| Juror | An invited expert who scores sites. Has a public page once claimed. |
+| Pillars | The four score dimensions, each 1.0 to 10.0. |
+| HM / SOTD / SOTM / SOTY | Honorable Mention, Site of the Day, Site of the Month, Site of the Year. |
+| BSC | Best Solo Creation, for solo creators. |
+| First 100 | An honorary badge for the first hundred winners, tracked in the admin. |
+| Team site | A site built by the Shemoqmedi team. Never eligible for awards. |
+| Collection | A programmatic page grouping sites by category, technology or region, e.g. `/collections/georgia`. |
+| ISR | Incremental static regeneration: cached HTML that Next refreshes in the background. |
+| Studio | The social posting app at `studio.shemoqmedi.space`. |
+| MCP connector | The endpoint that lets an AI client (such as Claude) use admin tools. |
+| Voloo | The old product that used this domain (NFC tap menus). Its URLs now answer 410 Gone. |
+
+## Where it lives
+
+| File or folder | What it does |
+| --- | --- |
+| storefront `app/` | All public and signed-in pages of the public site |
+| storefront `lib/listings.ts` | Server-side Convex reads for public pages |
+| storefront `convex-helpers-api.ts` | Hand-typed list of the Convex functions the storefront calls |
+| storefront `proxy.ts` | Clerk on signed-in routes, 410 for old Voloo pages |
+| admin `convex/` | The shared backend: schema, queries, mutations, crons, HTTP actions |
+| admin `convex/crons.ts` | Scheduled jobs (awards, digest, social desk) |
+| admin `proxy.ts` | Clerk session checks and host routing for admin, Studio and docs |
+| admin `lib/hosts.ts` | The admin, Studio and docs origins |
+| admin `lib/studioRouting.ts` | How Studio host paths map to `app/studio/*` |
+| admin `app/api/mcp/route.ts` | The MCP connector endpoint |
+| admin `lib/mcp/` | MCP server and OAuth checks |

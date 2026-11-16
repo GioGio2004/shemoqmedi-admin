@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import createMDX from "@next/mdx";
 
 const nextConfig: NextConfig = {
   // Verification builds can be pointed elsewhere with NEXT_BUILD_DIR so a
@@ -44,4 +45,10 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// The team docs are MDX files in content/docs (app/docs renders them).
+// Plugins are named as strings so Turbopack can load them.
+const withMDX = createMDX({
+  options: { remarkPlugins: [["remark-gfm", {}]] },
+});
+
+export default withMDX(nextConfig);

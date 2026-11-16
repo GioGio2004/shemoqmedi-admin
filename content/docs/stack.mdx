@@ -1,0 +1,113 @@
+This page lists every outside service Shemoqmedi depends on, what each one does for us, and the names of the environment variables each place needs. It lists names only. Values live in the Vercel and Convex dashboards and never go into the repo or these docs.
+
+## Frameworks
+
+| Piece | Used in | Notes |
+| --- | --- | --- |
+| Next.js 16, React 19 | Both repos | App Router. Middleware lives in `proxy.ts` (the Next 16 name). |
+| Tailwind CSS 4 | Both repos | Styling. |
+| Convex | Admin repo `convex/` | Database, server functions, file storage, crons, HTTP actions. One deployment shared by both apps. |
+| Clerk | Both repos and Convex | Sign-in. One Clerk instance shared by both apps. |
+
+## External services
+
+| Service | What we use it for | Where it is wired |
+| --- | --- | --- |
+| Vercel | Hosts the storefront and the admin app (admin, Studio and docs hosts). Its image optimizer caches ImageKit images for the storefront. | Storefront `next.config.ts`; admin `app/api/mcp/route.ts` sets a 300 s max duration |
+| Convex | Backend: data, queries, mutations, actions, crons, webhooks | Admin `convex/` |
+| Clerk | Accounts and sessions on both apps; OAuth for the MCP connector; a webhook syncs users into Convex | `proxy.ts` in both repos, admin `convex/auth.config.ts`, admin `convex/http.ts`, admin `lib/mcp/oauth.ts` |
+| ImageKit | Screenshots. The browser converts them to WebP and uploads them; Convex signs the upload. Also hosts rendered social graphics. | `lib/imagekitUpload.ts` (copy in both repos), admin `convex/media.ts`, admin `convex/graphics.ts` |
+| Cloudflare R2 | Videos (listing walkthroughs, reels, voiceover audio). Compressed in the browser, uploaded with signed URLs. | Admin `convex/lib/r2.ts`, storefront `lib/videoUpload.ts` |
+| Resend | Transactional email: jury invites, award and outreach emails, admin notices. Unsubscribe links point at a Convex HTTP action. | Admin `convex/emails.ts`, `convex/http.ts` |
+| Meta Graph API | Publishing to Facebook and Instagram | Admin `convex/lib/socialApi.ts`, `convex/publish.ts`, `convex/channels.ts` |
+| Threads API | Publishing to Threads, with automatic token refresh | Same files as Meta |
+| LinkedIn API | Code supports posting to LinkedIn with a token; the daily job emails admins before the token expires | Same files as Meta |
+| ElevenLabs | Text-to-speech voiceovers for reels | Admin `convex/voiceover.ts` |
+| Web Push (VAPID) | Push notifications to the Studio PWA | Admin `convex/lib/push.ts`, `convex/pushSend.ts` |
+| IndexNow | Tells Bing and other engines when a public page changes | Admin `convex/seo.ts`, key file in storefront `public/` |
+| Microlink, thum.io, WordPress mShots | Automatic screenshots for the site importer, tried in that order | Admin `convex/importer.ts` |
+| Cloudflare Web Analytics | Cookieless page views on every storefront page | Storefront `app/layout.tsx` |
+| Vercel Analytics | Page views on public storefront pages | Storefront `app/(site)/layout.tsx` |
+| Ahrefs Web Analytics | Cookieless analytics on public storefront pages | Storefront `app/(site)/layout.tsx` |
+| Google Search Console | Index coverage and search performance. Not referenced in code. | Set up in their own dashboards |
+| Namecheap | Domain registrar and DNS for shemoqmedi.space. Not referenced in code. | Set up in its own dashboard |
+
+<Callout kind="note">Analytics run only on the public `(site)` pages, apart from the Cloudflare beacon in the root layout. The signed-in pages are left out on purpose: claim links and sign-in redirects carry secret claim tokens in the URL.</Callout>
+
+## Environment variables
+
+Names only. Set values in the Vercel project settings or with `npx convex env set` on the Convex deployment. Variables marked "SDK" are read by a library, not by our own code.
+
+### Vercel: storefront
+
+| Name | What it is for |
+| --- | --- |
+| `NEXT_PUBLIC_CONVEX_URL` | The Convex deployment the site reads from (same as the admin's) |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk, browser side (SDK; same instance as the admin) |
+| `CLERK_SECRET_KEY` | Clerk, server side (SDK) |
+| `NEXT_PUBLIC_URL` | Optional override of the canonical origin (`lib/site.ts`). Defaults to the www host. |
+| `NEXT_PUBLIC_IMAGE_CDN` | Optional. Set to `imagekit` to let ImageKit resize images instead of Vercel's optimizer (`lib/imageLoader.ts`). |
+
+### Vercel: admin app (admin, Studio, docs)
+
+| Name | What it is for |
+| --- | --- |
+| `NEXT_PUBLIC_CONVEX_URL` | The shared Convex deployment |
+| `CONVEX_DEPLOYMENT` | Convex CLI target for local development |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk, browser side (also read directly by our code) |
+| `CLERK_SECRET_KEY` | Clerk, server side (SDK) |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL`, `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | Clerk's sign-in and sign-up paths (SDK) |
+| `NEXT_PUBLIC_STOREFRONT_URL` | Optional. Base for "view on site" links. Defaults to the www host. |
+| `NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT` | ImageKit URL base for image previews and uploads |
+| `R2_PUBLIC_URL` | Public base URL of the R2 bucket, for video previews |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Public key the Studio uses to subscribe to push |
+| `GRAPHICS_RENDER_KEY` | Shared secret: Convex sends it to `/api/graphics` to render social graphics. Same value as on Convex. |
+| `MCP_SERVICE_SECRET` | Signs short-lived tokens the MCP server sends to Convex. Same value as on Convex. |
+| `MCP_OAUTH_AUDIENCE` | Optional. Binds MCP OAuth tokens to this server's URL. |
+| `GRAPHICS_TIMING` | Optional debug switch: `1` logs graphics render timings |
+| `NEXT_BUILD_DIR` | Optional. Points a local verification build at another folder. |
+
+### Convex deployment
+
+| Name | What it is for |
+| --- | --- |
+| `CLERK_FRONTEND_API_URL` | Clerk issuer that Convex trusts for user tokens (`convex/auth.config.ts`) |
+| `CLERK_WEBHOOK_SECRET` | Verifies the Clerk user webhook |
+| `IMAGEKIT_PRIVATE_KEY`, `IMAGEKIT_PUBLIC_KEY`, `IMAGEKIT_URL_ENDPOINT` | Signing browser uploads, server uploads and deletes on ImageKit |
+| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL` | Signed uploads to Cloudflare R2 and the bucket's public URL |
+| `RESEND_API_KEY`, `RESEND_FROM` | Sending email and the sender address |
+| `EMAIL_UNSUBSCRIBE_SECRET` | Signs unsubscribe links in emails |
+| `META_PAGE_ACCESS_TOKEN` | Facebook Page and Instagram publishing |
+| `THREADS_ACCESS_TOKEN` | Threads publishing |
+| `LINKEDIN_ACCESS_TOKEN` | LinkedIn publishing |
+| `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICES`, `ELEVENLABS_MODEL` | Voiceovers: key, narrator name to voice id map (JSON), optional model |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Web Push. Push is off while any is missing. |
+| `GRAPHICS_RENDER_KEY` | Same secret as on the admin app |
+| `ADMIN_ORIGIN` | Admin app URL, so Convex can call `/api/graphics` |
+| `MCP_SERVICE_SECRET` | Same secret as on the admin app |
+| `INDEXNOW_KEY` | IndexNow key. Production only. Without it nothing is pinged. |
+| `SITE_URL` | Optional. Public site origin for IndexNow; defaults to the www host. |
+| `MICROLINK_API_KEY` | Optional. Raises the free Microlink screenshot limit. |
+| `SOCIAL_WAIT_SCALE` | Optional. Scales waits in social publishing; `0` turns them off in tests. |
+| `CONVEX_SITE_URL` | Provided by Convex. Base of the HTTP actions, used for unsubscribe links. |
+
+<Callout kind="sensitive">Never paste a value into code, a commit, a doc or a chat. `GRAPHICS_RENDER_KEY` and `MCP_SERVICE_SECRET` must match between Vercel (admin) and Convex; if you rotate one, change both places.</Callout>
+
+## Where it lives
+
+| File or folder | What it does |
+| --- | --- |
+| admin `convex/auth.config.ts` | Tells Convex which Clerk issuer to trust |
+| admin `convex/http.ts` | Clerk webhook and unsubscribe HTTP actions |
+| admin `convex/media.ts` | ImageKit upload signing and server-side uploads |
+| admin `convex/lib/r2.ts` | R2 signed URLs and public URLs |
+| admin `convex/emails.ts` | Resend email sending |
+| admin `convex/lib/socialApi.ts` | Facebook, Instagram, Threads and LinkedIn API calls |
+| admin `convex/channels.ts` | Social account tokens and the daily token check |
+| admin `convex/voiceover.ts` | ElevenLabs voiceovers |
+| admin `convex/lib/push.ts` | Web Push keys and sending |
+| admin `convex/seo.ts` | IndexNow pings |
+| admin `convex/importer.ts` | Screenshot providers for imports |
+| admin `lib/mcp/oauth.ts` | MCP OAuth and service tokens |
+| storefront `lib/imagekitUpload.ts`, `lib/videoUpload.ts` | Browser-side media upload |
+| storefront `app/layout.tsx`, `app/(site)/layout.tsx` | Analytics scripts |

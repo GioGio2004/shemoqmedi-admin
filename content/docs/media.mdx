@@ -1,0 +1,177 @@
+Every screenshot and preview video on a listing goes through one pipeline. Files never pass through our servers. The browser shrinks the file, Convex signs a direct upload, the browser uploads straight to storage, and Convex records the result in the `media` table. Screenshots live on ImageKit. Preview videos live on Cloudflare R2.
+
+## Why two stores
+
+ImageKit re-encodes every new video it delivers, once per browser format. That used up the free plan's video processing units after a few uploads. R2 serves a file exactly as it was uploaded, with no re-encoding and no bandwidth charge. So videos are compressed in the browser first and then stored on R2. Screenshots stay on ImageKit.
+
+| What | Where it is stored | Compressed by |
+| --- | --- | --- |
+| Listing screenshots (cover + gallery) | ImageKit, folder `/listings/<slug>/` | The browser, to WebP |
+| Listing preview video | R2, key `listings/<slug>/...mp4` | The browser, with mediabunny |
+| Studio social graphics | ImageKit, folder `/social/graphics/` | The browser or the render route |
+| Voiceover MP3s and reels | R2, key `social/<slug>/...` | Server or browser (see the Studio page) |
+| Old files | Convex storage | Not compressed (legacy) |
+
+## Screenshots: browser → ImageKit
+
+The flow lives in `lib/imagekitUpload.ts`. An identical copy is in the storefront repo.
+
+1. **Check the pick.** The admin uploader (`components/admin/MediaUpload.tsx`) accepts PNG, JPG or WebP up to 20 MB (`MAX_IMAGE_INPUT_BYTES`).
+2. **Convert to WebP.** `toWebp` draws the image on a canvas, at most 2560 px wide (`MAX_IMAGE_WIDTH`), and encodes WebP at quality 0.86. Tall full-page shots keep their full height. If the browser cannot encode WebP, or the result is not smaller, the original file is used.
+3. **Check the size again.** After conversion the file must be 5 MB or less, or the upload stops with a readable error.
+4. **Name it for SEO.** `seoSlug` turns the site and label into a name like `kencho-group-website-screenshot-2.webp`. ImageKit adds a short unique suffix (`useUniqueFileName`), so a replaced file never serves a stale CDN copy.
+5. **Get a signature.** The browser calls the `media.uploadAuth` action. It needs a signed-in user. It returns a token, an expiry (30 minutes), an HMAC-SHA1 signature, the public key and the URL endpoint. The private key never leaves Convex.
+6. **Upload.** The browser posts the file to ImageKit's upload API with the folder `/listings/<slug>` and tags.
+7. **Register.** The browser calls the `media.register` mutation with ImageKit's answer. It returns an `Id<"media">`.
+
+### What `media.register` checks
+
+- The caller is signed in (`requireUser`).
+- The URL starts with our `IMAGEKIT_URL_ENDPOINT` plus `/listings/`, and the file path starts with `/listings/`. No hot-linking any other URL.
+- The ImageKit file id looks valid.
+- The kind is `image`. A video sent here is refused: videos must go to R2.
+- The type is WebP, PNG or JPEG, and the size is 5 MB or less.
+- Registering the same `fileId` twice returns the existing row.
+
+Then it schedules `media.verify`. That action asks ImageKit's API for the real size, type and path. If the file is not what the browser claimed, the row is marked `invalid` and the file is deleted from ImageKit. Invalid rows are never shown.
+
+## Videos: browser → R2
+
+The flow lives in `lib/videoUpload.ts`. An identical copy is in the storefront repo.
+
+1. **Check the pick.** The uploader accepts MP4, WebM or MOV. The input file can be up to 500 MB (`MAX_VIDEO_INPUT_BYTES`).
+2. **Read it.** `compressVideo` opens the file with mediabunny and reads the primary video track and duration. Videos longer than 60 seconds are refused.
+3. **Compress.** It re-encodes to H.264 MP4: at most 1280 px wide, about 2 Mbps (variable bitrate), at most 30 fps, no audio, with fast start. Width and height are rounded to even numbers. A 40-second screen recording comes out at about 10 MB.
+4. **Fallbacks.** If the browser cannot encode H.264, the original is used only when it is already an MP4 or WebM of 15 MB or less. Otherwise the person is asked to use a recent Chrome, Edge or Safari. If a small original MP4 beats the compressed one, the original is kept.
+5. **Check the size.** After compression the file must be 15 MB or less.
+6. **Get an upload URL.** The browser calls the `media.videoUploadUrl` action with the site, a label, the type and the size. It needs a signed-in user and all R2 env vars. It returns a presigned PUT URL valid for 15 minutes and the object key. The key looks like `listings/<slug>/<slug>-website-preview-<random>.mp4`. The random suffix means a replaced video never reuses a cached URL and keys cannot be guessed.
+7. **Upload.** The browser sends a `PUT` with the file and its `Content-Type`.
+8. **Register.** The browser calls the `media.registerVideo` mutation with the key, type, size, width, height and duration.
+
+### What `media.registerVideo` checks
+
+- The caller is signed in.
+- The key matches `R2_LISTING_KEY` (`listings/<slug>/<name>.mp4` or `.webm`, lowercase).
+- The type is MP4 or WebM and the size is 15 MB or less.
+- Registering the same key twice returns the existing row.
+
+It stores the row with `store: "r2"` and schedules `media.verifyVideo`. That action sends a `HEAD` request to R2. If the object is missing, too big or the wrong type, the row is marked `invalid` and the object is deleted.
+
+The duration is kept on the row (`durationSec`). The social desk uses it to check whether a video can be a story.
+
+## CORS
+
+Uploads go straight from the browser to storage, so the buckets must allow it.
+
+- **R2 bucket.** Its CORS policy must allow `PUT` from the sites that upload (the admin, the Studio and the storefront) for direct uploads. It must also allow `GET` from the admin and the Studio, because the voiceover and reel tools download previews and MP3s in the browser. When the browser blocks the request, the code shows an error that names the missing rule, for example "Allow PUT from" the current origin.
+- **ImageKit.** Uploads go to ImageKit's own upload API with a signature, which accepts browser posts.
+
+<Callout kind="warning">If video uploads or reel builds fail with a network error and no HTTP status, check the R2 bucket's CORS policy first. The browser hides the real answer when CORS blocks it.</Callout>
+
+## Where URLs are stored
+
+Listings do not store URLs. They store ids:
+
+| Listing field | Holds |
+| --- | --- |
+| `coverId` | The first screenshot (16:9, or a full page that scrolls). Required. |
+| `galleryIds` | Up to 4 more screenshots (`LIMITS.gallery`), so 5 images in all. |
+| `videoId` | The short muted preview. Optional. |
+
+Each id is either a `media` row or an old Convex storage file (`vMediaId` in `convex/lib/media.ts`). Both are plain document ids, so listing code treats them the same.
+
+The `media` table holds one row per file:
+
+| Field | Meaning |
+| --- | --- |
+| `store` | `"r2"` for R2 objects. Empty means ImageKit. |
+| `fileId` | ImageKit file id, or the R2 object key. Indexed (`by_fileId`). |
+| `url` | Public URL at upload time. Indexed (`by_url`). |
+| `filePath` | Path inside the store. |
+| `kind` | `image` or `video`. |
+| `contentType`, `size`, `width`, `height` | File facts. |
+| `durationSec` | Video length as the browser measured it. |
+| `design` | For Studio graphics: the recipe it was rendered from, so it can be edited again. |
+| `uploadedBy` | The user. Empty for server-side uploads. |
+| `invalid` | Set when the server check failed. Never shown. |
+
+To get a public URL, use `mediaUrl` in `convex/lib/media.ts`. For R2 rows it builds the URL from the current `R2_PUBLIC_URL`, not the stored `url`. So changing that env var moves every video to the new domain at once.
+
+## Deleting
+
+All deletes go through `deleteMedia` in `convex/lib/media.ts`. It deletes the `media` row and schedules the remote delete: `media.deleteR2` for R2 objects, `media.deleteRemote` for ImageKit files. Old Convex storage files are deleted directly. A missing remote file is not an error.
+
+`deleteMedia` runs when:
+
+- A listing is deleted (`deleteListing` in `convex/lib/listingHelpers.ts`): cover, gallery and video.
+- A cover or video is replaced (`listings.replaceMedia`): the old file goes.
+- An extra screenshot is removed (`listings.removeGalleryImage`).
+- The preview video is removed (`admin.removeMedia`). The cover cannot be removed, only replaced.
+- A juror avatar is replaced or removed (`convex/jury.ts`).
+
+## Limits
+
+| Limit | Value | Where |
+| --- | --- | --- |
+| Screenshot input | 20 MB | `MAX_IMAGE_INPUT_BYTES` |
+| Screenshot stored | 5 MB, WebP / PNG / JPEG | `LIMITS.imageBytes` |
+| Screenshot width | 2560 px | `MAX_IMAGE_WIDTH` |
+| Extra screenshots | 4 | `LIMITS.gallery` |
+| Video input | 500 MB | `LIMITS.videoInputBytes` |
+| Video stored | 15 MB, MP4 / WebM | `LIMITS.videoBytes` |
+| Video length | 60 s | `LIMITS.videoSeconds` |
+| Video size | 1280 px wide, about 2 Mbps, 30 fps, no audio | `lib/videoUpload.ts` |
+| ImageKit signature | 30 minutes | `signUpload` |
+| R2 upload URL | 15 minutes | `presignPut` |
+| Studio graphics | JPEG or PNG, 5 MB, at most 4096 px a side | `media.registerSocial` |
+
+The browser limits and the server limits must stay in sync. The comments in `lib/imagekitUpload.ts` and `lib/videoUpload.ts` say which `LIMITS` value each one mirrors.
+
+## Studio graphics
+
+The Studio also stores final social graphics on ImageKit, in `/social/graphics/`. `graphics.finalUploadAuth` signs the upload (admins only) and `media.registerSocial` records it. That mutation only accepts files in that folder, keeps the design recipe when there is one, and schedules the same `media.verify` check. `media.recentRenders` lists recent renders and `media.designs` returns sizes and recipes for a list of URLs.
+
+## Moving old files
+
+Older listings may still have files in Convex storage, or videos on ImageKit. The admin overview has a media panel for this (`components/admin/LegacyMediaMigrator.tsx`):
+
+- `media.legacyFiles` lists listings that still use Convex storage.
+- `media.imagekitVideos` lists videos still on ImageKit, with a `tr=orig-true` URL that downloads the original without spending processing units.
+- The browser runs each file through the normal pipeline, then `media.adoptLegacy` swaps the new file onto the listing and deletes the old one.
+
+There are also CLI scripts: `scripts/media-to-imagekit.mjs` and `scripts/videos-to-r2.mjs` (needs ffmpeg). They use internal functions such as `media.adoptFile`, `media.largeVideos` and `media.deleteOrphanStorage`.
+
+## Environment variables
+
+Set these on each Convex deployment (dev and prod):
+
+| Variable | Used for |
+| --- | --- |
+| `IMAGEKIT_PRIVATE_KEY` | Signing uploads, verifying and deleting files. Stays on Convex. |
+| `IMAGEKIT_PUBLIC_KEY` | Sent to the browser with each signature. |
+| `IMAGEKIT_URL_ENDPOINT` | The ImageKit URL base. Uploads must start with it. |
+| `R2_ACCOUNT_ID` | R2 API host. |
+| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Signing R2 requests. |
+| `R2_BUCKET` | The bucket name. |
+| `R2_PUBLIC_URL` | Public base of the bucket. Read on every page view. |
+
+If the ImageKit variables are missing, uploads fail with "Image uploads are not configured yet". If any R2 variable is missing, video uploads fail with "Video uploads are not configured yet".
+
+<Callout kind="sensitive">The private keys and R2 secrets live only in the Convex environment. Never put them in a `NEXT_PUBLIC_` variable or in client code.</Callout>
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `lib/imagekitUpload.ts` | Browser: WebP conversion, SEO names, direct ImageKit upload |
+| `lib/videoUpload.ts` | Browser: mediabunny compression, direct R2 upload |
+| `components/admin/MediaUpload.tsx` | The admin's file pickers and upload hook |
+| `components/admin/MediaPanel.tsx` | Cover, gallery and video slots on a listing |
+| `components/admin/LegacyMediaMigrator.tsx` | Moves old files to ImageKit and R2 |
+| `components/studio/queue/upload.ts` | Studio: device images to `/social/graphics/` |
+| `convex/media.ts` | Signing, registering, verifying, deleting, migration |
+| `convex/lib/media.ts` | `mediaUrl`, `deleteMedia`, `vMediaId` |
+| `convex/lib/r2.ts` | R2 presigned PUT, HEAD, DELETE, public URLs |
+| `convex/lib/taxonomy.ts` | `LIMITS` for sizes, lengths and gallery count |
+| `convex/schema.ts` | The `media` table and listing media fields |
+| `scripts/media-to-imagekit.mjs`, `scripts/videos-to-r2.mjs` | CLI migrations |

@@ -15,6 +15,12 @@ const COPY = {
     accent: "studio.",
     description: "Design, schedule and publish the showcase's posts, stories and reels.",
   },
+  docs: {
+    eyebrow: "shemoqmedi.space · Docs",
+    title: "Team",
+    accent: "docs.",
+    description: "How Shemoqmedi works, feature by feature. For the team only.",
+  },
 };
 
 /** Kencho-admin sign-in layout: editorial headline left, form or action right. Used on both hosts. */
@@ -23,7 +29,7 @@ export function SignInFrame({ children, app = "admin" }: { children: React.React
   return (
     <div className="admin-signin">
       <header className="signin-header">
-        <Link href="/" aria-label={app === "studio" ? "Studio home" : "Admin home"}>
+        <Link href="/" aria-label={app === "studio" ? "Studio home" : app === "docs" ? "Docs home" : "Admin home"}>
           <Wordmark />
         </Link>
         <a href={STOREFRONT_URL} className="admin-storefront-link" target="_blank" rel="noopener noreferrer">

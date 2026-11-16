@@ -1,0 +1,178 @@
+The admin at admin.shemoqmedi.space is where the team runs Shemoqmedi: reviewing and adding sites, scoring, awards, the jury, creators, claims and users. It is the same Next app as the Studio and talks to the same Convex backend. Every page is for platform admins only. This page walks through sign-in, roles, each section of the admin, and the installable app with push notifications.
+
+## Sign-in and roles
+
+Sign-in uses Clerk. Convex trusts Clerk's session token and keeps its own `users` table.
+
+### How a request gets in
+
+1. `proxy.ts` runs first. The public routes are `/`, `/sign-in`, `/sign-up`, `/api/mcp` and `/.well-known`. Every other page needs a Clerk session. Without one, the visitor goes to `/sign-in` with a `redirect_url` back to the page.
+2. `/sign-in` is the app's own page (`app/sign-in`), wrapping Clerk's `SignIn` component. After sign-in the admin opens `/dashboard`. The same page serves the Studio host, where it opens `/` instead.
+3. Every admin page is wrapped in `AdminShell`. It calls `useAdmin()`, which reads `users.getCurrentUser` and only renders the page when the user's role is `admin` or `super_admin`.
+4. On the backend, every admin query and mutation starts with `requireAdmin(ctx)` from `convex/authHelpers.ts`. The UI check is only for display. The backend check is the real one.
+
+### How users reach Convex
+
+Clerk sends a webhook to the Convex HTTP route `/clerk-users-webhook` (`convex/http.ts`). On `user.created` and `user.updated` it runs `users.upsertFromClerk`. On `user.deleted` it runs `users.deleteFromClerk`, which also deactivates the user's juror profile. The webhook never touches `role`. Roles live only in Convex.
+
+When something is not set up yet, `AdminShell` says what is wrong:
+
+| Message | Cause |
+| --- | --- |
+| Session not accepted. | Signed in to Clerk, but Convex rejected the token. Check the Clerk JWT template named `convex` and `CLERK_FRONTEND_API_URL` on the Convex deployment. |
+| Almost there. | The webhook has not created the `users` row yet. Refresh after a few seconds. |
+| No access. | The user exists but has no admin role. The page shows the exact command to grant it. |
+
+### Roles
+
+`users.role` is optional and has two values:
+
+- `admin`: can use the whole admin and the Studio.
+- `super_admin`: the same, plus it is the only role that can grant or remove `super_admin`.
+
+There are two ways to change a role.
+
+- **From the CLI.** `users.setRole` is an internal mutation, so only someone with Convex deploy access can run it. Run it in the shemoqmedi-admin folder: `npx convex run users:setRole '{"email":"person@example.com","role":"admin"}'`. Pass `"role": null` to remove the role. The user must have signed up first so the row exists.
+- **From the Users page.** `admin.setUserRole` lets an admin change other users' roles. Nobody can change their own role, so the last admin can never lock themselves out. Only a super admin can grant or remove `super_admin`.
+
+`users.relinkClerkId` is another CLI-only helper. Clerk user ids differ between Clerk instances (dev and prod), so it points an existing user row at a new Clerk id and keeps its role and references.
+
+<Callout kind="sensitive">Granting `admin` gives full control of listings, awards, jurors, users, emails and social publishing. Only grant it to people who run the site.</Callout>
+
+## Navigation
+
+`AdminShell` draws the header nav from the `NAV` list. On narrow windows the nav scrolls sideways and a dots button lists every section. Under 900px wide there is a bottom tab bar instead: Overview, Review, Studio and More. Some links show a count bubble: waiting reviews, pending claims, agent drafts, and waiting social posts (on the Studio link).
+
+The Studio link opens studio.shemoqmedi.space in a new tab. The old admin pages `/social`, `/design` and `/voiceover` still exist in `app/`, but `proxy.ts` redirects them to the Studio's `/queue`, `/create` and `/reels`. See the Studio page.
+
+## Pages
+
+### Overview (`/dashboard`)
+
+The home page after sign-in, titled "Control room". It shows cards with live counts: sites waiting for review, sites in live voting, awarded sites, the First 100 giveaway tally, and pending claims. It links to Add site, Creators and Users.
+
+Below the cards sits `LegacyMediaMigrator`. It moves old files into the current media pipeline one at a time: screenshots still in Convex storage go to ImageKit as WebP, and preview videos still on ImageKit go to Cloudflare R2. It hides itself when nothing is left. See the Media page.
+
+### Review (`/review` and `/review/[id]`)
+
+The list of listings by status, with tabs for `pending`, `in_voting`, `awarded`, `archived` and `rejected`. `?status=` picks the tab. The default is `pending`.
+
+Opening a listing goes to `/review/[id]`, the full control panel for one site. It stacks these panels:
+
+| Panel | What it does |
+| --- | --- |
+| `AgentPanel` | Hand the listing to the AI agent, decide on its draft, undo changes. |
+| `ListingEditForm` | Edit the listing's details. |
+| `MediaPanel` | Screenshots and the hover video. |
+| `LifecyclePanel` | Approve, close voting now, or set any status by hand with its voting window, awards or reason. |
+| `IntegrityPanel` | The "By the Shemoqmedi team" switch (team sites are never eligible for awards, and marking one revokes its awards) and jurors with a conflict of interest on this site (their scores don't count). |
+| `ScoreEditor` | The admin's own score on 4 pillars (1.0 to 10.0), jury evaluations, clearing scores and resetting votes. An admin score shows on the site but never makes a site eligible for awards. Only jury votes do. |
+| `BadgeKit` | For each award the site won: the badge embed code and a ready email for its owner. |
+
+The page can also delete the listing.
+
+### Nominees (`/nominees`)
+
+Sites currently in jury voting, from `jury.nomineesOverview`. Each shows a countdown to the end of voting and one segment per evaluation needed, filled as evaluations come in. An admin can delete an evaluation here.
+
+### Featured (`/featured`)
+
+Chooses which sites appear in the storefront home page's featured header, and in what order. Edits stay a draft until "Save header" (`admin.setFeatured`). An empty list hands the header back to the automatic order: award winners, top scores, newest.
+
+### Awards (`/awards`)
+
+The awards control room. Tabs, picked with `?tab=`:
+
+- `awards`: today's Site of the Day, the queue, recent awards with revoke, and manual awards (any closed public site, any tier).
+- `first100`: the First 100 giveaway tracker. The honorary badge for the first hundred sites. It shows who holds which number and gives the next number with one click. Revoking frees the number.
+- `rounds`: the monthly and yearly rounds.
+- `settings`: award settings (`awards.updateSettings`).
+- `log`: the audit log.
+
+Every manual change asks for a reason and lands in the audit log.
+
+### Add site (`/listings/new`)
+
+The form for listing a site by hand (`admin.createListing`): details, up to five screenshots and a hover video, credit, scores and lifecycle. Two query parameters prefill it: `?juror=` (a juror's id) and `?brief=` (an approved agent brief for a new site, which gets linked to the new listing).
+
+### Agent desk (`/agent`)
+
+The listing desk for the AI agent (`convex/editorial.ts`). An admin hands listings or new sites to the agent, which researches each site and drafts its copy over the MCP connector. A draft changes nothing until an admin approves it. The brief lifecycle is `queued` → `drafted` → `approved`, with "send back" (back to `queued` with feedback) and cancel. Every applied change is a revision that can be undone.
+
+The agent connects through `/api/mcp`. It signs in with a Shemoqmedi account through Clerk OAuth, and only platform admins get the tools (`convex/lib/mcpAuth.ts`).
+
+### Creators (`/creators`)
+
+All creator profiles. Rename a creator, change their profile address, tier, region, bio and claimed state, or delete the profile.
+
+### Jury (`/jury`)
+
+Create, edit, deactivate and delete jurors. A juror can be created before the person has an account. The profile then has a private claim link, which can be copied or emailed to them through Resend.
+
+### Outreach (`/outreach`)
+
+Every pre-created jury profile and listing that nobody has claimed yet, each with its claim link, ready to send in a DM or email. A link works once. Claiming a listing makes its links followed (dofollow).
+
+### Users (`/users`)
+
+Everyone who signed up, with their number of listings and votes. Grant or remove admin here (see Roles above).
+
+### Claims (`/claims`)
+
+"This is mine" requests from the storefront: someone asks to own an unclaimed site or creator profile, with a message and an optional proof link. Tabs for `pending`, `approved` and `rejected`. Approve or reject each request. A new claim sends a push to admins.
+
+### Import (`/seed`)
+
+"Quick import": paste live website URLs and `importer.importUrls` creates listings from them. It captures a title, description and desktop screenshot for each URL. Screenshot providers are tried in order: Microlink (`MICROLINK_API_KEY` raises its free limit), thum.io, then WordPress mShots.
+
+### Settings (`/settings`)
+
+Settings for this device only: install the admin as an app and turn notifications on or off (`NotificationsPanel`).
+
+## The installable app and push
+
+### Two apps from one codebase
+
+`app/manifest.ts` reads the request's host, so each host installs as its own app. The admin installs as "Shemoqmedi Admin" and starts at `/dashboard`. The Studio installs as "Shemoqmedi Studio" and starts at `/`. Both use the crow icons.
+
+`public/sw.js` is one service worker for both hosts. It only handles push: it shows the notification and opens its link on tap. It has no fetch handler and no cache on purpose, because a stale cached admin page would be worse than none.
+
+On iPhone, web push only works in an installed app. The install prompt shows the "Add to Home Screen" steps there.
+
+### Push notifications
+
+An admin turns notifications on per device and per app. `push.subscribe` stores the browser's subscription with the app's origin. Up to 20 devices are kept per user. Any signed-in user can unsubscribe their own device, even after losing the admin role.
+
+Backend code sends pushes with `pushAdmins(ctx, message)`. It schedules `push.notifyAdmins`, so a slow push service never delays the caller. Only current admins' devices get pushes. The encrypted send runs in `convex/pushSend.ts` in the Node runtime. Subscriptions the push service no longer knows (404 or 410) are deleted. A push that nobody saw within 24 hours expires.
+
+Pushes sent today include: a new submission, a new claim, a listing draft ready on the agent desk, an award announced, a missing Site of the Day or round winner, social posts waiting, a post published or failed, a reel draft ready to render, and a failed Threads token refresh. Reminders and the test button push to one admin only.
+
+Push needs these env vars:
+
+| Where | Name |
+| --- | --- |
+| Next (browser) | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` |
+| Convex | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` |
+
+<Callout kind="note">Without the Convex VAPID vars, push is off. `notifyAdmins` logs and returns, and the test button says the keys are missing.</Callout>
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `proxy.ts` | Clerk middleware: public routes, sign-in redirects, Studio host routing. |
+| `app/*/page.tsx` | One thin page per admin section, each wrapped in `AdminShell`. |
+| `components/admin/AdminShell.tsx` | Header nav, mobile tab bar, count bubbles, the admin-only gate. |
+| `components/admin/useAdmin.ts` | Works out who is looking: loading, no session, not synced, forbidden or admin. |
+| `components/admin/*.tsx` | The page components (`Overview`, `ReviewQueue`, `ReviewDetail`, `AwardsManager`, `JuryAdmin` and the rest). |
+| `convex/authHelpers.ts` | `requireUser` and `requireAdmin`. |
+| `convex/users.ts` | Clerk sync, `getCurrentUser`, and the CLI-only `setRole` and `relinkClerkId`. |
+| `convex/admin.ts` | Admin mutations: listings, creators, featured header, `listUsers`, `setUserRole`. |
+| `convex/http.ts` | The `/clerk-users-webhook` HTTP route. |
+| `convex/editorial.ts` | The agent desk briefs and revisions. |
+| `convex/importer.ts` | Quick import by URL. |
+| `app/manifest.ts` | Per-host web app manifest. |
+| `public/sw.js` | Service worker: push display and click only. |
+| `components/pwa/` | Install prompt, push toggle and notifications panel. |
+| `convex/push.ts` | Subscriptions, `pushAdmins`, `notifyAdmins`, cleanup. |
+| `convex/pushSend.ts` | The web-push send, in Node. |

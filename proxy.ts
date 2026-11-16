@@ -1,6 +1,7 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
 import { studioRouting, studioSignInUrl } from "@/lib/studioRouting";
+import { docsRouting, docsSignInUrl } from "@/lib/docsRouting";
 
 // Everything except these (dashboard, /api/*) requires a Clerk session. The
 // MCP connector checks its own OAuth tokens (lib/mcp), and MCP clients probing
@@ -26,7 +27,19 @@ function signIn(req: NextRequest) {
 }
 
 export default clerkMiddleware(async (auth, req) => {
-  // The host first: the Studio and the admin are one Next app (lib/studioRouting).
+  // The team docs first (lib/docsRouting): docs.shemoqmedi.space is app/docs/*.
+  const docs = docsRouting(req.headers.get("host"), req.nextUrl);
+  if (docs.type === "redirect") return NextResponse.redirect(docs.url);
+  if (docs.type === "rewrite") {
+    // A session to get in; every docs page then checks the admin role on the server (lib/docsAccess).
+    const { userId } = await auth();
+    if (!userId) return NextResponse.redirect(docsSignInUrl(req.headers.get("host") ?? "", req.nextUrl));
+    const res = NextResponse.rewrite(new URL(docs.path, req.url));
+    res.headers.set("X-Robots-Tag", "noindex, nofollow");
+    return res;
+  }
+
+  // Then the Studio: the Studio and the admin are one Next app (lib/studioRouting).
   const route = studioRouting(req.headers.get("host"), req.nextUrl);
   if (route.type === "redirect") return NextResponse.redirect(route.url);
   if (route.type === "rewrite") {

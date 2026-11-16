@@ -1,14 +1,14 @@
 import { SignIn } from "@clerk/nextjs";
 import { SignInFrame } from "@/components/admin/SignInFrame";
-import { onStudioHost } from "@/lib/requestHost";
+import { onDocsHost, onStudioHost } from "@/lib/requestHost";
 
-// One sign-in page for both hosts. After signing in without a redirect_url,
-// the Studio opens its home (/), the admin its dashboard.
+// One sign-in page for every host. After signing in without a redirect_url,
+// the Studio and the docs open their home (/), the admin its dashboard.
 export default async function SignInPage() {
-  const studio = await onStudioHost();
+  const [studio, docs] = await Promise.all([onStudioHost(), onDocsHost()]);
   return (
-    <SignInFrame app={studio ? "studio" : "admin"}>
-      <SignIn path="/sign-in" signUpUrl="/sign-up" fallbackRedirectUrl={studio ? "/" : "/dashboard"} />
+    <SignInFrame app={studio ? "studio" : docs ? "docs" : "admin"}>
+      <SignIn path="/sign-in" signUpUrl="/sign-up" fallbackRedirectUrl={studio || docs ? "/" : "/dashboard"} />
     </SignInFrame>
   );
 }

@@ -1,0 +1,169 @@
+The storefront is the public site at `www.shemoqmedi.space`, in the `shemoqmedi` repo. It is a Next.js 16 app (React 19, Tailwind 4) on Vercel. It has no database of its own: public pages read the shared Convex backend on the server and are served as cached static HTML, while a small group of signed-in pages talk to Convex live through Clerk.
+
+## Route groups
+
+The `app/` folder has two route groups and a few special files.
+
+- `app/(site)/` holds the public pages. Its layout adds the footer and analytics. No Clerk or Convex client runs here.
+- `app/(auth)/` holds pages that need a session. Its layout mounts `ClerkProvider` and `ConvexClientProvider`. No analytics run here.
+- `app/layout.tsx` is the root layout for everything: font, default metadata, icons, the shared `Header`, and the Cloudflare Web Analytics beacon.
+
+## Route map
+
+### Public pages
+
+"ISR 60" means static HTML refreshed in the background at most once every 60 seconds. All of these export `dynamic = "force-static"`.
+
+| Route | File | What it shows | Rendering |
+| --- | --- | --- | --- |
+| `/` | `app/(site)/page.tsx` | Home: hero showcase, sites in live voting, a browsable directory of all sites | ISR 60 |
+| `/sites/[slug]` | `app/(site)/sites/[slug]/page.tsx` | One listing: screenshots, video, credits, scores, jury reviews, award history | ISR 60. `generateStaticParams` prerenders every public slug; new slugs render on demand. Old slugs get a 308 to the new one. |
+| `/creators` | `app/(site)/creators/page.tsx` | All creators and studios | ISR 60 |
+| `/creators/[slug]` | `app/(site)/creators/[slug]/page.tsx` | One creator and their sites | ISR 60, `generateStaticParams` for known creators |
+| `/collections/[tag]` | `app/(site)/collections/[tag]/page.tsx` | Sites by category, technology or region | ISR 60. `generateStaticParams` from `lib/collections.ts`; `dynamicParams = false`, so unknown tags 404. |
+| `/site-of-the-day` | `app/(site)/site-of-the-day/page.tsx` | Dated archive of SOTD winners | ISR 60 (a new day's winner shows within a minute of 00:00 UTC) |
+| `/awards/[slug]` | `app/(site)/awards/[slug]/page.tsx` | One award: what, when, score, the badge | ISR 300, `generateStaticParams` from award slugs |
+| `/badges` | `app/(site)/badges/page.tsx` | The badge tiers and the First 100 count | ISR 300 |
+| `/jury` | `app/(site)/jury/page.tsx` | Jury members | ISR 60 |
+| `/jury/[slug]` | `app/(site)/jury/[slug]/page.tsx` | One juror's public page | ISR 60, `generateStaticParams` for public jurors |
+| `/ka` | `app/(site)/ka/page.tsx` | The one Georgian page: sites made in Georgia | ISR 300 |
+| `/how-we-score` | `app/(site)/how-we-score/page.tsx` | Scoring rules. Mirrors admin `convex/lib/scoring.ts` by hand. | Static |
+| `/about`, `/crow`, `/privacy`, `/terms` | `app/(site)/.../page.tsx` | About, the crow story, legal pages | Static |
+
+### Signed-in pages
+
+`proxy.ts` redirects signed-out visitors to `/sign-in` for `/account`, `/submit`, `/vote`, `/jury/profile` and `/jury/rounds`. All of these are `noindex`.
+
+| Route | What it does |
+| --- | --- |
+| `/sign-in`, `/sign-up`, `/sso-callback`, `/session-tasks` | Our own Clerk forms. Session tasks (such as a password reset) finish on `/session-tasks`. |
+| `/submit` | Submit a site |
+| `/account` | Your sites and claims. Jurors with nothing else are sent to `/jury/profile`. |
+| `/account/badges` | Your awards and badge embed codes |
+| `/vote/[slug]` | Score a site in voting. `force-dynamic`. |
+| `/claim/[key]` | Open a claim link or request a claim. Not behind the proxy redirect: the page sends new users through sign-up itself. `force-dynamic`, referrer `same-origin`. |
+| `/jury/profile` | A juror edits their public profile |
+| `/jury/rounds` | A juror scores open monthly and yearly rounds |
+
+### Route handlers and special files
+
+| Route | File | What it does |
+| --- | --- | --- |
+| `/api/menu` | `app/api/menu/route.ts` | JSON for the header mega menu: search index, counts, covers. ISR 300. Fetched only when someone opens the menu. |
+| `/badge/[slug]` | `app/badge/[slug]/route.ts` | The badge SVG for a real award. Options `?shape=seal`, `?theme=light` or `dark`, `?motion=1`. Unknown or revoked awards get 404. |
+| `/sitemap.xml` | `app/sitemap.ts` | Sitemap with images and video. ISR 3600. |
+| `/robots.txt` | `app/robots.ts` | Allows everything except `/api/` |
+| `/opengraph-image` | `app/opengraph-image.tsx` | Default 1200 by 630 share card, built once |
+| 404 and errors | `app/not-found.tsx`, `app/error.tsx`, `app/global-error.tsx` | Error pages (404 is `noindex`) |
+
+## How data is read
+
+### Server reads: `lib/listings.ts`
+
+Every public page gets its data from functions in `lib/listings.ts`, such as `getPublicListings`, `getListing`, `getPublicSlugs`, `getCreator`, `getJurors`, `getAward` and `getAwardSlugs`. They call Convex with `fetchQuery` from `convex/nextjs`.
+
+Rules to know:
+
+- `fetchQuery` is an HTTP POST, which Next will not cache. That is why every page that uses these functions exports `dynamic = "force-static"` and a `revalidate` time. Forget it and the page becomes dynamic on every request.
+- Reads are wrapped in React `cache()` so `generateMetadata` and the page share one request.
+- Errors: during `next build`, a failed read falls back to an empty result so a Convex outage cannot fail a deploy. At runtime it throws, so Next keeps serving the last good page instead of caching an empty one.
+- A real "not found" is a `null` result, not an error.
+- `getPublicListings` returns every public listing (up to 200). Pages filter in code.
+- Renamed listings: `lib/slugRedirect.ts` asks Convex for the current slug and the page answers with a permanent redirect.
+
+### The hand-typed Convex API: `convex-helpers-api.ts`
+
+The Convex backend lives in the admin repo, so the storefront has no generated `api` object. `convex-helpers-api.ts` declares, by hand, the types of every Convex function the storefront calls (`listings`, `media`, `votes`, `creators`, `claims`, `users`, `jury`, `claimLinks`, `awards`, `rounds`, `conflicts`, `digest`) and exports `api` as a typed `anyApi`.
+
+<Callout kind="warning">TypeScript cannot catch drift between this file and the real backend. When you change a Convex function used by the storefront, update `convex-helpers-api.ts` in the same change, and deploy the backend first if the storefront depends on a new field.</Callout>
+
+### Client reads
+
+Only the `(auth)` pages use the Convex React client (`components/ConvexClientProvider.tsx`) with the Clerk token. Uploads from `/submit` go through `lib/imagekitUpload.ts` (screenshots to ImageKit as WebP) and `lib/videoUpload.ts` (videos to Cloudflare R2).
+
+### Images
+
+`components/site/MediaImage.tsx` serves images through Vercel's image optimizer in front of ImageKit (WebP only, cached 31 days, see `images` in `next.config.ts`). Setting `NEXT_PUBLIC_IMAGE_CDN=imagekit` switches to ImageKit's own resizing (`lib/imageLoader.ts`).
+
+## Shared header and the crow
+
+There is one `Header` (`components/site/Header.tsx`), rendered in the root `app/layout.tsx` above every route group, so the navbar stays put on every page, including sign-in and account.
+
+- The header is fixed and transparent, and turns into white glass on scroll.
+- `components/site/MegaMenu.tsx` is the full-screen menu: pages, categories, technologies, a few covers and live search. Opens from the Menu button, the search field, `/` or Ctrl or Cmd plus K. Its links are server-rendered; its data loads from `/api/menu` on first use.
+- `components/site/NavCrow.tsx` is the crow's home slot in the logo. The animated crow flies in, lands there and then roams the page. Logic is in `components/site/crow/` (`roam.ts`, `sprites.ts`, `world.ts`); sprite sheets are in `public/crow/`. Add `?crowdebug` to a URL for debug mode.
+
+## SEO files
+
+- `lib/site.ts`: the canonical origin (`SITE_URL`), `absoluteUrl()`, and the official social profiles used as `sameAs`.
+- `app/sitemap.ts` and `app/robots.ts`: see the SEO page.
+- JSON-LD: each public page writes its own `application/ld+json` script (types include `WebSite`, `Organization`, `CollectionPage`, `ItemList`, `BreadcrumbList`, `ProfilePage`, `CreativeWork`, `VideoObject`).
+- `lib/imageSeo.ts`: image and video data shared by listing pages and the sitemap.
+- OG images: `app/opengraph-image.tsx` is the default; pages that set their own `openGraph` must repeat `siteName`, `locale`, `type` and `images`, because Next merges metadata one level deep.
+
+## Analytics
+
+| Tool | Where it loads |
+| --- | --- |
+| Cloudflare Web Analytics | Root layout, every page |
+| Vercel Analytics | `app/(site)/layout.tsx`, public pages only |
+| Ahrefs Web Analytics | `app/(site)/layout.tsx`, public pages only |
+
+Signed-in pages carry no Vercel or Ahrefs analytics because claim URLs contain secret tokens.
+
+## Old Voloo pages: 410 Gone
+
+The domain used to host Voloo (NFC tap menus). Its old URLs are handled in two ways:
+
+1. Old URLs that have a live equivalent are permanently redirected in `next.config.ts` (`redirects()`): the `/en`, `/ka/...` and `/ru` locale prefixes, `/category/...` to `/collections/...`, `/collections/sotd` to `/site-of-the-day`, and `/t/...` (old NFC stickers) to the home page.
+2. Everything else from Voloo answers **410 Gone** from `proxy.ts`, using the path list and HTML in `lib/gone.ts`. The response carries `X-Robots-Tag: noindex`.
+
+<Callout kind="warning">The 410 path list exists twice: in `lib/gone.ts` and as literals in the `matcher` of `proxy.ts` (Next needs literals there). Change both together. `/ka` itself is the live Georgian page and must never be marked gone.</Callout>
+
+## Security headers
+
+`next.config.ts` sets HSTS, `nosniff`, a referrer policy, a permissions policy and a `frame-ancestors` rule. Only the site itself and Giorgi's portfolio may show the site in a frame. Any host other than `www.shemoqmedi.space` (for example `*.vercel.app` aliases) gets `X-Robots-Tag: noindex`.
+
+## Where to change X
+
+| I want to change... | Edit |
+| --- | --- |
+| The navbar or mega menu | `components/site/Header.tsx`, `components/site/MegaMenu.tsx` |
+| The crow's behaviour | `components/site/crow/roam.ts`, `components/site/NavCrow.tsx` |
+| The footer or social links | `components/site/Footer.tsx`, `SOCIAL_PROFILES` in `lib/site.ts` |
+| A listing page | `app/(site)/sites/[slug]/page.tsx`, `components/listing/*` |
+| Listing cards and grids | `components/listing/ListingCard.tsx`, `components/listing/ListingGrid.tsx` |
+| Which collections exist | `lib/collections.ts`, `lib/collectionCopy.ts`, `lib/taxonomy.ts` |
+| Categories, technologies, regions, award names | `lib/taxonomy.ts` |
+| How often a page refreshes | The `revalidate` export in that page file |
+| What data a page gets | `lib/listings.ts`, then the Convex function in the admin repo, then `convex-helpers-api.ts` |
+| Badge artwork | `lib/badgeSvg.ts`, `lib/badgeArt.ts`, `lib/badgeInfo.ts` |
+| Default title, description, icons | `app/layout.tsx` |
+| Default share image | `app/opengraph-image.tsx` |
+| Redirects for old URLs | `next.config.ts` |
+| Pages that answer 410 | `lib/gone.ts` and the `matcher` in `proxy.ts` |
+| Which pages need sign-in | `isProtectedRoute` and `matcher` in `proxy.ts` |
+| Scoring explanation | `app/(site)/how-we-score/page.tsx` (keep in sync with admin `convex/lib/scoring.ts`) |
+| Legal text | `app/(site)/privacy/page.tsx`, `app/(site)/terms/page.tsx`, `lib/legal.ts` |
+
+## Where it lives
+
+| File or folder | What it does |
+| --- | --- |
+| `app/(site)/` | Public pages, footer and analytics layout |
+| `app/(auth)/` | Signed-in pages with Clerk and Convex providers |
+| `app/layout.tsx` | Root layout, default metadata, Header, Cloudflare beacon |
+| `app/sitemap.ts`, `app/robots.ts` | Sitemap and robots |
+| `app/api/menu/route.ts` | Mega menu data |
+| `app/badge/[slug]/route.ts` | Badge SVG |
+| `lib/listings.ts` | Server-side Convex reads |
+| `lib/slugRedirect.ts` | Redirects for renamed listings |
+| `convex-helpers-api.ts` | Hand-typed Convex function types |
+| `lib/site.ts` | Canonical origin and social profiles |
+| `lib/gone.ts` | Voloo 410 list and page |
+| `proxy.ts` | Auth redirects and 410 responses |
+| `next.config.ts` | Redirects, headers, image settings |
+| `components/site/` | Header, mega menu, crow, footer, shared UI |
+| `components/listing/` | Listing cards, galleries, forms, voting |
+| `components/jury/` | Jury pages and forms |
+| `lib/imagekitUpload.ts`, `lib/videoUpload.ts` | Browser uploads to ImageKit and R2 |

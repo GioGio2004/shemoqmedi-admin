@@ -1,0 +1,135 @@
+The admin app hosts an MCP connector at `/api/mcp`. An admin adds it to Claude (the phone app, claude.ai or Claude Code), signs in with their Shemoqmedi account, and Claude can then work the social desk, the listing desk and outreach: read listings and awards, render graphics, write and publish posts, draft listing copy and email studios. Only admins get the tools. This page covers how sign-in works and every tool the connector exposes.
+
+## What MCP is
+
+MCP (Model Context Protocol) is an open standard that lets an AI client call tools on a server. The server publishes a list of tools, each with a name, a description and an input schema. The client (here, Claude) decides when to call them, and the server runs them and returns the result. Our server is built with `mcp-handler` and lives in `lib/mcp/server.ts`. It also sends Claude a long set of instructions (the `INSTRUCTIONS` string) on how to run the desk: always show captions and images before approving, never send email without a yes, English only, and so on.
+
+## How auth works
+
+There are two steps. Clerk proves who the person is. Convex decides what they may do.
+
+1. **Clerk OAuth.** The client finds the sign-in server from the metadata the app serves under `/.well-known`. Clerk is the OAuth authorization server. The person signs in with their own account and presses Allow. The client gets a short-lived OAuth access token and sends it as a bearer token to `/api/mcp`.
+2. **Token check.** `verifyToken` in `lib/mcp/server.ts` checks the token with Clerk (`verifyOAuthToken` in `lib/mcp/oauth.ts`). If `MCP_OAUTH_AUDIENCE` is set, the token must also be bound to this resource.
+3. **Service credential.** The app mints a `svc.` credential (`serviceCredential`): the Clerk user id, issue time and expiry, signed with HMAC-SHA256 using `MCP_SERVICE_SECRET`. It lives for one minute.
+4. **Admin check in Convex.** Every tool calls a function in `convex/mcp.ts` with that credential. Convex verifies the signature and the short lifetime (`convex/lib/tokens.ts`), looks up the user, and requires role `admin` or `super_admin` (`requireTokenAdmin` in `convex/lib/mcpAuth.ts`). Anyone else gets a 401 at sign-in.
+
+`MCP_SERVICE_SECRET` must have the same value on Vercel (admin app) and on the Convex deployment. If they differ, every sign-in is refused and the server log says so.
+
+The `/api/mcp` route is public in `proxy.ts` because it checks its own tokens. The social network tokens never pass through the connector: they live only in the Convex env.
+
+<Callout kind="note">If a connector shows no tools, check the admin app's logs on Vercel for "MCP sign-in refused". The message tells you whether Clerk rejected the token or the person is not an admin.</Callout>
+
+## The tools
+
+Labels used below:
+
+- **reads**: only reads data.
+- **writes**: changes data in our database, but nothing leaves the system.
+- **publishes**: posts to public social networks.
+- **sends**: sends email or uses a paid outside service.
+
+### Account and overview
+
+| Tool | What it does | Effect |
+| --- | --- | --- |
+| `whoami` | The signed-in admin | reads |
+| `stats` | Counts: posts by status, emails in the last 30 days, listings by status, creators with contact emails, opt-outs | reads |
+
+### Listings, creators and awards
+
+| Tool | What it does | Effect |
+| --- | --- | --- |
+| `search_listings` | Listings newest first, filtered by text and status | reads |
+| `get_listing` | Everything about a site, including private details (contact email, owner, claim link), jury scores, posts and emails sent | reads |
+| `list_awards` | Latest awards with site, date, page and whether the winner was emailed | reads |
+| `get_creator` | A studio or person, with private contact email, social handles and listings | reads |
+| `studios_without_contact` | Unclaimed studios with public listings and no contact email | reads |
+| `update_creator` | Saves a studio's private contact email and social handles | writes |
+| `claim_link` | The secret claim link of an unclaimed listing; creates it on first use | writes |
+
+### Listing desk (agent desk)
+
+Claude researches a site and drafts its listing copy. Nothing changes on the site until an admin approves.
+
+| Tool | What it does | Effect |
+| --- | --- | --- |
+| `editorial_rules` | The writing rules and the award facts Claude may state | reads |
+| `editorial_queue` | Briefs on the desk: queued and drafted | reads |
+| `get_brief` | One brief with the current copy, the draft and what it would change | reads |
+| `queue_brief` | Puts a listing or a new site URL on the desk | writes |
+| `submit_draft` | Sends a draft for a brief; checked against the rules; admins get a push | writes |
+| `approve_draft` | Applies a draft to the live listing (needs `confirm: true`); can be undone | writes (public site copy changes) |
+| `cancel_brief` | Takes a brief off the desk | writes |
+| `listing_history` | Every change to a listing's copy, newest first | reads |
+| `undo_change` | Puts a change's fields back (needs `confirm: true`) | writes (public site copy changes) |
+
+The same desk has a page in the admin at `/agent` (`app/agent/page.tsx`, `components/admin/AgentDesk.tsx`). There an admin hands listings to the agent, reads drafts as before and after, approves, sends back with feedback, cancels, and undoes changes. It uses `convex/editorial.ts`, like the tools.
+
+### Social queue
+
+| Tool | What it does | Effect |
+| --- | --- | --- |
+| `social_queue` | Posts by status (default: waiting) with facts, captions and media | reads |
+| `get_post` | One post with per-network results and each media item's design recipe | reads |
+| `create_post` | Starts a post (announcement, custom, or story) | writes |
+| `update_post` | Saves captions, media, publish time or note; never publishes. Editing an approved, scheduled or failed post sends it back to waiting | writes |
+| `approve_post` | Approves a waiting post; it publishes now or at its publish time. A new-listing post also emails the studio | **publishes**, **sends** |
+| `publish_post` | Approves and publishes in one step, now or at a given time | **publishes**, **sends** |
+| `unschedule_post` | Takes a scheduled post back to waiting; cancels the publish | writes |
+| `retry_post` | Publishes a failed post again, only to networks not yet sent | **publishes** |
+| `reject_post` | Drops a post with an optional reason | writes |
+| `list_channels` | Which networks are connected, token expiry, last error; picks up new tokens first | reads |
+
+### Graphics
+
+| Tool | What it does | Effect |
+| --- | --- | --- |
+| `list_templates` | Graphic templates and formats | reads |
+| `list_palettes` | Colour palettes | reads |
+| `list_styles` | Visual styles (glass and flat styles) | reads |
+| `list_media` | Uploaded files newest first, to reuse | reads |
+| `get_designs` | The design recipe behind image or video URLs | reads |
+| `render_graphic` | Renders one JPEG, uploads it to ImageKit, returns a public URL | writes (file on ImageKit) |
+| `render_carousel` | Renders a listing's 6 to 8 slide carousel, uploads to ImageKit | writes (files on ImageKit) |
+
+### Reels and voice
+
+| Tool | What it does | Effect |
+| --- | --- | --- |
+| `list_voices` | ElevenLabs narrators with samples; free | reads |
+| `create_voiceover` | Voices a script with ElevenLabs and stores the MP3 | **sends** (spends ElevenLabs credits) |
+| `find_reel` | A listing's latest finished reel | reads |
+| `create_reel_draft` | Saves a reel recipe for the Studio's reel editor; admins get a push | writes |
+| `update_reel_draft` | Replaces a draft's recipe; never publishes | writes |
+| `get_reel_draft` | One draft with status, recipe and problems | reads |
+| `list_reel_drafts` | Reel drafts, last changed first | reads |
+| `attach_reel` | Puts a rendered reel into a post as its video | writes |
+
+Claude cannot render video. The reel renders in the admin's browser when they open it in the Studio.
+
+### Email
+
+| Tool | What it does | Effect |
+| --- | --- | --- |
+| `preview_email` | Shows exactly who gets what, without sending | reads |
+| `send_email` | Sends one email with an unsubscribe footer and logs it; needs `confirm: true` | **sends** |
+| `preview_broadcast` | How many people an audience reaches and the first few addresses | reads |
+| `send_broadcast` | Emails a whole audience in the background; needs `confirm: true` | **sends** |
+| `email_history` | Emails sent, newest first | reads |
+
+<Callout kind="warning">`confirm: true` and approval are the only brakes. The server checks that the caller is an admin, not that a human said yes. The instructions tell Claude to ask first, but whoever holds a connected admin session can publish and send.</Callout>
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `app/api/mcp/route.ts` | The `/api/mcp` route (GET, POST, DELETE), 300 s max duration |
+| `lib/mcp/server.ts` | Tool registrations, Claude's instructions, `verifyToken` |
+| `lib/mcp/oauth.ts` | OAuth metadata, Clerk token check, `svc.` service credential |
+| `lib/mcp/catalog.ts` | Template, style and palette lists for the tool schemas |
+| `convex/mcp.ts` | The Convex function behind every tool |
+| `convex/lib/mcpAuth.ts` | `requireTokenAdmin`: credential to admin user |
+| `convex/lib/tokens.ts` | HMAC signing and checking |
+| `convex/editorial.ts` | The listing desk |
+| `app/agent/page.tsx`, `components/admin/AgentDesk.tsx` | The agent desk page in the admin |
+| `proxy.ts` | Leaves `/api/mcp` and `/.well-known` open so the connector can check its own tokens |

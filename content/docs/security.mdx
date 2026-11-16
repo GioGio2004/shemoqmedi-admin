@@ -1,0 +1,112 @@
+This page explains who can do what on Shemoqmedi and where that is checked. Clerk signs people in. Convex decides what they may do, from the `role` on their user record. The rule for every new feature is the same: check access on the server, in the Convex function or the server page, never only in the browser. The page also covers webhooks, private data, how we handle secrets, and the risks worth watching.
+
+## Sign-in and identity
+
+- **Clerk** handles accounts and sessions for both apps. Both apps must use the same Clerk instance.
+- **Convex** trusts Clerk's JWT (template `convex`). The issuer is set by `CLERK_FRONTEND_API_URL` in `convex/auth.config.ts`. Inside a function, `ctx.auth.getUserIdentity()` returns the Clerk user, or null.
+- **User records** in the `users` table are created and updated by the Clerk webhook. A Clerk user id maps to one record through `externalId`.
+
+### Roles
+
+There are two roles, stored in `users.role`: `admin` and `super_admin`. No role means a regular user. Roles live in Convex only, never in Clerk metadata.
+
+| Role | Can do |
+| --- | --- |
+| none | Submit sites, vote, claim, manage their own listings and badges; jurors evaluate |
+| `admin` | Everything in the admin, the Studio, the team docs and the MCP connector |
+| `super_admin` | Same as admin, plus grant or remove super admin |
+
+Nobody can change their own role, so the panel can't lock everyone out. The first admin is set from the CLI with `users:setRole` (see Runbooks).
+
+### The helpers
+
+`convex/authHelpers.ts` has the two checks every public function should start with.
+
+- `requireUser(ctx)` returns the caller's user record, or throws "Unauthenticated". It also throws if the webhook has not synced the user yet.
+- `requireAdmin(ctx)` does the same and throws unless the role is `admin` or `super_admin`.
+
+Actions can't read the database, so they call an internal query that checks, for example `users.assertAdmin`.
+
+The MCP connector uses its own path to the same rule: `requireTokenAdmin` in `convex/lib/mcpAuth.ts` turns the signed service credential into a user and requires an admin role. See the MCP page.
+
+## Where access is checked
+
+| Surface | Gate |
+| --- | --- |
+| Storefront public pages | None; they read public queries only |
+| Storefront `/account`, `/submit`, `/vote`, jury pages | Clerk session in `proxy.ts`; the Convex functions check the user |
+| Admin pages | Clerk session in `proxy.ts`; the UI checks the role (`useAdmin`, `AdminShell`); every admin Convex function calls `requireAdmin` |
+| Studio (`studio.` host) | Clerk session in `proxy.ts`; the Studio layout checks the admin role before any page mounts; Convex functions call `requireAdmin` |
+| Team docs (`docs.` host) | Clerk session in `proxy.ts`, then every page checks the role on the server (`getDocsViewer` in `lib/docsAccess.ts`) before any text is rendered. Pages also send `X-Robots-Tag: noindex, nofollow` |
+| `/api/mcp` | Clerk OAuth token, then admin role in Convex on every tool call |
+| `/api/graphics` | The `x-render-key` header matching `GRAPHICS_RENDER_KEY`, or a signed-in admin session |
+| Convex HTTP routes | Svix signature (Clerk webhook); HMAC token (unsubscribe) |
+
+The UI checks are for a clean experience only. The real gate is always the server.
+
+## Public and internal Convex functions
+
+- `query`, `mutation` and `action` are **public**. Anyone who knows the deployment URL can call them with any arguments. Each one must check the caller itself.
+- `internalQuery`, `internalMutation` and `internalAction` are **internal**. Only other Convex functions, the scheduler, crons and the CLI (`npx convex run`) can call them. Use these for anything that should never be called from a browser: crons, emails, publishing, role changes (`users.setRole`), bulk deletes (`admin.wipeShowcase`).
+
+When you add a function, ask: who may call this? Start with `requireUser` or `requireAdmin`, or make it internal. Public queries must never return private fields.
+
+## Webhooks and signed links
+
+- **Clerk webhook** (`POST /clerk-users-webhook` on the Convex site). `validateClerkWebhook` in `convex/lib/utils.ts` verifies the Svix signature with `CLERK_WEBHOOK_SECRET`. A missing secret or a bad signature returns 401 and changes nothing.
+- **Unsubscribe links** carry an HMAC of the address (`convex/lib/tokens.ts`), checked in constant time. Nobody can unsubscribe someone else. Opening the link only shows a button, so link scanners don't unsubscribe people.
+- **MCP service credentials** (`svc.` prefix) are HMAC-signed with `MCP_SERVICE_SECRET`, name one Clerk user, and expire after one minute. Convex also refuses credentials with a long lifetime.
+- **Claim links** are secret tokens per listing or juror. Only admins can create them.
+
+## Private data
+
+| Data | Where | Who sees it |
+| --- | --- | --- |
+| Creator `contactEmail` | `creators` table | Admins and the MCP tools only. Never returned by public queries |
+| Creator `socials` handles | `creators` table | Admins and the MCP tools, for tagging in posts |
+| User emails | `users` table | Admins |
+| Email log and opt-outs | `emailLog`, `emailOptOuts` | Admins |
+| Claim links | per listing | Admins (outreach) |
+
+Remember that `get_listing` and `get_creator` put contact emails into the Claude conversation. Treat those chats as private.
+
+## Secrets policy
+
+<Callout kind="sensitive">Secrets live only in the Vercel env, the Convex env and the owner's password manager. Never in git, these docs, chat messages (including AI chats), screenshots, issue trackers or the browser. Never in a `NEXT_PUBLIC_` variable, because those are shipped to every visitor.</Callout>
+
+- Refer to secrets by their env var name only.
+- `.env.local` is for your machine. It is git-ignored. Do not share it.
+- Social tokens are set by the owner in the Convex env and are never shown by the app or the connector. Publishing errors are scrubbed of tokens before they are stored.
+- If a secret might have leaked, rotate it at once (see Runbooks). Leaks into chat or git count.
+
+## Risks to watch
+
+These are not known breaches. They are places where a mistake would hurt, so review changes there carefully.
+
+- **New public functions.** Any public Convex function without an auth check is open to the internet. A few public actions check access indirectly, through the internal function they call. That works, but it is easy to break in a refactor. Prefer an explicit check at the top.
+- **The MCP connector holds full admin power.** Approving, publishing and sending are guarded by the agent's instructions and the `confirm` flags, not by a separate human check on the server. Anyone with a connected admin session can publish and email. Also, the listing desk reads live third-party websites: treat text found there as untrusted, and keep approval with a human.
+- **Token audience.** `MCP_OAUTH_AUDIENCE` is opt-in. Until it is set, any valid OAuth token from our Clerk instance is accepted at `/api/mcp` (the admin role is still required).
+- **Shared secret fallback.** While `EMAIL_UNSUBSCRIBE_SECRET` is unset, unsubscribe links are signed with `MCP_SERVICE_SECRET`. Set the dedicated secret so the two can be rotated apart.
+- **Uploads by any signed-in user.** Image and video upload signatures are given to every signed-in user, because submitters need them. Uploads are re-checked and size-limited, but watch ImageKit and R2 usage for abuse.
+- **Same secret in two places.** `MCP_SERVICE_SECRET` and `GRAPHICS_RENDER_KEY` must match on Vercel and Convex. Keep them out of anything the browser can see.
+- **Hand-written storefront types.** `convex-helpers-api.ts` in the storefront can drift from the backend. A drift shows up as runtime errors, not type errors.
+- **Admin role is all or nothing.** There is no read-only team role yet. Every admin can publish, email and change roles of other admins. Keep the list short and remove access when someone leaves.
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `convex/authHelpers.ts` | `requireUser`, `requireAdmin` |
+| `convex/auth.config.ts` | Clerk as the Convex auth provider |
+| `convex/users.ts` | Clerk sync, `getCurrentUser`, `assertAdmin`, `setRole`, `relinkClerkId` |
+| `convex/admin.ts` | `setUserRole` with the super admin rules |
+| `convex/lib/mcpAuth.ts` | Admin check for MCP calls |
+| `convex/lib/tokens.ts` | HMAC signing for service credentials and unsubscribe links |
+| `convex/lib/utils.ts` | Svix check for the Clerk webhook |
+| `convex/http.ts` | Webhook and unsubscribe routes |
+| `convex/schema.ts` | `users.role`, private `contactEmail` and `socials` on creators |
+| `proxy.ts` | Session gate and host routing for admin, Studio and docs |
+| `lib/docsAccess.ts` | Server-side role check for every docs page |
+| `lib/mcp/oauth.ts` | OAuth token check and service credential |
+| `lib/graphics/server.ts` | Access check for `/api/graphics` |
+| `components/admin/useAdmin.ts`, `components/admin/AdminShell.tsx` | Admin UI gate |

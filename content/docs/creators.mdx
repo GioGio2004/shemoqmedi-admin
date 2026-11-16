@@ -1,0 +1,115 @@
+A creator is the person or studio credited on a listing, stored in the `creators` table and shown at `/creators/<slug>` on the storefront. Creators are created automatically from a listing's "Made by" name. A creator can be claimed by a user account, and the creator's private contact email is where award and "featured" emails go while nobody has claimed the studio.
+
+## Fields
+
+From `convex/schema.ts` → `creators`.
+
+| Field | Public? | Meaning |
+| --- | --- | --- |
+| `slug` | Yes | Profile address, `/creators/<slug>` |
+| `name` | Yes | Display name. Also the "Made by" text on its listings |
+| `tier` | Yes | `solo` or `agency` |
+| `region` | Yes | `georgia` or `global` |
+| `location` | Yes | Free text, for example "Tbilisi, GE" (up to 80 characters) |
+| `website` | Yes | The studio's site |
+| `links` | Yes | Profile links (Dribbble, Behance, LinkedIn, X and so on), up to 6 (`LIMITS.creatorLinks`) |
+| `bio` | Yes | Up to 600 characters |
+| `isClaimed` | Yes | Whether a user owns the profile |
+| `claimedBy` | **No** | The owner's `users` id |
+| `contactEmail` | **No** | Private, admin-only email for award and "featured" emails |
+| `socials` | **No** | Instagram, Facebook and LinkedIn handles used to tag the studio in social posts |
+| `createdAt`, `updatedAt` | No | Timestamps |
+
+## Public versus private data
+
+Public queries in `convex/creators.ts` build their own return shape (`publicCreator`). That shape has no `claimedBy`, `contactEmail` or `socials`. Only admin functions return those:
+
+- `admin.listCreators` (needs `requireAdmin`) returns the contact email, socials and the claiming user's name and email.
+- The MCP connector for the social desk also reads and updates them (`mcp.updateCreator`).
+
+<Callout kind="sensitive">`contactEmail` and `socials` must never be added to a public query. The contact email is a real person's inbox, and the schema comment says it is "never returned by public queries". If you add a field to `publicCreator`, check it is meant to be public.</Callout>
+
+Saving `contactEmail` or `socials` is done apart from the public fields in `admin.updateCreator`, so editing them never pings search engines. The email is lowercased and checked (`normalizeEmail` in `convex/lib/contacts.ts`). Handles can be typed as `@studio`, `studio` or a full profile URL; `cleanHandle` stores just the handle. An empty string clears a value.
+
+## Profile pages
+
+`creators.getBySlug` serves `/creators/<slug>`. It returns `null`, so the page does not exist, until the creator has at least one public listing (`in_voting`, `awarded` or `archived`). The page shows:
+
+- The public fields above.
+- Every public listing credited to the creator, newest first.
+- Award counts per tier (SOTY, SOTM, SOTD, BSC, HM, F100), counted from those listings.
+- `nominations`: the number of public listings.
+
+`creators.listPublic` serves the `/creators` index and the sitemap. It lists only creators with a public listing, sorted by total awards, then by nominations.
+
+## How creators are linked to listings
+
+A listing points to its creator with `creatorId`. The link is made by name.
+
+`findOrCreateCreator` in `convex/lib/listingHelpers.ts` turns the "Made by" name into a slug. If a creator with that slug exists, the listing uses it. If not, a new creator is created with the listing's tier, region and creator website. This runs when:
+
+- an admin creates a listing (`admin.createListing`) or imports URLs,
+- a user submits a site (`listings.submit`),
+- an admin changes a listing's "Made by" (`admin.updateListing`).
+
+Because matching is by slug of the name, two different studios with the same name end up on one profile. Rename one of them to split them.
+
+A creator created from a storefront submission starts as claimed by the submitter. A creator created by an admin starts unclaimed. When an existing creator is reused, its claim state is not changed.
+
+## Editing and deleting
+
+Admins edit creators on the admin `/creators` page.
+
+- `admin.updateCreator` edits any field. Renaming a creator also updates `creditName` ("Made by") on all of its listings. Changing the slug fails if another creator has it.
+- Setting `isClaimed` to false clears `claimedBy`.
+- `admin.deleteCreator` deletes a profile only when no listing uses it. It also deletes claim requests for that profile.
+
+## Team sites
+
+"Built by the Shemoqmedi team" is a flag on the **listing** (`byTeam`), not on the creator. An admin sets it with `awards.setTeamSite`. Team sites are shown as such, are never judged by the jury, and are never eligible for awards. Marking a site as a team site revokes its active awards with a logged reason. See the Awards page.
+
+## Claims
+
+A user can become the owner of a creator profile in one way: a claim request.
+
+1. On the storefront's claim page (`/claim/<slug>?type=creator`), a signed-in user asks for an unclaimed profile and sends a message and an optional proof link (`claims.submit`).
+2. Admins get a push notification.
+3. On the admin `/claims` page, `claims.approve` sets `claimedBy` and `isClaimed`, and rejects other pending claims on the same profile. `claims.reject` needs a reason the user sees.
+
+Claim links (`claimLinks.ts`) work for listings and jurors, not for creator profiles. Claiming a listing does not claim its creator profile.
+
+### What owning a profile changes
+
+- **Emails.** Award emails go to the listing's owner, or if the listing has no owner, to the user who claimed its creator profile. Their account email wins over `contactEmail`.
+- **Conflicts of interest.** A juror who claimed a creator profile cannot score that creator's listings (`convex/lib/conflicts.ts`).
+- **Community votes.** A user cannot vote on a listing whose creator they claimed. An approved creator claim also counts as "having a site listed", which community voting requires (`convex/votes.ts` → `earnedBadge`).
+
+## What emails creators get
+
+All of these go through `emails.deliver` in `convex/emails.ts`. It skips anyone who unsubscribed (`emailOptOuts`), adds an unsubscribe link, and logs every attempt in `emailLog`.
+
+The recipient is picked by `social.studioContact`: the listing's owner, else the user who claimed the creator, else the creator's `contactEmail`. With none of these, no email is sent.
+
+| Email | When | Contents |
+| --- | --- | --- |
+| Award winner (`kind: "award"`) | Right after any award is given (`notify.awardAnnounced`) | Award page link. If the listing is claimed, the badge embed code (tag and seal) and a link to `/account/badges`. If unclaimed, the listing's claim link instead. Sent once per award (`awards.notifiedAt`) |
+| Featured (`kind: "featured"`) | When an admin approves the "new listing" social post for the site (`emails.featured`) | Listing page link. If unclaimed, the claim link. Sent once per listing, and only if it is still public |
+| Outreach, broadcast, custom | Sent by an admin through the social desk / MCP connector | Free text. Broadcasts go to an audience in batches of 100 |
+
+Emails need `RESEND_API_KEY` (and `RESEND_FROM`) set on the Convex deployment. Without them nothing is sent and the reason is returned.
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `convex/schema.ts` | `creators` table and `creatorTier`, `region` |
+| `convex/creators.ts` | Public profile and index queries |
+| `convex/admin.ts` | `listCreators`, `updateCreator`, `deleteCreator`, listing "Made by" relinking |
+| `convex/lib/listingHelpers.ts` | `findOrCreateCreator` |
+| `convex/lib/contacts.ts` | Email and social handle cleaning |
+| `convex/claims.ts` | Claim requests for listings and creators |
+| `convex/social.ts` | `studioContact`: who gets a studio's emails |
+| `convex/emails.ts` | `deliver`, opt-outs, the featured email, broadcasts |
+| `convex/notify.ts` | Award winner email |
+| `app/creators` (admin repo) | Admin creator editor |
+| `app/(site)/creators` (storefront repo) | Public creator index and profile pages |

@@ -1,0 +1,40 @@
+Welcome to the team. Shemoqmedi is small, so everything you touch is close to production. This page gives you a reading order for your first week and the handful of rules that keep the live site, the money and people's trust safe.
+
+## The rules
+
+These matter more than anything else in these docs. Read them twice.
+
+1. **Pushing `main` is shipping.** Both repos deploy to production on Vercel as soon as `main` is pushed. Never push without the owner's yes.
+2. **Convex deploys separately.** `npx convex deploy` changes the live backend for every app at once. Treat it like a push to `main`.
+3. **Secrets never leave their vault.** API keys and tokens live in Vercel and Convex environment settings and the team password manager. Never in git, these docs, chat, screenshots or the browser console.
+4. **Nothing goes out without a human yes.** Social posts, emails and broadcasts are approved one by one by an admin. That includes anything an AI assistant drafts.
+5. **No data-changing jobs on production without asking.** Backfills, migrations and one-off `npx convex run` calls against prod need the owner's okay first.
+6. **Earn links, never buy them.** No paid links, link networks or link swaps. See [SEO](/seo).
+
+<Callout kind="warning">If you are unsure whether something reaches production or real people, assume it does and ask first.</Callout>
+
+## Your first week
+
+| Day | Read | Do |
+|---|---|---|
+| 1 | [Overview](/overview), [Stack and services](/stack) | Open every app: the site, the admin, the Studio. Click around as a visitor. |
+| 2 | [Public site](/storefront), [Listings](/listings), [Creators](/creators) | Find one listing in the admin and trace it to its public page. |
+| 3 | [Awards](/awards), [Jury](/jury) | Read one listing's jury scores and work out its award by hand. |
+| 4 | [Admin](/admin), [Studio](/studio), [Media pipeline](/media) | Watch an admin add a listing with screenshots, start to finish. |
+| 5 | [Jobs and webhooks](/automations), [Email](/email), [Social desk](/social) | Follow one queued social post from the queue to publishing. |
+| 6 | [MCP connector](/mcp) | Learn which tools only read and which ones publish or send. |
+| 7 | [Shipping code](/deploy), [Runbooks](/runbooks), [Security](/security) | Run both apps locally and run the tests. |
+
+## How to ask good questions
+
+- Say what you expected, what happened, and where (which app, which page, which environment).
+- Link the docs page or file you were reading.
+- For anything touching production, write down the exact command or click you plan to make before you make it.
+
+## Where it lives
+
+| Place | What it is |
+|---|---|
+| `shemoqmedi` repo | The public site, www.shemoqmedi.space |
+| `shemoqmedi-admin` repo | The admin, the Studio, these docs, the MCP connector and the shared Convex backend |
+| `content/docs` in the admin repo | Every page of these docs |

@@ -1,0 +1,127 @@
+Short, step-by-step fixes for the problems most likely to happen. Each runbook follows how the code really works today. Start with the first step. Most problems show up in one of three logs: Vercel runtime logs (the two Next apps), Convex logs (the backend), and the admin's email log.
+
+## Before you start
+
+- Convex logs: the Convex dashboard's Logs page, or `npx convex logs --prod` from the admin repo.
+- Vercel logs: the project's Logs tab in the Vercel dashboard.
+- Production CLI calls need `--prod`. Without it you change your dev deployment.
+- In Windows PowerShell 5.1 the inner quotes of JSON arguments are stripped. Run CLI commands with JSON from Git Bash.
+
+## The site is down or shows errors
+
+1. Find out which part is down: the storefront (`www.`), the admin, the Studio, or all of them. All of them at once usually means Convex or Clerk.
+2. Open the Vercel project of the broken app. Check the latest production deployment. If the error started right after a deploy, promote the last good deployment (Instant Rollback) and fix forward.
+3. Read the Vercel runtime logs for the failing page.
+4. Read the Convex logs. A function error there with a recent `npx convex deploy` points at the backend. Redeploy the last good `convex/` (see the Deploy page).
+5. Check env vars. A missing `NEXT_PUBLIC_CONVEX_URL` stops the admin at start. A changed Vercel env var needs a redeploy to take effect.
+6. Check the Clerk and Convex status pages if nothing in our logs explains it.
+
+## A page shows stale data
+
+The storefront pages are static and refresh in the background (ISR). Most pages use `revalidate = 60` seconds. Award pages, `/badges` and `/ka` use 300 seconds. The sitemap uses one hour. Badge images are cached for an hour.
+
+1. Wait for the window to pass, then load the page twice. The first load after the window triggers the refresh; the second shows it.
+2. Check the data itself in the admin or the Convex dashboard. If the data is wrong, the page is not stale: fix the data.
+3. Check the listing's status. Public pages show only `in_voting`, `awarded` and `archived` listings.
+4. If the admin itself shows stale pages in local dev, see the Windows dev-watcher note on the Deploy page: stop the server, delete `.next`, start again.
+
+## An award run went wrong
+
+The `awards tick` cron runs every 15 minutes and every step is safe to repeat. Winner emails are sent once per award.
+
+1. Open **Awards** in the admin. Read the audit log: every close, Site of the Day decision, round and override is there with its reason.
+2. Check the award settings (announce time and the rest) on the same page.
+3. Wrong winner: revoke the award with a reason (`awards.revoke`), then grant the right one by hand with a reason (`awards.grant`). Both are logged.
+4. Revoking does not unsend the winner email or delete the queued social post. Reject the post in the Studio queue if it should not go out. Write to the studio by hand if needed.
+5. No winner on a day: the queue was empty. Admins got an email (`notify.emptyDay`). The day is logged as empty and the tick leaves it alone; grant by hand if you want one.
+6. A site built by our own team must never win: mark it as a team site on the Awards page. That revokes its active awards and removes it from the queue.
+7. To run the tick now instead of waiting: `npx convex run awards:tick --prod`.
+
+## A social post failed to publish
+
+1. Open the post in the Studio queue (or ask Claude for `get_post`). Each network shows sent, failed or skipped, with the error.
+2. Check the channels (`list_channels` in Claude). An expired or missing token shows there with its last error.
+3. Token problem: put a new token in the Convex env (`META_PAGE_ACCESS_TOKEN`, `THREADS_ACCESS_TOKEN` or `LINKEDIN_ACCESS_TOKEN`). `list_channels` picks it up at once; the daily `social: channels` cron also does.
+4. Media problem (for example Instagram's 4:5 to 1.91:1 image limit): fix the media with `update_post` or in the Studio. This sends the post back to waiting, so approve again.
+5. Press Retry in the Studio, or use `retry_post`. Only networks not yet sent are tried. A network that already went out is never posted twice.
+6. A post that was approved before publishing existed has no results and can't be retried. Check the network by hand.
+
+## Emails are not arriving
+
+1. Look up the address in the email log (`email_history` in Claude, or the emails section of `get_listing`). Status is `sent`, `failed` or `skipped`, with the error.
+2. `skipped` usually means the person unsubscribed, or the unsubscribe secret is missing (`EMAIL_UNSUBSCRIBE_SECRET`, falling back to `MCP_SERVICE_SECRET`).
+3. `failed`: read the error. Check `RESEND_API_KEY` and `RESEND_FROM` on the Convex deployment. `RESEND_FROM` must be on a domain verified in Resend.
+4. `sent` but not received: check the Resend dashboard for bounces and the recipient's spam folder.
+5. Juror digests skip jurors who unsubscribed from any email, and send at most once a day after the digest time.
+6. Admin alerts (nudges, empty day, LinkedIn warning) go to every user with an admin role and are not in the email log. Check Convex logs for "not sent" warnings.
+
+## Uploads are failing
+
+Screenshots go to ImageKit. Preview videos, reels and voiceovers go to Cloudflare R2. The browser uploads straight to them; Convex only signs the upload and then re-checks the file.
+
+1. Read the error the page shows.
+   - "Image uploads are not configured yet": the `IMAGEKIT_*` variables are missing on Convex.
+   - "Video uploads are not configured yet": one of the `R2_*` variables is missing on Convex.
+   - "That upload did not come from this site": the file is not where Convex expects it. Upload again from the page.
+2. A blocked browser request (a CORS error in the browser console) on R2 means the bucket's CORS policy does not allow this origin. In Cloudflare, add the origin (admin, Studio, storefront, or your `localhost` port) to the bucket's CORS rules: PUT for uploads, GET for the reel editor and voiceovers.
+3. The reel editor says the upload was blocked after rendering: same fix, allow PUT from the Studio origin.
+4. An upload that worked but then disappears was rejected by the follow-up check (`media.verify`, `media.verifyVideo`): the file was not what the browser said. Check the Convex logs.
+5. Check the ImageKit and R2 dashboards for quota or billing limits.
+
+## A key needs rotating
+
+Never paste the new value in chat, docs, git or a browser tool. Put it straight into the Vercel or Convex env from the password manager.
+
+1. Make the new key in the provider's dashboard.
+2. Set it where it is used.
+   - Convex only: `RESEND_API_KEY`, `IMAGEKIT_PRIVATE_KEY`, `R2_*`, `ELEVENLABS_API_KEY`, social tokens, `CLERK_WEBHOOK_SECRET`, `EMAIL_UNSUBSCRIBE_SECRET`. Takes effect on the next function run.
+   - Both Vercel (admin) and Convex, same value: `MCP_SERVICE_SECRET`, `GRAPHICS_RENDER_KEY`. Set Convex, set Vercel, then redeploy the admin. Until both match, the MCP connector or graphic rendering fails.
+   - Vercel only: `CLERK_SECRET_KEY`. Redeploy both apps.
+3. Revoke the old key at the provider.
+4. Check it works: send a test email, render a graphic, sign in to the MCP connector, upload a file, whichever the key covers.
+
+<Callout kind="warning">Rotating `EMAIL_UNSUBSCRIBE_SECRET` breaks every unsubscribe link already sent. If it is unset, rotating `MCP_SERVICE_SECRET` does the same. Set a dedicated `EMAIL_UNSUBSCRIBE_SECRET` and rotate it only if it leaked.</Callout>
+
+For `CLERK_WEBHOOK_SECRET`, roll the signing secret in Clerk's webhook settings and set the new one on Convex straight away. Until then, webhooks get 401 and new users are not synced.
+
+## Giving someone admin access
+
+Roles live in Convex (`users.role`), not in Clerk.
+
+1. The person signs up on the site once, so the Clerk webhook creates their user record.
+2. An admin opens **Users** in the admin and sets their role to Admin. Only a super admin can grant super admin. Nobody can change their own role.
+3. For the very first admin, or from the CLI:
+
+   ```bash
+   npx convex run users:setRole '{"email":"person@example.com","role":"admin"}' --prod
+   ```
+
+4. If it says "No user with email", the webhook has not created the record. Check the Clerk webhook deliveries.
+
+The role gives full admin power: the admin, the Studio, the team docs, and the MCP connector (which can publish and email). Give it only to people who need all of that.
+
+## Removing access
+
+1. In **Users**, set the person's role to None. Or from the CLI:
+
+   ```bash
+   npx convex run users:setRole '{"email":"person@example.com","role":null}' --prod
+   ```
+
+2. The change is immediate. Every admin Convex function, every docs page and every MCP tool checks the role on each call.
+3. If they should not have an account at all, delete the user in Clerk. The webhook deletes the Convex user record and deactivates their juror profile.
+4. If they knew any shared secret (env values, social tokens), rotate it.
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `convex/awards.ts` | Award tick, grant, revoke, team sites, settings, audit log |
+| `convex/social.ts`, `convex/publish.ts` | Post approval, publishing, retry |
+| `convex/channels.ts` | Social tokens and their health |
+| `convex/emails.ts`, `convex/lib/email.ts` | Email sending, opt-outs, email log |
+| `convex/media.ts`, `convex/lib/r2.ts` | Upload signing and checks for ImageKit and R2 |
+| `convex/users.ts` | `setRole`, Clerk sync, `relinkClerkId` |
+| `convex/admin.ts` | `setUserRole` for the Users page |
+| `convex/http.ts` | Clerk webhook and unsubscribe |
+| `components/studio/queue/controls.tsx` | Retry and other post controls in the Studio |

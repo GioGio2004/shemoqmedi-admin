@@ -1,0 +1,148 @@
+Shemoqmedi is two Next.js apps on Vercel and one Convex backend. The apps deploy when `main` is pushed to GitHub. The Convex backend does not: you deploy it yourself with `npx convex deploy`. There is no CI, so tests and checks run only when you run them. This page covers how code ships, how to roll back, and how to run everything on your machine.
+
+## The pieces
+
+| Repo | What it is | Hosts | Ships by |
+| --- | --- | --- | --- |
+| `GioGio2004/shemoqmedi` | The public storefront | `www.shemoqmedi.space` | Push to `main` (Vercel) |
+| `GioGio2004/shemoqmedi-admin` | Admin, Studio, team docs, MCP connector | `admin.shemoqmedi.space`, `studio.shemoqmedi.space`, `docs.shemoqmedi.space` | Push to `main` (Vercel) |
+| `convex/` in `shemoqmedi-admin` | The shared Convex backend (database, functions, crons, files) | `.convex.cloud` and `.convex.site` | `npx convex deploy` |
+
+The admin repo is one Next app that serves three hosts. `proxy.ts` picks the page tree from the Host header: `lib/studioRouting.ts` for the Studio, `lib/docsRouting.ts` for the docs, the admin for anything else.
+
+The storefront has no `convex/` folder. It calls the same deployment, and its function types are written by hand in `convex-helpers-api.ts`. When you change a function the storefront uses, update that file too.
+
+## Shipping a change
+
+1. Work on a branch. Commit.
+2. Run the tests in the admin repo (see below) and `npm run build` in the app you changed.
+3. If you changed anything in `convex/`, deploy the backend first:
+
+   ```bash
+   npx convex deploy
+   ```
+
+   This pushes functions, schema and crons to the production deployment. It fails if the schema does not match existing data.
+4. Merge into `main` and push. Vercel builds and deploys production.
+
+<Callout kind="warning">Pushing `main` deploys to production right away. Ask the owner before you push. There is no CI and no review gate in between.</Callout>
+
+Deploy order matters when the apps and the backend change together. Make backend changes additive (new optional fields, new functions), deploy Convex, then deploy the apps. Remove old functions only after no deployed app calls them.
+
+### Preview deployments
+
+Vercel builds a preview for pushes to other branches. A preview uses the env vars set for the Preview environment in Vercel. Check which Convex deployment `NEXT_PUBLIC_CONVEX_URL` points to there before you trust or test against a preview.
+
+## Environment variables
+
+Secrets live only in Vercel and Convex env settings (and the owner's password manager). Never in git. Names only below.
+
+### Vercel: admin app
+
+| Variable | Used for |
+| --- | --- |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | Clerk |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL`, `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | Our own sign-in pages |
+| `NEXT_PUBLIC_CONVEX_URL`, `CONVEX_DEPLOYMENT` | Which Convex deployment |
+| `MCP_SERVICE_SECRET` | Signs the MCP service credential; same value as on Convex |
+| `MCP_OAUTH_AUDIENCE` | Optional: binds MCP OAuth tokens to this server |
+| `GRAPHICS_RENDER_KEY` | Lets Convex call `/api/graphics`; same value as on Convex |
+| `NEXT_PUBLIC_IMAGEKIT_URL_ENDPOINT`, `R2_PUBLIC_URL` | Media URLs |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Web push |
+| `NEXT_PUBLIC_STOREFRONT_URL` | Optional: links to the public site |
+
+### Vercel: storefront
+
+| Variable | Used for |
+| --- | --- |
+| `NEXT_PUBLIC_CONVEX_URL` | Same deployment as the admin |
+| `NEXT_PUBLIC_URL` | The site's own origin |
+| `NEXT_PUBLIC_IMAGE_CDN` | Image CDN base |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` | Same Clerk instance as the admin |
+
+### Convex deployment
+
+Set with `npx convex env set NAME value` (add `--prod` for production) or in the Convex dashboard.
+
+| Group | Variables |
+| --- | --- |
+| Auth | `CLERK_FRONTEND_API_URL` (issuer in `convex/auth.config.ts`), `CLERK_WEBHOOK_SECRET`, `MCP_SERVICE_SECRET` |
+| Email | `RESEND_API_KEY`, `RESEND_FROM`, `EMAIL_UNSUBSCRIBE_SECRET` |
+| Media | `IMAGEKIT_PRIVATE_KEY`, `IMAGEKIT_PUBLIC_KEY`, `IMAGEKIT_URL_ENDPOINT`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL` |
+| Graphics | `ADMIN_ORIGIN`, `GRAPHICS_RENDER_KEY` |
+| Social | `META_PAGE_ACCESS_TOKEN`, `THREADS_ACCESS_TOKEN`, `LINKEDIN_ACCESS_TOKEN` |
+| Voice | `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICES`, `ELEVENLABS_MODEL` |
+| Push | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` |
+| Other | `SITE_URL`, `INDEXNOW_KEY`, `MICROLINK_API_KEY` |
+
+A Convex env change takes effect on the next function run. A Vercel env change needs a new deployment (redeploy from the Vercel dashboard).
+
+`scripts/prod-env.mjs` sets the production Convex env in one go from your local `.env.local`, so nothing is pasted by hand.
+
+## Rolling back
+
+- **Apps.** In the Vercel dashboard, open the project's Deployments, pick the last good production deployment and promote it (Instant Rollback). Then fix forward on `main`. The next push to `main` replaces the rollback.
+- **Convex.** There is no one-click rollback. Check out the last good commit of `convex/` and run `npx convex deploy` again. Data written in the meantime stays. If a schema change already wrote new data, the old schema may refuse to deploy.
+
+## Local development
+
+```bash
+# shemoqmedi-admin
+npm install
+npx convex dev   # pushes convex/ to your dev deployment, regenerates types, keeps watching
+npm run dev      # next dev --turbo on port 3000
+```
+
+Open the hosts on port 3000. Browsers resolve `*.localhost` to your machine.
+
+| Host | What you get |
+| --- | --- |
+| `localhost:3000` | Admin |
+| `studio.localhost:3000` | Studio |
+| `docs.localhost:3000` | Team docs |
+
+The storefront runs the same way with `npm run dev`. Use another port when the admin is running, for example `npm run dev -- -p 3001`. Both apps must point at the same Convex deployment and the same Clerk instance.
+
+## Tests
+
+`npm test` runs `vitest run` in the admin repo. It runs `tests/**/*.test.ts` in Node, on `convex-test`, so no deployment is needed. The storefront has no test script.
+
+What the suites cover:
+
+| Area | Files |
+| --- | --- |
+| Listings, review, admin listing and user management | `listings`, `admin` |
+| Scoring and awards | `scoring`, `awards` |
+| Jury claim links and evaluations | `jury` |
+| Media on R2 | `media` |
+| SEO (slug history, jury note) | `seo` |
+| Listing desk | `editorial` |
+| Social desk, MCP credentials, publishing, Studio API | `socialDesk`, `publishing`, `studioApi`, `studioPushHooks`, `studioHelpers`, `studioRouting`, `studioUxFixes` |
+| Post editing and media | `postEditing`, `postEditCreate`, `postSheetMedia` |
+| Graphics | `graphics`, `graphicsApi`, `graphicsStyles` |
+| Reels and voice | `reels`, `reelEditor`, `reelEngine`, `reelIntegration`, `reelLoudness`, `reelPost`, `reelRecipe`, `voiceover` |
+| Push | `push` |
+
+## The Windows dev-watcher gotcha
+
+On Windows, `next dev` sometimes keeps stale routes or CSS after files change. Pages 404 or old styles stay. Before you debug anything strange:
+
+1. Stop the dev server.
+2. Delete the `.next` folder.
+3. Start `npm run dev` again.
+
+`next.config.ts` already turns off Turbopack's on-disk dev cache for this reason. To run `next build` while `next dev` is running, set `NEXT_BUILD_DIR` to another folder so the build does not touch the `.next` the dev server reads.
+
+## Where it lives
+
+| File | What it does |
+| --- | --- |
+| `package.json` | `dev`, `build`, `test` scripts |
+| `vitest.config.mts` | Test setup |
+| `tests/` | Backend and UI logic tests |
+| `next.config.ts` | `NEXT_BUILD_DIR`, dev cache setting, headers, redirects |
+| `proxy.ts` | Host routing and Clerk session gate |
+| `lib/hosts.ts` | Production origins and the `*.localhost` dev hosts |
+| `scripts/prod-env.mjs` | Sets production Convex env from `.env.local` |
+| `convex/` | The backend that `npx convex deploy` ships |
+| `convex-helpers-api.ts` (storefront) | Hand-written types of the Convex functions the storefront calls |

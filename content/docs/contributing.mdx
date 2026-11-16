@@ -1,0 +1,59 @@
+These docs live in the admin repo next to the code they describe, so a change to a feature and the change to its page can ship in the same commit. This page explains how to add or edit a page, how the docs are protected, and what must never be written in them.
+
+## Edit a page
+
+1. Open the page's file in `content/docs`. Its path is in the strip under every page title, next to "Source".
+2. Write in Markdown. Tables, lists, code blocks and links all work.
+3. Run the admin locally with `npm run dev` and open `http://docs.localhost:3000` to see the page.
+4. Commit it with the code change it describes.
+
+## Add a page
+
+1. Create `content/docs/your-page.mdx`. Don't start it with a `#` title: the page title comes from the list in the next step.
+2. Add an entry to `content/docs/index.ts`, in the section where it belongs, with a slug, title, one-sentence summary, a few search keywords, and the `load` line pointing at the file.
+3. The sidebar, the home page, search and the previous/next links all pick it up from there.
+
+## Writing style
+
+- Plain English, short sentences. Write for someone who joined this week.
+- Start with one paragraph that says what the page covers, then use `##` sections.
+- Name files and functions in backticks, like `convex/awards.ts`.
+- End with a "Where it lives" table that maps files to what they do.
+- Only write what the code really does. When the code changes, the page changes with it.
+
+### The Callout component
+
+One custom component is available for notes that must stand out:
+
+```mdx
+<Callout kind="note">Something useful to know.</Callout>
+<Callout kind="warning">Something that can break production.</Callout>
+<Callout kind="sensitive">Something that must not leave the team.</Callout>
+```
+
+### MDX gotchas
+
+MDX reads `<` as the start of a component and curly braces as code. In normal text, put them inside backticks. HTML comments don't work: delete the text instead.
+
+## What never goes in the docs
+
+<Callout kind="sensitive">No secret values, ever: API keys, tokens, passwords, webhook secrets, private keys or recovery codes. Write the name of the variable and where it is set, never its value.</Callout>
+
+Also leave out personal data about real users, creators or jurors, such as emails, phone numbers or addresses.
+
+## Who can read the docs
+
+The docs are served at docs.shemoqmedi.space by the same Next app as the admin and the Studio. `proxy.ts` sends signed-out visitors to sign-in, and every page checks the reader's role on the server before rendering any text. Today only `admin` and `super_admin` accounts can read them. The list of allowed roles is `DOCS_ROLES` in `lib/docsAccess.ts`.
+
+## Where it lives
+
+| File | What it does |
+|---|---|
+| `content/docs/*.mdx` | The pages |
+| `content/docs/index.ts` | The sections, order, titles, summaries and search keywords |
+| `app/docs/` | The routes: layout with the access check, the page, not found |
+| `app/docs/docs.css` | The whole look, scoped to the docs |
+| `components/docs/` | Shell, sidebar, search, "On this page", the home page, the no-access page |
+| `components/docs/mdx.tsx` | How Markdown renders, and `Callout` |
+| `lib/docsRouting.ts` | The docs host: rewrites to `app/docs`, redirects `/docs` from other hosts |
+| `lib/docsAccess.ts` | Who may read the docs (`DOCS_ROLES`) |

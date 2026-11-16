@@ -5,6 +5,8 @@
 
 export const STUDIO_ORIGIN = "https://studio.shemoqmedi.space";
 export const ADMIN_APP_ORIGIN = "https://admin.shemoqmedi.space";
+/** The team docs (admins only): proxy.ts rewrites this host to app/docs/*. */
+export const DOCS_ORIGIN = "https://docs.shemoqmedi.space";
 
 /** The host part of a Host header, lowercased and without its port. */
 function hostname(host: string) {
@@ -21,6 +23,20 @@ const STUDIO_HOSTS = new Set([new URL(STUDIO_ORIGIN).hostname, "studio.localhost
 export function isStudioHost(host: string | null | undefined): boolean {
   if (!host) return false;
   return STUDIO_HOSTS.has(hostname(host));
+}
+
+// docs.localhost:3000 stands in for the docs in development, like studio.localhost.
+const DOCS_HOSTS = new Set([new URL(DOCS_ORIGIN).hostname, "docs.localhost"]);
+
+/** Whether a request's Host header is the team docs (production or local development). */
+export function isDocsHost(host: string | null | undefined): boolean {
+  if (!host) return false;
+  return DOCS_HOSTS.has(hostname(host));
+}
+
+/** An absolute docs link for a path, e.g. docsUrl("/awards"). */
+export function docsUrl(path = "/") {
+  return `${DOCS_ORIGIN}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 /** An absolute admin link for a path, e.g. adminUrl("/review/abc"). */
