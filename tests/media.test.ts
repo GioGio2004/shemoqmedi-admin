@@ -61,6 +61,24 @@ describe("preview videos on R2", () => {
     ).rejects.toThrow(/MP4 or WebM/);
   });
 
+  it("lets only admins store 1080p-sized videos (up to 40 MB)", async () => {
+    const { t, maker } = await setup();
+    await t.run((ctx) =>
+      ctx.db.insert("users", { externalId: "boss", name: "Boss", email: "b@example.com", role: "admin", createdAt: 0, updatedAt: 0 }),
+    );
+    const admin = t.withIdentity({ subject: "boss" });
+    const size = 30 * 1024 * 1024;
+    await expect(maker.action(api.media.videoUploadUrl, { site: "a", label: "p", contentType: "video/mp4", size })).rejects.toThrow(/15 MB/);
+    await expect(maker.mutation(api.media.registerVideo, { key: KEY, contentType: "video/mp4", size })).rejects.toThrow(/15 MB/);
+    await expect(admin.action(api.media.videoUploadUrl, { site: "a", label: "p", contentType: "video/mp4", size })).resolves.toMatchObject({
+      key: expect.stringMatching(/^listings\//),
+    });
+    await expect(admin.mutation(api.media.registerVideo, { key: KEY, contentType: "video/mp4", size })).resolves.toBeTruthy();
+    await expect(
+      admin.action(api.media.videoUploadUrl, { site: "a", label: "p", contentType: "video/mp4", size: 41 * 1024 * 1024 }),
+    ).rejects.toThrow(/40 MB/);
+  });
+
   it("says so when R2 is not configured", async () => {
     vi.stubEnv("R2_SECRET_ACCESS_KEY", "");
     const { maker } = await setup();

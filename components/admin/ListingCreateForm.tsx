@@ -24,7 +24,7 @@ import {
   type RegionSlug,
   type TechnologyName,
 } from "@/convex/lib/taxonomy";
-import { MediaPicker, MultiImagePicker, useMediaUpload } from "./MediaUpload";
+import { MediaPicker, MultiImagePicker, VideoQualityPicker, useMediaUpload, useVideoQuality } from "./MediaUpload";
 import { score } from "./format";
 import { Select } from "./Select";
 
@@ -65,6 +65,7 @@ export function ListingCreateForm() {
   const createListing = useMutation(api.admin.createListing);
   const jurors = useQuery(api.jury.options, {});
   const uploadFile = useMediaUpload();
+  const [videoQuality, setVideoQuality] = useVideoQuality();
   // Files already uploaded in this session, so a retry after a failed save
   // does not upload the same screenshot twice.
   const uploaded = useRef(new Map<File, Id<"media">>());
@@ -72,7 +73,7 @@ export function ListingCreateForm() {
     const known = uploaded.current.get(file);
     if (known) return known;
     // Folder + file names come from the site title (the slug is derived from it).
-    const id = await uploadFile(file, { site: title, label }, setProgress);
+    const id = await uploadFile(file, { site: title, label }, setProgress, videoQuality);
     uploaded.current.set(file, id);
     return id;
   }
@@ -675,12 +676,13 @@ export function ListingCreateForm() {
               <MediaPicker
                 id="video"
                 label="Preview video (optional)"
-                hint="MP4, WebM or MOV, up to 60 s. Compressed to 720p in this tab before upload."
+                hint="MP4, WebM or MOV, up to 60 s. Compressed in this tab before upload."
                 kind="video"
                 aspect="16 / 9"
                 file={video.file}
                 onChange={(file, err) => setVideo({ file, error: err })}
               />
+              <VideoQualityPicker value={videoQuality} onChange={setVideoQuality} disabled={busy} />
               {video.error && <p role="alert" className="text-xs font-medium">{video.error}</p>}
             </div>
           </section>

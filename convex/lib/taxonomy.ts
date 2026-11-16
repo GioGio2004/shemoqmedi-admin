@@ -195,6 +195,8 @@ export const LIMITS = {
   imageBytes: 5 * 1024 * 1024,
   /** Max preview-video size in bytes, as stored (after compression in the browser). */
   videoBytes: 15 * 1024 * 1024,
+  /** The same for admins, who can upload 1080p previews (about 30 MB for 60 s). */
+  videoBytesAdmin: 40 * 1024 * 1024,
   /** Largest video file people can pick (it is compressed before upload). */
   videoInputBytes: 500 * 1024 * 1024,
   /** Max preview-video length in seconds. */

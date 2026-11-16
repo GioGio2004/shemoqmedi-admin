@@ -59,13 +59,18 @@ async function hmacSha1Hex(key: string, message: string) {
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function checkLimits(kind: "image" | "video", contentType: string, size: number) {
+/** The largest preview video a user may store: 1080p (40 MB) for admins, 720p (15 MB) for everyone else. */
+function videoCapFor(user: Pick<Doc<"users">, "role">) {
+  return user.role === "admin" || user.role === "super_admin" ? LIMITS.videoBytesAdmin : LIMITS.videoBytes;
+}
+
+function checkLimits(kind: "image" | "video", contentType: string, size: number, videoCap: number = LIMITS.videoBytes) {
   if (kind === "image") {
     if (!IMAGE_TYPES.includes(contentType) || size > LIMITS.imageBytes) {
       throw new ConvexError("Screenshots must be images of 5 MB or less.");
     }
-  } else if (!VIDEO_TYPES.includes(contentType) || size > LIMITS.videoBytes) {
-    throw new ConvexError("The preview video must be an MP4 or WebM of 15 MB or less.");
+  } else if (!VIDEO_TYPES.includes(contentType) || size > videoCap) {
+    throw new ConvexError(`The preview video must be an MP4 or WebM of ${Math.round(videoCap / 1024 / 1024)} MB or less.`);
   }
 }
 
@@ -232,7 +237,7 @@ export const videoUploadUrl = action({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new ConvexError("Please log in to upload.");
     if (!r2Configured()) throw new ConvexError("Video uploads are not configured yet. Please try again later.");
-    checkLimits("video", contentType, size);
+    checkLimits("video", contentType, size, await ctx.runQuery(internal.media.myVideoCap, {}));
     const slug = slugify(site);
     const ext = contentType === "video/webm" ? "webm" : "mp4";
     // Random suffix: a replaced video never reuses a cached URL, and keys cannot be guessed.
@@ -240,6 +245,13 @@ export const videoUploadUrl = action({
     const key = `listings/${slug}/${slug}-website-${slugify(label, "preview")}-${suffix}.${ext}`;
     return { uploadUrl: await presignPut(key), key };
   },
+});
+
+/** The signed-in user's preview-video size limit (videoCapFor). */
+export const myVideoCap = internalQuery({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => videoCapFor(await requireUser(ctx)),
 });
 
 /** Record a finished R2 video upload; returns the id listing mutations take. */
@@ -256,7 +268,8 @@ export const registerVideo = mutation({
   handler: async (ctx, { key, contentType, size, width, height, durationSec }) => {
     const user = await requireUser(ctx);
     if (!R2_LISTING_KEY.test(key)) throw new ConvexError("That upload did not come from this site. Please upload it again.");
-    checkLimits("video", contentType, size);
+    const cap = videoCapFor(user);
+    checkLimits("video", contentType, size, cap);
     const existing = await ctx.db
       .query("media")
       .withIndex("by_fileId", (q) => q.eq("fileId", key))
@@ -278,21 +291,21 @@ export const registerVideo = mutation({
       uploadedBy: user._id,
       createdAt: Date.now(),
     });
-    await ctx.scheduler.runAfter(0, internal.media.verifyVideo, { id, key });
+    await ctx.scheduler.runAfter(0, internal.media.verifyVideo, { id, key, maxBytes: cap });
     return id;
   },
 });
 
 /** Double-check a registered video against R2 (it exists, real size and type). */
 export const verifyVideo = internalAction({
-  args: { id: v.id("media"), key: v.string() },
+  args: { id: v.id("media"), key: v.string(), maxBytes: v.optional(v.number()) },
   returns: v.null(),
-  handler: async (ctx, { id, key }) => {
+  handler: async (ctx, { id, key, maxBytes }) => {
     const file = await headObject(key); // throws (and retries) on R2 errors
     let ok = !!file;
     if (file) {
       try {
-        checkLimits("video", file.contentType.split(";")[0].trim(), file.size);
+        checkLimits("video", file.contentType.split(";")[0].trim(), file.size, maxBytes ?? LIMITS.videoBytes);
       } catch {
         ok = false;
       }

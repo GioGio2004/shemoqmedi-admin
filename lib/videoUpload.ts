@@ -1,6 +1,10 @@
 // Browser-side preview-video pipeline (identical copy in shemoqmedi/lib/videoUpload.ts).
 //
-//   video ─▶ H.264 MP4 (max 1280 px wide, ~2 Mbps, ≤ 30 fps, no sound, fast start) ─▶ Cloudflare R2
+//   video ─▶ H.264 MP4 (720p: max 1280 px wide, ~2 Mbps; 1080p: max 1920 px wide,
+//            ~4 Mbps; ≤ 30 fps, no sound, fast start) ─▶ Cloudflare R2
+//
+// 720p is the default and the only size the storefront makes. Admins can pick
+// 1080p (Convex lets only admins store files over 15 MB, up to 40 MB).
 //
 // R2 serves the file exactly as uploaded: no re-encoding (which is what
 // spent ImageKit's video processing units) and no bandwidth bill. So the
@@ -24,10 +28,16 @@ import {
 import { UploadError, seoSlug } from "./imagekitUpload";
 
 export const VIDEO_MAX_WIDTH = 1280;
-const VIDEO_BITRATE = 2_000_000;
 const VIDEO_MAX_FPS = 30;
 /** Keep in sync with LIMITS.videoBytes / videoSeconds / videoInputBytes. */
 export const MAX_VIDEO_BYTES = 15 * 1024 * 1024;
+
+export type VideoQuality = "720p" | "1080p";
+/** Width cap, bitrate and stored-size limit per quality (1080p: LIMITS.videoBytesAdmin, admins only). */
+export const VIDEO_QUALITY: Record<VideoQuality, { maxWidth: number; bitrate: number; maxBytes: number }> = {
+  "720p": { maxWidth: VIDEO_MAX_WIDTH, bitrate: 2_000_000, maxBytes: MAX_VIDEO_BYTES },
+  "1080p": { maxWidth: 1920, bitrate: 4_000_000, maxBytes: 40 * 1024 * 1024 },
+};
 export const MAX_VIDEO_SECONDS = 60;
 export const MAX_VIDEO_INPUT_BYTES = 500 * 1024 * 1024;
 
@@ -58,14 +68,17 @@ const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
 export async function compressVideo(
   file: File,
   onProgress?: (fraction: number) => void,
+  quality: VideoQuality = "720p",
 ): Promise<{ blob: Blob; width?: number; height?: number; durationSec?: number }> {
+  const preset = VIDEO_QUALITY[quality];
+  const maxMb = Math.round(preset.maxBytes / 1024 / 1024);
   let durationSec: number | undefined;
   const asIs = () => {
-    if (file.size <= MAX_VIDEO_BYTES && (file.type === "video/mp4" || file.type === "video/webm")) {
+    if (file.size <= preset.maxBytes && (file.type === "video/mp4" || file.type === "video/webm")) {
       return { blob: file as Blob, durationSec };
     }
     throw new UploadError(
-      "This browser cannot compress videos. Use a recent Chrome, Edge or Safari, or pick a file of 15 MB or less.",
+      `This browser cannot compress videos. Use a recent Chrome, Edge or Safari, or pick a file of ${maxMb} MB or less.`,
     );
   };
 
@@ -87,12 +100,12 @@ export async function compressVideo(
       );
     }
 
-    const scale = Math.min(1, VIDEO_MAX_WIDTH / track.displayWidth);
+    const scale = Math.min(1, preset.maxWidth / track.displayWidth);
     const width = even(track.displayWidth * scale);
     const height = even(track.displayHeight * scale);
     // An explicit bitrate (a bare number would be a 0–1 quality level): predictable file sizes.
-    const quality = new Quality({ bitrate: VIDEO_BITRATE, bitrateMode: "variable" });
-    if (typeof VideoEncoder === "undefined" || !(await canEncodeVideo("avc", { width, height, quality }))) {
+    const encodeQuality = new Quality({ bitrate: preset.bitrate, bitrateMode: "variable" });
+    if (typeof VideoEncoder === "undefined" || !(await canEncodeVideo("avc", { width, height, quality: encodeQuality }))) {
       return asIs();
     }
 
@@ -113,7 +126,7 @@ export async function compressVideo(
         width,
         height,
         fit: "fill",
-        quality,
+        quality: encodeQuality,
         ...(fps > VIDEO_MAX_FPS + 1 ? { frameRate: VIDEO_MAX_FPS } : {}),
         forceTranscode: true,
       },
@@ -132,9 +145,9 @@ export async function compressVideo(
     if (!buffer) return asIs();
     const blob = new Blob([buffer], { type: "video/mp4" });
     // Already-tiny originals can beat our settings; keep the smaller one.
-    if (blob.size > file.size && file.type === "video/mp4" && file.size <= MAX_VIDEO_BYTES) return { blob: file, durationSec };
-    if (blob.size > MAX_VIDEO_BYTES) {
-      throw new UploadError("This video is still over 15 MB after compression. Trim it and try again.");
+    if (blob.size > file.size && file.type === "video/mp4" && file.size <= preset.maxBytes) return { blob: file, durationSec };
+    if (blob.size > preset.maxBytes) {
+      throw new UploadError(`This video is still over ${maxMb} MB after compression. Trim it${quality === "1080p" ? " or pick 720p" : ""} and try again.`);
     }
     return { blob, width, height, durationSec };
   } finally {
@@ -148,15 +161,17 @@ export async function compressVideo(
  *
  * @param site  the listing's slug or title (used for the folder and file name)
  * @param label what the file is: "preview"
+ * @param quality 720p (default) or 1080p (admins only: Convex refuses files over 15 MB from anyone else)
  */
 export async function uploadVideoToR2(
   file: File,
   { site, label }: { site: string; label: string },
   getUploadUrl: VideoUploadUrl,
   onProgress?: (fraction: number) => void,
+  quality: VideoQuality = "720p",
 ): Promise<RegisterVideoArgs> {
   if (file.size > MAX_VIDEO_INPUT_BYTES) throw new UploadError("Pick a video file of 500 MB or less.");
-  const { blob, width, height, durationSec } = await compressVideo(file, onProgress);
+  const { blob, width, height, durationSec } = await compressVideo(file, onProgress, quality);
   const contentType = blob.type || file.type;
   const { uploadUrl, key } = await getUploadUrl({
     site: seoSlug(site),

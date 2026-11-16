@@ -118,7 +118,7 @@ All deletes go through `deleteMedia` in `convex/lib/media.ts`. It deletes the `m
 | Screenshot width | 2560 px | `MAX_IMAGE_WIDTH` |
 | Extra screenshots | 4 | `LIMITS.gallery` |
 | Video input | 500 MB | `LIMITS.videoInputBytes` |
-| Video stored | 15 MB, MP4 / WebM | `LIMITS.videoBytes` |
+| Video stored | 15 MB, MP4 / WebM (40 MB for admins at 1080p) | `LIMITS.videoBytes`, `LIMITS.videoBytesAdmin` |
 | Video length | 60 s | `LIMITS.videoSeconds` |
 | Video size | 1280 px wide, about 2 Mbps, 30 fps, no audio | `lib/videoUpload.ts` |
 | ImageKit signature | 30 minutes | `signUpload` |

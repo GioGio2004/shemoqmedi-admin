@@ -170,8 +170,9 @@ export async function assertMedia(
     if (!type.startsWith("image/") || meta.size > LIMITS.imageBytes) {
       fail(`${field} must be an image of 5 MB or less.`);
     }
-  } else if (!["video/mp4", "video/webm"].includes(type) || meta.size > LIMITS.videoBytes) {
-    fail(`${field} must be an MP4 or WebM video of 15 MB or less.`);
+  } else if (!["video/mp4", "video/webm"].includes(type) || meta.size > LIMITS.videoBytesAdmin) {
+    // Who may store what size is checked at upload (media.registerVideo: 15 MB, 40 MB for admins).
+    fail(`${field} must be an MP4 or WebM video of ${LIMITS.videoBytesAdmin / 1024 / 1024} MB or less.`);
   }
 }
 

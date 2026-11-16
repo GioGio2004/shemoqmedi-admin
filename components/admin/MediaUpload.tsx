@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useAction, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { LIMITS } from "@/convex/lib/taxonomy";
 import { MAX_IMAGE_INPUT_BYTES, uploadToImageKit } from "@/lib/imagekitUpload";
-import { uploadVideoToR2 } from "@/lib/videoUpload";
+import { uploadVideoToR2, type VideoQuality } from "@/lib/videoUpload";
 
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 // MOV (QuickTime) too: it is re-encoded to MP4 before upload.
@@ -23,6 +23,7 @@ export type UploadKind = "image" | "video";
  * @param seo.site   the listing's slug or title, used for the folder and file name
  * @param seo.label  what the file is: "cover", "screenshot-3", "preview"
  * @param onProgress videos only: 0–1 while compressing
+ * @param quality    videos only: 720p (default) or 1080p
  */
 export function useMediaUpload() {
   const getAuth = useAction(api.media.uploadAuth);
@@ -33,13 +34,83 @@ export function useMediaUpload() {
     file: File,
     seo: { site: string; label: string },
     onProgress?: (fraction: number) => void,
+    quality: VideoQuality = "720p",
   ): Promise<Id<"media">> => {
     if (file.type.startsWith("video/")) {
-      return await registerVideo(await uploadVideoToR2(file, seo, (args) => getVideoUrl(args), onProgress));
+      return await registerVideo(await uploadVideoToR2(file, seo, (args) => getVideoUrl(args), onProgress, quality));
     }
     const args = await uploadToImageKit(file, seo, () => getAuth({}));
     return await register(args);
   };
+}
+
+const QUALITY_KEY = "admin-video-quality";
+const qualityListeners = new Set<() => void>();
+let memoryQuality: VideoQuality | null = null; // when storage is blocked
+
+function readQuality(): VideoQuality {
+  try {
+    return window.localStorage.getItem(QUALITY_KEY) === "1080p" ? "1080p" : "720p";
+  } catch {
+    return memoryQuality ?? "720p";
+  }
+}
+
+function writeQuality(q: VideoQuality) {
+  memoryQuality = q;
+  try {
+    window.localStorage.setItem(QUALITY_KEY, q);
+  } catch {
+    // storage blocked: kept in memory for this page
+  }
+  qualityListeners.forEach((fn) => fn());
+}
+
+function subscribeQuality(fn: () => void) {
+  qualityListeners.add(fn);
+  return () => {
+    qualityListeners.delete(fn);
+  };
+}
+
+/** The admin's preview-video quality, remembered on this device (720p until changed). */
+export function useVideoQuality() {
+  const quality = useSyncExternalStore(subscribeQuality, readQuality, () => "720p" as VideoQuality);
+  return [quality, writeQuality] as const;
+}
+
+/** 720p / 1080p switch for a preview video, with what each costs on R2. */
+export function VideoQualityPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: VideoQuality;
+  onChange: (q: VideoQuality) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <div role="radiogroup" aria-label="Video quality" className="inline-flex rounded-full border border-[var(--line)] p-0.5 text-xs">
+        {(["720p", "1080p"] as const).map((q) => (
+          <button
+            key={q}
+            type="button"
+            role="radio"
+            aria-checked={value === q}
+            disabled={disabled}
+            onClick={() => onChange(q)}
+            className={`min-h-0 rounded-full px-3 py-1 font-medium ${value === q ? "bg-black text-white" : "text-black/60 hover:text-black"}`}
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+      <span className="text-xs text-black/55">
+        {value === "1080p" ? "Sharper. About 0.5 MB a second, up to 40 MB." : "About 0.25 MB a second, up to 15 MB."}
+      </span>
+    </div>
+  );
 }
 
 /** Client-side type/size check; returns an error message or null. */

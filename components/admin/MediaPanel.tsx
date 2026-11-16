@@ -7,7 +7,7 @@ import type { FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { LIMITS } from "@/convex/lib/taxonomy";
-import { MediaPicker, MultiImagePicker, useMediaUpload, type UploadKind } from "./MediaUpload";
+import { MediaPicker, MultiImagePicker, VideoQualityPicker, useMediaUpload, useVideoQuality, type UploadKind } from "./MediaUpload";
 
 type Listing = NonNullable<FunctionReturnType<typeof api.listings.reviewDetail>>;
 type Kind = "cover" | "video";
@@ -35,7 +35,7 @@ const SLOTS: Record<Kind, Slot> = {
     label: "Preview video",
     media: "video",
     aspect: "16 / 9",
-    hint: "MP4, WebM or MOV, up to 60 seconds. Compressed to 720p in this tab before upload. Plays muted on a loop.",
+    hint: "MP4, WebM or MOV, up to 60 seconds. Compressed in this tab before upload. Plays muted on a loop.",
     removable: true,
   },
 };
@@ -52,6 +52,7 @@ function MediaSlot({
   currentUrl: string | null;
 }) {
   const upload = useMediaUpload();
+  const [videoQuality, setVideoQuality] = useVideoQuality();
   const replace = useMutation(api.listings.replaceMedia);
   const removeMedia = useMutation(api.admin.removeMedia);
 
@@ -74,6 +75,7 @@ function MediaSlot({
         file,
         { site: slug, label: slot.kind === "cover" ? "cover" : "preview" },
         setProgress,
+        videoQuality,
       );
       await replace({ id: listingId, kind: slot.kind, storageId });
       setFile(null);
@@ -121,6 +123,7 @@ function MediaSlot({
           setMessage(null);
         }}
       />
+      {slot.media === "video" && <VideoQualityPicker value={videoQuality} onChange={setVideoQuality} disabled={busy !== null} />}
       {pickError && (
         <p role="alert" className="text-xs font-medium">
           {pickError}
