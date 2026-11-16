@@ -101,7 +101,7 @@ function parseWhen(value: string | null | undefined): number | null | undefined 
   return ms;
 }
 
-const INSTRUCTIONS = `You are connected to Shemoqmedi (shemoqmedi.space), an awards site for web design run by Giorgi, as his social media and outreach desk. He is the only person running it, so your job is to do the work and bring him finished things to approve.
+const INSTRUCTIONS = `You are connected to Shemoqmedi (shemoqmedi.space), an awards site for web design run by Giorgi, as his social media, outreach and listing desk. He is the only person running it, so your job is to do the work and bring him finished things to approve.
 
 What the database does by itself: when an award is announced (Honorable Mention, Site of the Day, Site of the Month, Site of the Year), when a site goes public (new listing), every Monday (call for submissions), every other Thursday (call for jurors) and on Sundays (weekly roundup), it queues a social post with \`facts\`: plain data about the site, studio, award, screenshots and links. Award winners and featured studios are emailed by the system.
 
@@ -142,6 +142,14 @@ Email:
 - For outreach to studios that aren't in the database yet, find their public contact email on their own website, write a short personal note (who we are, why their work, one clear ask), show it, and send only after a yes. Save emails you find with update_creator.
 - Broadcasts (preview_broadcast, send_broadcast) go to many people: always show the recipient count and the full text first; confirm only after an explicit yes.
 - Never message people on LinkedIn or other networks automatically; for LinkedIn, write the message and Giorgi sends it himself.
+
+The listing desk (writing listing pages): Giorgi hands listings, or new sites, to you; you research each live site and write its copy (title, tagline, the "About this site" write-up, categories, technologies, region, maker). He adds the screenshots and video himself.
+1. Call editorial_rules first in every session that touches listings, and follow them exactly: they hold the writing rules and the only award facts you may state.
+2. editorial_queue shows the desk. Work only on briefs there. queue_brief adds one only when Giorgi asks for that exact site in chat.
+3. get_brief, then research the live site (open it, scroll it, check its source and credits) before writing a word. Never invent facts.
+4. submit_draft with every field you are sure of, your sources and an agentNote. It changes nothing on the site; Giorgi gets a push.
+5. Show him the whole draft (every field, the write-up in full) and ask. approve_draft with confirm: true only after he says yes to that draft; if he wants changes, submit_draft again and show it again. listing_history and undo_change (confirm: true only when he asks) take a change back.
+6. For a new site, approval doesn't create the listing: tell him to add the screenshots on the link approve_draft returns.
 
 Times are Tbilisi time (UTC+4) unless Giorgi says otherwise.`;
 
@@ -292,6 +300,128 @@ const handler = createMcpHandler(
         inputSchema: z.object({ slug }),
       },
       async (args, ctx) => run(() => convex.action(api.mcp.claimLink, { ...auth(ctx), slug: args.slug })),
+    );
+
+    // The listing desk: briefs Giorgi handed to the agent (convex/editorial.ts)
+
+    server.registerTool(
+      "editorial_rules",
+      {
+        title: "Editorial rules",
+        description:
+          "The rules for writing listing pages (research steps, the write-up, every field, the award facts you may state). Read them before drafting anything, in every session.",
+        inputSchema: z.object({}),
+      },
+      async (_args, ctx) => run(() => convex.query(api.mcp.editorialRules, auth(ctx))),
+    );
+
+    server.registerTool(
+      "editorial_queue",
+      {
+        title: "Listing desk queue",
+        description:
+          "Briefs Giorgi handed to you: queued (write a draft; feedback holds his notes when he sent one back) and drafted (waiting for his yes). Only these may be drafted.",
+        inputSchema: z.object({}),
+      },
+      async (_args, ctx) => run(() => convex.query(api.mcp.editorialQueue, auth(ctx))),
+    );
+
+    server.registerTool(
+      "get_brief",
+      {
+        title: "Get brief",
+        description:
+          "One brief: the site URL, Giorgi's note and feedback, the listing's current copy, your draft and what it would change, the jury's comments and the listing's recent changes.",
+        inputSchema: z.object({ briefId: z.string().describe("Brief id from editorial_queue") }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.getBrief, { ...auth(ctx), briefId: args.briefId })),
+    );
+
+    server.registerTool(
+      "queue_brief",
+      {
+        title: "Queue a site for the desk",
+        description:
+          "Put a listing (slug) or a site that isn't listed yet (url) on the desk, with Giorgi's note. Only when Giorgi asks for that exact site.",
+        inputSchema: z.object({
+          slug: slug.optional().describe("An existing listing"),
+          url: z.string().max(500).optional().describe("A site that isn't listed yet"),
+          note: z.string().max(1000).optional().describe("Giorgi's brief, in his words"),
+        }),
+      },
+      async (args, ctx) => run(() => convex.mutation(api.mcp.queueBriefTool, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "submit_draft",
+      {
+        title: "Submit a listing draft",
+        description:
+          "Send your draft of a brief to Giorgi (replaces an earlier draft). Nothing changes on the site. Existing listings: send only the fields you change. New sites: every field. The write-up is checked against the rules (length, paragraphs, hype words) and refused with the reason when it fails.",
+        inputSchema: z.object({
+          briefId: z.string(),
+          draft: z.object({
+            title: z.string().max(80).optional(),
+            tagline: z.string().max(160).optional().describe("One plain sentence: what the site is"),
+            writeup: z
+              .string()
+              .max(2000)
+              .optional()
+              .describe('"About this site": 120-250 words, 2-4 paragraphs separated by a blank line'),
+            categories: z.array(z.string()).max(3).optional().describe("Category slugs, primary first"),
+            technologies: z.array(z.string()).max(6).optional().describe("Technology names, only with evidence"),
+            region: z.enum(["georgia", "global"]).optional(),
+            creatorTier: z.enum(["solo", "agency"]).optional(),
+            creditName: z.string().max(80).optional().describe("The maker's real name"),
+            creditUrl: z.string().max(500).optional().describe("The maker's own website"),
+          }),
+          sources: z.array(z.string().max(500)).min(1).max(12).describe("Pages you looked at"),
+          agentNote: z.string().max(1500).optional().describe("What you checked, what you could not confirm"),
+        }),
+      },
+      async (args, ctx) => run(() => convex.mutation(api.mcp.submitDraftTool, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "approve_draft",
+      {
+        title: "Approve a listing draft",
+        description:
+          "Apply a drafted brief to its listing (saved as a change that can be undone), or, for a new site, approve it so Giorgi can add its screenshots. Set confirm: true only after Giorgi said yes to that exact draft in this conversation; without it you get the draft back to show him.",
+        inputSchema: z.object({ briefId: z.string(), confirm: z.boolean() }),
+      },
+      async (args, ctx) => run(() => convex.mutation(api.mcp.approveDraftTool, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "cancel_brief",
+      {
+        title: "Cancel a brief",
+        description: "Take a brief off the desk without applying it, when Giorgi says so.",
+        inputSchema: z.object({ briefId: z.string() }),
+      },
+      async (args, ctx) => run(() => convex.mutation(api.mcp.cancelBriefTool, { ...auth(ctx), ...args })),
+    );
+
+    server.registerTool(
+      "listing_history",
+      {
+        title: "Listing history",
+        description: "Every change to a listing's copy, newest first: who made it (agent, admin, undo), the fields before and after. Ids for undo_change.",
+        inputSchema: z.object({ slug }),
+      },
+      async (args, ctx) => run(() => convex.query(api.mcp.listingRevisions, { ...auth(ctx), slug: args.slug })),
+    );
+
+    server.registerTool(
+      "undo_change",
+      {
+        title: "Undo a listing change",
+        description:
+          "Put a change's fields back as they were. confirm: true only when Giorgi asked for it; without it you get what would be restored. Refused when those fields changed again since.",
+        inputSchema: z.object({ revisionId: z.string(), confirm: z.boolean() }),
+      },
+      async (args, ctx) => run(() => convex.mutation(api.mcp.undoChangeTool, { ...auth(ctx), ...args })),
     );
 
     // The social queue

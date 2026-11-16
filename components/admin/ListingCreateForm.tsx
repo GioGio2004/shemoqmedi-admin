@@ -81,6 +81,7 @@ export function ListingCreateForm() {
   const [url, setUrl] = useState("");
   const [tagline, setTagline] = useState("");
   const [juryNote, setJuryNote] = useState("");
+  const [writeup, setWriteup] = useState("");
   const [categories, setCategories] = useState<CategorySlug[]>([]);
   const [technologies, setTechnologies] = useState<TechnologyName[]>([]);
   const [creditName, setCreditName] = useState("");
@@ -91,6 +92,27 @@ export function ListingCreateForm() {
   const [isStartup, setIsStartup] = useState(false);
   // /listings/new?juror=<id> (from the Jury page) pre-picks the juror to bundle with.
   const [jurorId, setJurorId] = useState(() => searchParams.get("juror") ?? "");
+
+  // /listings/new?brief=<id> (from the agent desk): an approved new-site draft
+  // fills the copy; Giorgi adds the screenshots and video.
+  const briefParam = searchParams.get("brief");
+  const fromBrief = useQuery(api.editorial.draftForNewListing, briefParam ? { briefId: briefParam } : "skip");
+  // Filled once per brief, while rendering (React's "adjust state on a prop change" pattern).
+  const [prefilledFrom, setPrefilledFrom] = useState<string | null>(null);
+  if (fromBrief && prefilledFrom !== fromBrief.id) {
+    setPrefilledFrom(fromBrief.id);
+    const d = fromBrief.draft;
+    setUrl(fromBrief.url);
+    if (d.title) setTitle(d.title);
+    if (d.tagline) setTagline(d.tagline);
+    if (d.writeup) setWriteup(d.writeup);
+    if (d.categories) setCategories(d.categories as CategorySlug[]);
+    if (d.technologies) setTechnologies(d.technologies as TechnologyName[]);
+    if (d.creditName) setCreditName(d.creditName);
+    if (d.creditUrl) setCreditUrl(d.creditUrl);
+    if (d.creatorTier) setTier(d.creatorTier);
+    if (d.region) setRegion(d.region);
+  }
 
   const [cover, setCover] = useState<MediaState>(NO_MEDIA);
   const [extras, setExtras] = useState<File[]>([]);
@@ -196,6 +218,7 @@ export function ListingCreateForm() {
         title: title.trim(),
         tagline: tagline.trim(),
         juryNote: juryNote.trim() || undefined,
+        writeup: writeup.trim() || undefined,
         url: url.trim(),
         categories,
         technologies,
@@ -214,6 +237,7 @@ export function ListingCreateForm() {
         isClaimed,
         isStartup,
         jurorId: jurorId ? (jurorId as Id<"jurors">) : undefined,
+        briefId: fromBrief?.id,
       });
       router.push(`/review/${id}`);
     } catch (err) {
@@ -229,7 +253,11 @@ export function ListingCreateForm() {
         <div>
           <p className="admin-eyebrow">Add a site</p>
           <h1>New listing.</h1>
-          <p>List a site by hand with your own screenshots, in any state of the lifecycle.</p>
+          <p>
+            {fromBrief
+              ? "Filled in from the agent's approved draft. Add the screenshots and video, check the details, then create it."
+              : "List a site by hand with your own screenshots, in any state of the lifecycle."}
+          </p>
         </div>
         <Link href="/review" className="admin-button admin-button-secondary">
           Back to review
@@ -308,6 +336,25 @@ export function ListingCreateForm() {
                 />
                 <span id="jury-note-count" className="admin-mono text-black/55">
                   {juryNote.length}/{LIMITS.juryNote}
+                </span>
+              </div>
+
+              <div className="grid gap-2">
+                <label htmlFor="writeup" className="admin-eyebrow">
+                  About this site (optional)
+                </label>
+                <textarea
+                  id="writeup"
+                  rows={8}
+                  maxLength={LIMITS.writeup}
+                  value={writeup}
+                  onChange={(e) => setWriteup(e.target.value)}
+                  className="admin-input resize-y"
+                  placeholder="The editorial write-up: 120-250 words in 2-4 paragraphs, a blank line between them."
+                  aria-describedby="writeup-count"
+                />
+                <span id="writeup-count" className="admin-mono text-black/55">
+                  {writeup.length}/{LIMITS.writeup}
                 </span>
               </div>
 

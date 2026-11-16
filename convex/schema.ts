@@ -169,6 +169,31 @@ export const juryCategory = v.union(
   v.literal("academic"),
 );
 
+/**
+ * The text a listing's agent-desk draft (and a revision) can carry: the
+ * descriptive copy only. Media, slug, URL, status, scores and link settings
+ * stay with Giorgi.
+ */
+export const listingCopy = v.object({
+  title: v.optional(v.string()),
+  tagline: v.optional(v.string()),
+  writeup: v.optional(v.string()),
+  categories: v.optional(v.array(v.string())),
+  technologies: v.optional(v.array(v.string())),
+  region: v.optional(region),
+  creatorTier: v.optional(creatorTier),
+  creditName: v.optional(v.string()),
+  creditUrl: v.optional(v.string()),
+});
+
+/** A brief on the agent desk (convex/editorial.ts). */
+export const briefStatus = v.union(
+  v.literal("queued"), // handed to the agent, waiting for a draft (or sent back with feedback)
+  v.literal("drafted"), // the agent submitted a draft: waiting for Giorgi
+  v.literal("approved"), // applied to the listing (or, for a new site, ready for its media)
+  v.literal("cancelled"),
+);
+
 export default defineSchema({
   // Files uploaded to ImageKit (convex/media.ts). WebP screenshots and
   // MP4/WebM previews under /listings/<slug>/ with SEO-friendly names.
@@ -261,6 +286,9 @@ export default defineSchema({
     title: v.string(),
     tagline: v.string(),
     juryNote: v.optional(v.string()), // short public review by the jury (LIMITS.juryNote)
+    // "About this site": the editorial write-up (LIMITS.writeup), paragraphs
+    // separated by a blank line. Written on the agent desk or by an admin.
+    writeup: v.optional(v.string()),
     url: v.string(), // normalized live URL
     category: v.string(), // primary CATEGORIES slug (= categories[0])
     // Every CATEGORIES slug, primary first. Absent on older rows: read it with
@@ -701,6 +729,44 @@ export default defineSchema({
   //   ready     Claude made or changed it: waiting for Giorgi to open and render it
   //   rendered  the current recipe has a render (renderedUrl / mediaId)
   // Editing a rendered reel puts it back to draft (the last render is kept).
+  // The agent desk: listings (or new sites) Giorgi hands to his AI agent over
+  // MCP. The agent may only draft copy for briefs here; a draft changes the
+  // listing only when Giorgi approves it (convex/editorial.ts).
+  listingBriefs: defineTable({
+    // The listing to rewrite. Absent: a new site, created from the approved
+    // draft once Giorgi adds its screenshots (then set to the new listing).
+    listingId: v.optional(v.id("listings")),
+    url: v.string(), // the live site the agent studies
+    note: v.optional(v.string()), // Giorgi's brief (LIMITS.briefNote)
+    status: briefStatus,
+    draft: v.optional(listingCopy),
+    sources: v.optional(v.array(v.string())), // pages the agent looked at
+    agentNote: v.optional(v.string()), // what it checked, open questions
+    feedback: v.optional(v.string()), // Giorgi's note when he sent the draft back
+    rounds: v.number(), // drafts submitted so far
+    createdBy: v.id("users"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    draftedAt: v.optional(v.number()),
+    decidedAt: v.optional(v.number()),
+    decidedBy: v.optional(v.id("users")),
+  })
+    .index("by_status", ["status", "updatedAt"])
+    .index("by_listing", ["listingId", "createdAt"]),
+
+  // Every change to a listing's copy (agent drafts, admin edits, undos), so
+  // any of them can be undone (convex/lib/revisions.ts).
+  listingRevisions: defineTable({
+    listingId: v.id("listings"),
+    source: v.union(v.literal("agent"), v.literal("admin"), v.literal("undo")),
+    before: listingCopy, // the changed fields as they were ("" for an empty one)
+    after: listingCopy, // and as they became
+    briefId: v.optional(v.id("listingBriefs")),
+    undoneAt: v.optional(v.number()),
+    actorId: v.optional(v.id("users")),
+    createdAt: v.number(),
+  }).index("by_listing", ["listingId", "createdAt"]),
+
   reelDrafts: defineTable({
     title: v.string(),
     recipe: reelRecipe,

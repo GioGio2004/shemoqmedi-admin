@@ -155,6 +155,17 @@ export const LIMITS = {
   tagline: 160,
   /** Public jury note on the listing page (a few sentences). */
   juryNote: 600,
+  /**
+   * "About this site": the editorial write-up on the listing page (a few short
+   * paragraphs, ~120-250 words). Written by the agent desk or an admin.
+   */
+  writeup: 2000,
+  /** Giorgi's brief to the agent desk, and his feedback when he sends a draft back. */
+  briefNote: 1000,
+  /** The agent's own notes on a draft (what it checked, open questions). */
+  agentNote: 1500,
+  /** Pages the agent looked at for a draft. */
+  draftSources: 12,
   creditName: 80,
   url: 500,
   technologies: 6,

@@ -6,7 +6,9 @@
 // publish, schedule and retry posts (feed posts and stories); see the
 // connected channels (never their tokens); render graphics and voiceovers and
 // find past renders and reels; draft reels for the Studio's reel editor (Claude
-// writes the recipe, Giorgi renders it); email studios; broadcast to an audience.
+// writes the recipe, Giorgi renders it); email studios; broadcast to an audience;
+// and run the listing desk (draft listing copy for briefs Giorgi queued, see
+// convex/editorial.ts).
 
 import { v } from "convex/values";
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
@@ -19,7 +21,7 @@ import { readPillars } from "./lib/scoring";
 import { TIER_NAMES } from "./lib/awards";
 import { folderOf, mediaDetails, mediaEntry, mediaEntryOf, mediaRole, roleOf } from "./lib/mediaEntry";
 import { mediaDetail } from "./lib/design";
-import { socialNetwork, socialPlacement, socialPostKind } from "./schema";
+import { listingCopy, socialNetwork, socialPlacement, socialPostKind } from "./schema";
 import { reelDraftStatus } from "./lib/reel";
 import { draftSummary, draftView, insertDraft, patchDraft, resolveLooseRecipe, summarize, viewDraft } from "./reels";
 import { rowUrl } from "./lib/media";
@@ -46,6 +48,19 @@ import { channelView, type ChannelView } from "./channels";
 import { audience, deliver, type Message } from "./emails";
 import { ensureListingClaimUrl, newClaimToken } from "./claimLinks";
 import { siteUrl } from "./seo";
+import { getConfig } from "./lib/config";
+import { editorialRules as rulesText } from "./lib/editorial";
+import {
+  approveBrief,
+  briefsWithStatus,
+  cancelBrief,
+  getBriefOrFail,
+  queueBrief,
+  revisionsOf,
+  submitDraft,
+  undoRevision,
+  viewBrief,
+} from "./editorial";
 
 const token = v.string();
 
@@ -872,5 +887,142 @@ export const emailHistory = query({
       ? await ctx.db.query("emailLog").withIndex("by_to", (q) => q.eq("to", to.trim().toLowerCase())).order("desc").take(n)
       : await ctx.db.query("emailLog").withIndex("by_sentAt").order("desc").take(n);
     return rows.map((r) => ({ to: r.to, subject: r.subject, kind: r.kind, status: r.status, error: r.error ?? null, sentAt: r.sentAt, broadcastId: r.broadcastId ?? null }));
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The listing desk (convex/editorial.ts): briefs Giorgi handed to the agent
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The editorial rules, with the live award settings. */
+export const editorialRules = query({
+  args: { token },
+  returns: v.string(),
+  handler: async (ctx, { token }) => {
+    await requireTokenAdmin(ctx, token);
+    return rulesText(await getConfig(ctx));
+  },
+});
+
+/** Open briefs: drafted ones wait for Giorgi, queued ones wait for the agent. */
+export const editorialQueue = query({
+  args: { token },
+  returns: v.array(v.any()),
+  handler: async (ctx, { token }) => {
+    await requireTokenAdmin(ctx, token);
+    const rows = await briefsWithStatus(ctx, ["queued", "drafted"]);
+    return Promise.all(
+      rows.map(async (b) => {
+        const view = await viewBrief(ctx, b);
+        return {
+          briefId: view.id,
+          status: view.status,
+          site: view.listing?.title ?? view.url,
+          listingSlug: view.listing?.slug ?? null,
+          newSite: view.listing === null,
+          url: view.url,
+          note: view.note,
+          feedback: view.feedback,
+          rounds: view.rounds,
+          updatedAt: view.updatedAt,
+        };
+      }),
+    );
+  },
+});
+
+/** One brief in full: the listing's current copy, the draft and its changes, plus the jury's comments. */
+export const getBrief = query({
+  args: { token, briefId: v.string() },
+  returns: v.any(),
+  handler: async (ctx, { token, briefId }) => {
+    await requireTokenAdmin(ctx, token);
+    const brief = await getBriefOrFail(ctx, briefId);
+    const view = await viewBrief(ctx, brief);
+    const juryComments = brief.listingId
+      ? (
+          await ctx.db
+            .query("juryEvaluations")
+            .withIndex("by_listing", (q) => q.eq("listingId", brief.listingId!))
+            .take(50)
+        )
+          .filter((e) => e.comment.trim())
+          .map((e) => e.comment)
+      : [];
+    return { ...view, juryComments, revisions: brief.listingId ? await revisionsOf(ctx, brief.listingId, 10) : [] };
+  },
+});
+
+/** Queue a site for the agent: a listing (by slug) or a site that isn't listed (by url). Only when Giorgi asks. */
+export const queueBriefTool = mutation({
+  args: { token, slug: v.optional(v.string()), url: v.optional(v.string()), note: v.optional(v.string()) },
+  returns: v.string(),
+  handler: async (ctx, { token, slug, url, note }) => {
+    const admin = await requireTokenAdmin(ctx, token);
+    if (!slug && !url) fail("Give the listing's slug or the new site's url.");
+    const listing = slug ? await listingBySlug(ctx, slug) : null;
+    return await queueBrief(ctx, admin, listing ? { listingId: listing._id, note } : { url, note });
+  },
+});
+
+/** Submit (or replace) the draft of an open brief. Giorgi gets a push; nothing changes on the site yet. */
+export const submitDraftTool = mutation({
+  args: { token, briefId: v.string(), draft: listingCopy, sources: v.array(v.string()), agentNote: v.optional(v.string()) },
+  returns: v.any(),
+  handler: async (ctx, { token, briefId, draft, sources, agentNote }) => {
+    await requireTokenAdmin(ctx, token);
+    const brief = await getBriefOrFail(ctx, briefId);
+    await submitDraft(ctx, brief, { draft, sources, agentNote });
+    return viewBrief(ctx, (await ctx.db.get(brief._id))!);
+  },
+});
+
+/** Apply a draft. confirm must be true, and only after Giorgi said yes to that exact draft. */
+export const approveDraftTool = mutation({
+  args: { token, briefId: v.string(), confirm: v.boolean() },
+  returns: v.any(),
+  handler: async (ctx, { token, briefId, confirm }) => {
+    const admin = await requireTokenAdmin(ctx, token);
+    const brief = await getBriefOrFail(ctx, briefId);
+    if (!confirm) return { applied: false, draft: await viewBrief(ctx, brief) };
+    const result = await approveBrief(ctx, admin, brief);
+    return { applied: true, ...result, page: result.slug ? `${siteUrl()}/sites/${result.slug}` : null };
+  },
+});
+
+/** Close a brief without applying it (Giorgi changed his mind). */
+export const cancelBriefTool = mutation({
+  args: { token, briefId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { token, briefId }) => {
+    const admin = await requireTokenAdmin(ctx, token);
+    await cancelBrief(ctx, admin, await getBriefOrFail(ctx, briefId));
+    return null;
+  },
+});
+
+/** A listing's copy history (newest first), for undo_change. */
+export const listingRevisions = query({
+  args: { token, slug: v.string() },
+  returns: v.array(v.any()),
+  handler: async (ctx, { token, slug }) => {
+    await requireTokenAdmin(ctx, token);
+    const listing = await listingBySlug(ctx, slug);
+    return revisionsOf(ctx, listing._id);
+  },
+});
+
+/** Undo one change to a listing's copy. confirm must be true, only after Giorgi asked for it. */
+export const undoChangeTool = mutation({
+  args: { token, revisionId: v.string(), confirm: v.boolean() },
+  returns: v.any(),
+  handler: async (ctx, { token, revisionId, confirm }) => {
+    const admin = await requireTokenAdmin(ctx, token);
+    const id = ctx.db.normalizeId("listingRevisions", revisionId);
+    const rev = id ? await ctx.db.get(id) : null;
+    if (!rev) fail(`No change with the id "${revisionId}". Use listing_history to find it.`);
+    if (!confirm) return { undone: false, wouldRestore: rev.before };
+    const { slug } = await undoRevision(ctx, admin, rev._id);
+    return { undone: true, page: `${siteUrl()}/sites/${slug}` };
   },
 });

@@ -40,6 +40,11 @@ function ClaimsCount() {
   return <CountBubble value={count} label="pending claims" />;
 }
 
+function AgentCount() {
+  const count = useQuery(api.editorial.draftedCount, {});
+  return <CountBubble value={count} label="drafts waiting" />;
+}
+
 function SocialCount() {
   const count = useQuery(api.social.waitingCount, {});
   return <CountBubble value={count} label="posts waiting" />;
@@ -54,6 +59,7 @@ const NAV = [
   { href: "/featured", label: "Featured", count: null },
   { href: "/awards", label: "Awards", count: null },
   { href: "/listings/new", label: "Add site", count: null },
+  { href: "/agent", label: "Agent desk", count: AgentCount },
   { href: "/creators", label: "Creators", count: null },
   { href: "/jury", label: "Jury", count: null },
   { href: "/outreach", label: "Outreach", count: null },

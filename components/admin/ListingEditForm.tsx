@@ -16,6 +16,7 @@ import {
   type RegionSlug,
 } from "@/convex/lib/taxonomy";
 import { Select } from "./Select";
+import { wordCount } from "@/convex/lib/editorial";
 
 type Listing = NonNullable<FunctionReturnType<typeof api.listings.reviewDetail>>;
 type UpdateArgs = FunctionArgs<typeof api.admin.updateListing>;
@@ -26,6 +27,7 @@ type Fields = {
   url: string;
   tagline: string;
   juryNote: string;
+  writeup: string;
   categories: string[];
   technologies: string[];
   creditName: string;
@@ -57,6 +59,7 @@ const KEYS: Key[] = [
   "url",
   "tagline",
   "juryNote",
+  "writeup",
   "categories",
   "technologies",
   "creditName",
@@ -76,6 +79,7 @@ function fromListing(l: Listing): Fields {
     url: l.url,
     tagline: l.tagline,
     juryNote: l.juryNote ?? "",
+    writeup: l.writeup ?? "",
     categories: l.categories,
     technologies: l.technologies,
     creditName: l.creditName,
@@ -258,6 +262,26 @@ export function ListingEditForm({ listing }: { listing: Listing }) {
               placeholder="A few sentences on what makes this site stand out. Shown on its page."
             />
             <span className="text-xs text-black/55">Optional. Leave empty to hide it.</span>
+          </label>
+
+          <label className="grid gap-2">
+            <span className="flex items-baseline justify-between gap-3">
+              <span className="admin-eyebrow">About this site</span>
+              <span className="admin-mono text-black/55">
+                {wordCount(value.writeup)} words · {value.writeup.length}/{LIMITS.writeup}
+              </span>
+            </span>
+            <textarea
+              className="admin-input resize-y"
+              rows={8}
+              value={value.writeup}
+              maxLength={LIMITS.writeup}
+              onChange={(e) => set("writeup", e.target.value)}
+              placeholder="The editorial write-up shown on the site's page: 120-250 words in 2-4 paragraphs, a blank line between them."
+            />
+            <span className="text-xs text-black/55">
+              Optional. The agent desk drafts it; every change can be undone under Agent desk.
+            </span>
           </label>
 
           <div className="grid gap-6 md:grid-cols-2">

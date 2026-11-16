@@ -3,7 +3,7 @@ import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { award, creatorTier, listingStatus, pillars, region } from "../schema";
 import { deleteMedia, mediaInfo, mediaUrl, type MediaId } from "./media";
-import { CATEGORIES, LIMITS, isCategory, type CategorySlug, type CreatorTier, type RegionSlug } from "./taxonomy";
+import { CATEGORIES, LIMITS, isCategory, isTechnology, type CategorySlug, type CreatorTier, type RegionSlug } from "./taxonomy";
 import { ZERO_PILLARS, readPillars, round2, summarize, type Pillars, type StoredPillars } from "./scoring";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -19,6 +19,31 @@ export function cleanText(value: string, field: string, max: number, required = 
   if (required && !text) fail(`${field} is required.`);
   if (text.length > max) fail(`${field} must be ${max} characters or fewer.`);
   return text;
+}
+
+/**
+ * Multi-paragraph text (the listing write-up): paragraphs are kept (split on
+ * blank lines, joined with one blank line), whitespace inside each is
+ * collapsed. "" when empty and not required.
+ */
+export function cleanParagraphs(value: string, field: string, max: number, required = true) {
+  const text = value
+    .replace(/\r\n?/g, "\n")
+    .split(/\n\s*\n/)
+    .map((p) => p.trim().replace(/\s+/g, " "))
+    .filter(Boolean)
+    .join("\n\n");
+  if (required && !text) fail(`${field} is required.`);
+  if (text.length > max) fail(`${field} must be ${max} characters or fewer.`);
+  return text;
+}
+
+/** Up to LIMITS.technologies known technology names, deduplicated. */
+export function checkTechnologies(technologies: string[]) {
+  const unique = [...new Set(technologies)];
+  if (unique.length > LIMITS.technologies) fail(`Choose up to ${LIMITS.technologies} technologies.`);
+  if (!unique.every(isTechnology)) fail("Unknown technology selected.");
+  return unique;
 }
 
 /** Normalizes a public http(s) URL, or throws. */
@@ -254,6 +279,7 @@ export const publicListing = v.object({
   title: v.string(),
   tagline: v.string(),
   juryNote: v.union(v.string(), v.null()),
+  writeup: v.union(v.string(), v.null()), // "About this site"
   url: v.string(),
   category: v.string(), // primary
   categories: v.array(v.string()), // all, primary first
@@ -326,6 +352,7 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
     title: listing.title,
     tagline: listing.tagline,
     juryNote: listing.juryNote ?? null,
+    writeup: listing.writeup ?? null,
     url: listing.url,
     category: listing.category,
     categories: listingCategories(listing),

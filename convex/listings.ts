@@ -322,6 +322,7 @@ const reviewListing = v.object({
   title: v.string(),
   tagline: v.string(),
   juryNote: v.union(v.string(), v.null()),
+  writeup: v.union(v.string(), v.null()), // "About this site"
   url: v.string(),
   categories: v.array(v.string()), // primary first
   categoryNames: v.array(v.string()),
@@ -385,6 +386,7 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
     title: listing.title,
     tagline: listing.tagline,
     juryNote: listing.juryNote ?? null,
+    writeup: listing.writeup ?? null,
     url: listing.url,
     categories: listingCategories(listing),
     categoryNames: listingCategories(listing).map(categoryName),

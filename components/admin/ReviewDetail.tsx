@@ -12,6 +12,7 @@ import { STATUS_LABEL, StatusBadge } from "./ReviewQueue";
 import { ScoreEditor } from "./ScoreEditor";
 import { ListingEditForm } from "./ListingEditForm";
 import { MediaPanel } from "./MediaPanel";
+import { AgentPanel } from "./AgentDesk";
 import { LifecyclePanel } from "./LifecyclePanel";
 import { IntegrityPanel } from "./IntegrityPanel";
 import { BadgeKit } from "./BadgeKit";
@@ -106,6 +107,7 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
             </section>
           )}
 
+          <AgentPanel listingId={listing.id} />
           <ListingEditForm key={listing.id} listing={listing} />
           <MediaPanel key={`media-${listing.id}`} listing={listing} />
         </div>

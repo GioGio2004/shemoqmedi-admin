@@ -4,11 +4,11 @@
 
 import { v } from "convex/values";
 import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
-import { internalMutation, mutation, query } from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
+import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin } from "./authHelpers";
 import { award, creatorTier, listingStatus, pillars, region } from "./schema";
-import { DAY_MS, LIMITS, VOTING_DAYS, isTechnology } from "./lib/taxonomy";
+import { DAY_MS, LIMITS, VOTING_DAYS } from "./lib/taxonomy";
 import { normalizePillars, type Pillars } from "./lib/scoring";
 import { batchVotingEnds, tbilisiDay, tbilisiMonth, tbilisiYear, weekOf } from "./lib/time";
 import { checkDomain, domainKey, listingsOnDomain } from "./lib/domains";
@@ -19,6 +19,8 @@ import {
   assertMedia,
   checkCategories,
   checkGallery,
+  checkTechnologies,
+  cleanParagraphs,
   cleanText,
   deleteListing,
   fail,
@@ -34,17 +36,11 @@ import {
 import { hasJuryEvaluations } from "./jury";
 import { mergeSocials, normalizeEmail } from "./lib/contacts";
 import { awardPaths, creatorPath, listingPaths, scheduleIndexNow, sitePath } from "./seo";
+import { copyOf, recordRevision } from "./lib/revisions";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared validation
 // ─────────────────────────────────────────────────────────────────────────────
-
-function checkTechnologies(technologies: string[]) {
-  const unique = [...new Set(technologies)];
-  if (unique.length > LIMITS.technologies) fail(`Choose up to ${LIMITS.technologies} technologies.`);
-  if (!unique.every(isTechnology)) fail("Unknown technology selected.");
-  return unique;
-}
 
 function checkPillars(scores: Pillars | undefined) {
   if (!scores) return undefined;
@@ -76,6 +72,7 @@ export const createListing = mutation({
     title: v.string(),
     tagline: v.string(),
     juryNote: v.optional(v.string()),
+    writeup: v.optional(v.string()),
     url: v.string(),
     categories: v.array(v.string()), // primary first
     technologies: v.array(v.string()),
@@ -103,6 +100,8 @@ export const createListing = mutation({
     isStartup: v.optional(v.boolean()),
     // Pre-created for this juror: their claim link claims this listing too.
     jurorId: v.optional(v.id("jurors")),
+    // Created from an approved agent-desk draft for a new site: the brief gets linked to it.
+    briefId: v.optional(v.id("listingBriefs")),
   },
   returns: v.object({ id: v.id("listings"), slug: v.string() }),
   handler: async (ctx, args) => {
@@ -110,6 +109,7 @@ export const createListing = mutation({
     const title = cleanText(args.title, "Site title", LIMITS.title);
     const tagline = cleanText(args.tagline, "Short description", LIMITS.tagline, false);
     const juryNote = cleanText(args.juryNote ?? "", "Jury note", LIMITS.juryNote, false) || undefined;
+    const writeup = cleanParagraphs(args.writeup ?? "", "About this site", LIMITS.writeup, false) || undefined;
     const creditName = cleanText(args.creditName, "Made by", LIMITS.creditName);
     const url = normalizeUrl(args.url);
     const creditUrl = args.creditUrl?.trim() ? normalizeUrl(args.creditUrl, "Creator website") : undefined;
@@ -162,6 +162,7 @@ export const createListing = mutation({
       title,
       tagline,
       juryNote,
+      writeup,
       url,
       category: categories[0],
       categories,
@@ -192,6 +193,10 @@ export const createListing = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    if (args.briefId) {
+      const brief = await ctx.db.get(args.briefId);
+      if (brief && !brief.listingId) await ctx.db.patch(brief._id, { listingId: id, updatedAt: now });
+    }
     if (args.status !== "pending") {
       await scheduleIndexNow(ctx, [
         ...(await listingPaths(ctx, { slug, creatorId })),
@@ -221,102 +226,128 @@ export const createListing = mutation({
   },
 });
 
+export const listingEditArgs = {
+  title: v.optional(v.string()),
+  slug: v.optional(v.string()),
+  tagline: v.optional(v.string()),
+  juryNote: v.optional(v.string()), // "" clears it
+  writeup: v.optional(v.string()), // "About this site"; "" clears it
+  url: v.optional(v.string()),
+  categories: v.optional(v.array(v.string())), // primary first
+  technologies: v.optional(v.array(v.string())),
+  region: v.optional(region),
+  creatorTier: v.optional(creatorTier),
+  creditName: v.optional(v.string()),
+  creditUrl: v.optional(v.string()), // "" clears it
+  isClaimed: v.optional(v.boolean()),
+  isStartup: v.optional(v.boolean()),
+  jurorId: v.optional(v.union(v.id("jurors"), v.null())), // null unlinks
+  // Outbound link follow state: true/false sets it, null returns to automatic (followed once claimed).
+  isDoFollow: v.optional(v.union(v.boolean(), v.null())),
+};
+
+export type ListingEdit = {
+  [K in keyof typeof listingEditArgs]?: (typeof listingEditArgs)[K]["type"];
+};
+
+/**
+ * Validate and apply an edit to a listing: the admin form, an approved agent
+ * draft (convex/editorial.ts) or an undo. Changes to the copy are stored as a
+ * revision (lib/revisions.ts) so they can be undone.
+ */
+export async function applyListingEdit(
+  ctx: MutationCtx,
+  listing: Doc<"listings">,
+  args: ListingEdit,
+  meta: { source: "agent" | "admin" | "undo"; actorId?: Id<"users">; briefId?: Id<"listingBriefs"> },
+): Promise<{ slug: string; revisionId: Id<"listingRevisions"> | null }> {
+  const id = listing._id;
+  const patch: Partial<Doc<"listings">> = {};
+
+  if (args.title !== undefined) patch.title = cleanText(args.title, "Site title", LIMITS.title);
+  if (args.tagline !== undefined) patch.tagline = cleanText(args.tagline, "Short description", LIMITS.tagline, false);
+  if (args.juryNote !== undefined) {
+    patch.juryNote = cleanText(args.juryNote, "Jury note", LIMITS.juryNote, false) || undefined;
+  }
+  if (args.writeup !== undefined) {
+    patch.writeup = cleanParagraphs(args.writeup, "About this site", LIMITS.writeup, false) || undefined;
+  }
+  if (args.url !== undefined) {
+    patch.url = normalizeUrl(args.url);
+    if (patch.url !== listing.url) await assertDomainFree(ctx, patch.url, listing);
+    patch.domainKey = domainKey(patch.url);
+  }
+  if (args.slug !== undefined) {
+    const wanted = slugify(args.slug, "");
+    if (!wanted) fail("The page address can only use letters, numbers and dashes.");
+    if (wanted !== listing.slug) {
+      // Another listing's old address counts as taken: it redirects there.
+      if (await listingSlugTaken(ctx, wanted, id)) fail(`/sites/${wanted} is already taken.`);
+      patch.slug = wanted;
+      // The old address keeps working: the site 308s it to the new slug.
+      patch.previousSlugs = previousSlugsAfterRename(listing, wanted);
+    }
+  }
+  if (args.categories !== undefined) {
+    patch.categories = checkCategories(args.categories);
+    patch.category = patch.categories[0];
+  }
+  if (args.technologies !== undefined) patch.technologies = checkTechnologies(args.technologies);
+  if (args.region !== undefined) patch.region = args.region;
+  if (args.creatorTier !== undefined) patch.creatorTier = args.creatorTier;
+  if (args.creditUrl !== undefined) {
+    patch.creditUrl = args.creditUrl.trim() ? normalizeUrl(args.creditUrl, "Creator website") : undefined;
+  }
+  if (args.isClaimed !== undefined) {
+    patch.isClaimed = args.isClaimed;
+    // A claimed listing has no open claim link.
+    if (args.isClaimed && listing.claimToken) {
+      patch.claimToken = undefined;
+      patch.claimTokenUsed = listing.claimToken;
+    }
+  }
+  if (args.isStartup !== undefined) patch.isStartup = args.isStartup || undefined;
+  if (args.jurorId !== undefined) {
+    if (args.jurorId && !(await ctx.db.get(args.jurorId))) fail("That juror no longer exists.");
+    patch.jurorId = args.jurorId ?? undefined;
+  }
+  if (args.isDoFollow !== undefined) patch.isDoFollow = args.isDoFollow ?? undefined;
+  if (args.creditName !== undefined) {
+    const creditName = cleanText(args.creditName, "Made by", LIMITS.creditName);
+    if (creditName !== listing.creditName) {
+      patch.creditName = creditName;
+      patch.creatorId = await findOrCreateCreator(ctx, {
+        name: creditName,
+        tier: patch.creatorTier ?? listing.creatorTier,
+        region: patch.region ?? listing.region,
+        website: "creditUrl" in patch ? patch.creditUrl : listing.creditUrl,
+      });
+    }
+  }
+
+  await ctx.db.patch(id, { ...patch, updatedAt: Date.now() });
+  const revisionId = await recordRevision(ctx, id, copyOf(listing), copyOf({ ...listing, ...patch }), meta);
+  if (isPublicStatus(listing.status) && Object.keys(patch).length > 0) {
+    // New page + creator page, and the old ones (old slug now redirects,
+    // the old creator may have lost a listing). Duplicates are dropped.
+    await scheduleIndexNow(ctx, [
+      ...(await listingPaths(ctx, { ...listing, ...patch })),
+      ...(await listingPaths(ctx, listing)),
+    ]);
+  }
+  return { slug: patch.slug ?? listing.slug, revisionId };
+}
+
 /** Edit any descriptive field. Changing "Made by" relinks the creator profile. */
 export const updateListing = mutation({
-  args: {
-    id: v.id("listings"),
-    title: v.optional(v.string()),
-    slug: v.optional(v.string()),
-    tagline: v.optional(v.string()),
-    juryNote: v.optional(v.string()), // "" clears it
-    url: v.optional(v.string()),
-    categories: v.optional(v.array(v.string())), // primary first
-    technologies: v.optional(v.array(v.string())),
-    region: v.optional(region),
-    creatorTier: v.optional(creatorTier),
-    creditName: v.optional(v.string()),
-    creditUrl: v.optional(v.string()), // "" clears it
-    isClaimed: v.optional(v.boolean()),
-    isStartup: v.optional(v.boolean()),
-    jurorId: v.optional(v.union(v.id("jurors"), v.null())), // null unlinks
-    // Outbound link follow state: true/false sets it, null returns to automatic (followed once claimed).
-    isDoFollow: v.optional(v.union(v.boolean(), v.null())),
-  },
+  args: { id: v.id("listings"), ...listingEditArgs },
   returns: v.object({ slug: v.string() }),
   handler: async (ctx, { id, ...args }) => {
-    await requireAdmin(ctx);
+    const admin = await requireAdmin(ctx);
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
-    const patch: Partial<Doc<"listings">> = {};
-
-    if (args.title !== undefined) patch.title = cleanText(args.title, "Site title", LIMITS.title);
-    if (args.tagline !== undefined) patch.tagline = cleanText(args.tagline, "Short description", LIMITS.tagline, false);
-    if (args.juryNote !== undefined) {
-      patch.juryNote = cleanText(args.juryNote, "Jury note", LIMITS.juryNote, false) || undefined;
-    }
-    if (args.url !== undefined) {
-      patch.url = normalizeUrl(args.url);
-      if (patch.url !== listing.url) await assertDomainFree(ctx, patch.url, listing);
-      patch.domainKey = domainKey(patch.url);
-    }
-    if (args.slug !== undefined) {
-      const wanted = slugify(args.slug, "");
-      if (!wanted) fail("The page address can only use letters, numbers and dashes.");
-      if (wanted !== listing.slug) {
-        // Another listing's old address counts as taken: it redirects there.
-        if (await listingSlugTaken(ctx, wanted, id)) fail(`/sites/${wanted} is already taken.`);
-        patch.slug = wanted;
-        // The old address keeps working: the site 308s it to the new slug.
-        patch.previousSlugs = previousSlugsAfterRename(listing, wanted);
-      }
-    }
-    if (args.categories !== undefined) {
-      patch.categories = checkCategories(args.categories);
-      patch.category = patch.categories[0];
-    }
-    if (args.technologies !== undefined) patch.technologies = checkTechnologies(args.technologies);
-    if (args.region !== undefined) patch.region = args.region;
-    if (args.creatorTier !== undefined) patch.creatorTier = args.creatorTier;
-    if (args.creditUrl !== undefined) {
-      patch.creditUrl = args.creditUrl.trim() ? normalizeUrl(args.creditUrl, "Creator website") : undefined;
-    }
-    if (args.isClaimed !== undefined) {
-      patch.isClaimed = args.isClaimed;
-      // A claimed listing has no open claim link.
-      if (args.isClaimed && listing.claimToken) {
-        patch.claimToken = undefined;
-        patch.claimTokenUsed = listing.claimToken;
-      }
-    }
-    if (args.isStartup !== undefined) patch.isStartup = args.isStartup || undefined;
-    if (args.jurorId !== undefined) {
-      if (args.jurorId && !(await ctx.db.get(args.jurorId))) fail("That juror no longer exists.");
-      patch.jurorId = args.jurorId ?? undefined;
-    }
-    if (args.isDoFollow !== undefined) patch.isDoFollow = args.isDoFollow ?? undefined;
-    if (args.creditName !== undefined) {
-      const creditName = cleanText(args.creditName, "Made by", LIMITS.creditName);
-      if (creditName !== listing.creditName) {
-        patch.creditName = creditName;
-        patch.creatorId = await findOrCreateCreator(ctx, {
-          name: creditName,
-          tier: patch.creatorTier ?? listing.creatorTier,
-          region: patch.region ?? listing.region,
-          website: "creditUrl" in patch ? patch.creditUrl : listing.creditUrl,
-        });
-      }
-    }
-
-    await ctx.db.patch(id, { ...patch, updatedAt: Date.now() });
-    if (isPublicStatus(listing.status) && Object.keys(patch).length > 0) {
-      // New page + creator page, and the old ones (old slug now redirects,
-      // the old creator may have lost a listing). Duplicates are dropped.
-      await scheduleIndexNow(ctx, [
-        ...(await listingPaths(ctx, { ...listing, ...patch })),
-        ...(await listingPaths(ctx, listing)),
-      ]);
-    }
-    return { slug: patch.slug ?? listing.slug };
+    const { slug } = await applyListingEdit(ctx, listing, args, { source: "admin", actorId: admin._id });
+    return { slug };
   },
 });
 
