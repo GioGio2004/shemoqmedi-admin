@@ -25,6 +25,7 @@ import { listingPaths, scheduleIndexNow } from "./seo";
 import { isPublicStatus } from "./lib/listingHelpers";
 import { readPillars, compareRanked, finalScore } from "./lib/scoring";
 import { DEFAULT_CONFIG, checkConfig, getConfig, type AwardConfig } from "./lib/config";
+import { publicRulesFrom, vPublicRules } from "./lib/publicRules";
 import {
   FIRST_100,
   FIRST_100_REASON,
@@ -439,6 +440,17 @@ export const first100Count = query({
   args: {},
   returns: v.object({ given: v.number(), limit: v.number() }),
   handler: async (ctx) => ({ given: (await first100Members(ctx)).length, limit: FIRST_100 }),
+});
+
+/**
+ * The award rules as they stand (weights, thresholds, rounds), for every page
+ * on the public site that states a number. Built from the engine's own
+ * constants and the live settings, so the copy follows an admin's changes.
+ */
+export const publicRules = query({
+  args: {},
+  returns: vPublicRules,
+  handler: async (ctx) => publicRulesFrom(await getConfig(ctx)),
 });
 
 /** Every active award slug, for the sitemap and static params. */

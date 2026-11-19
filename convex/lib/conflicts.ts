@@ -12,6 +12,8 @@ export const OWN_SITE = "You can't evaluate your own site.";
 export async function conflictReason(ctx: QueryCtx, listing: Doc<"listings">, juror: Doc<"jurors">) {
   if (listing.jurorId === juror._id) return OWN_SITE;
   if (juror.userId && listing.ownerId === juror.userId) return OWN_SITE;
+  // A submission they sent in, whether or not they were given ownership.
+  if (juror.userId && listing.submittedBy === juror.userId) return OWN_SITE;
   if (juror.userId && listing.creatorId) {
     const creator = await ctx.db.get(listing.creatorId);
     if (creator?.claimedBy === juror.userId) return OWN_SITE;

@@ -21,6 +21,7 @@ import { averagePillars, finalScore, readPillars, type StoredPillars } from "./l
 import { scoreFields } from "./lib/listingHelpers";
 import { audit, awardSlug, awardsOf, revokeAward, syncListingAwards } from "./lib/awards";
 import { tbilisiDay, tbilisiMonth, tbilisiYear, weekOf } from "./lib/time";
+import { CLAIM_LINK_TTL, hashClaimToken } from "./claimLinks";
 
 const withContent = (p: StoredPillars | undefined) =>
   p && p.content === undefined && p.code !== undefined ? { ...p, content: p.code } : null;
@@ -139,5 +140,116 @@ export const markTeamSites = internalMutation({
       out.push({ url, title: matches[0]?.title ?? null, revoked });
     }
     return out;
+  },
+});
+
+/**
+ * Claim links used to be stored in plaintext on the juror or listing
+ * (claimToken, and claimTokenUsed once claimed). This moves each one into the
+ * claimLinks table as a SHA-256 hash and clears the plaintext field. Open
+ * links get 14 days from now (they had no expiry before); used ones keep
+ * redirecting their claimer. Safe to run more than once:
+ *
+ *   npx convex run migrations:hashClaimTokens            (dev)
+ *   npx convex run migrations:hashClaimTokens --prod     (production)
+ *
+ * Until it has run, claimLinks.ts still accepts the plaintext fields.
+ */
+export const hashClaimTokens = internalMutation({
+  args: {},
+  returns: v.object({ open: v.number(), used: v.number(), dropped: v.number() }),
+  handler: async (ctx) => {
+    const now = Date.now();
+    let open = 0;
+    let used = 0;
+    let dropped = 0;
+    const known = async (tokenHash: string) =>
+      (await ctx.db
+        .query("claimLinks")
+        .withIndex("by_tokenHash", (q) => q.eq("tokenHash", tokenHash))
+        .first()) !== null;
+
+    type Row = { claimToken?: string; claimTokenUsed?: string };
+    const move = async (
+      row: Row,
+      target: { jurorId: Doc<"jurors">["_id"] } | { listingId: Doc<"listings">["_id"] },
+      owner: Doc<"users">["_id"] | undefined,
+      claimedAt: number,
+    ) => {
+      if (row.claimToken) {
+        const tokenHash = await hashClaimToken(row.claimToken);
+        if (!(await known(tokenHash))) {
+          await ctx.db.insert("claimLinks", { tokenHash, ...target, createdAt: now, expiresAt: now + CLAIM_LINK_TTL });
+          open += 1;
+        }
+      }
+      if (row.claimTokenUsed) {
+        const tokenHash = await hashClaimToken(row.claimTokenUsed);
+        if (!owner) dropped += 1; // claimed with nobody to redirect: nothing to keep
+        else if (!(await known(tokenHash))) {
+          await ctx.db.insert("claimLinks", {
+            tokenHash,
+            ...target,
+            createdAt: claimedAt,
+            expiresAt: claimedAt + CLAIM_LINK_TTL,
+            usedBy: owner,
+            usedAt: claimedAt,
+          });
+          used += 1;
+        }
+      }
+    };
+
+    for (const j of await ctx.db.query("jurors").take(2000)) {
+      if (!j.claimToken && !j.claimTokenUsed) continue;
+      await move(j, { jurorId: j._id }, j.userId, j.claimedAt ?? j.updatedAt);
+      await ctx.db.patch(j._id, { claimToken: undefined, claimTokenUsed: undefined });
+    }
+    for (const l of await ctx.db.query("listings").take(8000)) {
+      if (!l.claimToken && !l.claimTokenUsed) continue;
+      await move(l, { listingId: l._id }, l.ownerId, l.updatedAt);
+      await ctx.db.patch(l._id, { claimToken: undefined, claimTokenUsed: undefined });
+    }
+    return { open, used, dropped };
+  },
+});
+
+/**
+ * Submissions still waiting for review that were made before submitting
+ * stopped granting ownership (audit A-05): the submitter moves from ownerId to
+ * submittedBy and the listing goes back to unclaimed, so ownership is decided
+ * on approval like every new submission. A creator profile the submission
+ * created for them (claimed by the submitter and crediting only this site) is
+ * unclaimed too. Published listings are left alone. Safe to run more than once:
+ *   npx convex run migrations:unclaimPendingSubmissions --prod
+ */
+export const unclaimPendingSubmissions = internalMutation({
+  args: {},
+  returns: v.object({ listings: v.number(), creators: v.number() }),
+  handler: async (ctx) => {
+    let listings = 0;
+    let creators = 0;
+    const now = Date.now();
+    const pending = await ctx.db
+      .query("listings")
+      .withIndex("by_status", (q) => q.eq("status", "pending"))
+      .take(1000);
+    for (const l of pending) {
+      if (l.source !== "submission" || !l.ownerId || l.publishedAt !== undefined || l.submittedBy) continue;
+      const submitter = l.ownerId;
+      await ctx.db.patch(l._id, { submittedBy: submitter, ownerId: undefined, isClaimed: false, updatedAt: now });
+      listings += 1;
+      const creator = l.creatorId ? await ctx.db.get(l.creatorId) : null;
+      if (!creator || creator.claimedBy !== submitter) continue;
+      const credits = await ctx.db
+        .query("listings")
+        .withIndex("by_creator", (q) => q.eq("creatorId", creator._id))
+        .take(2);
+      if (credits.every((c) => c._id === l._id)) {
+        await ctx.db.patch(creator._id, { isClaimed: false, claimedBy: undefined, updatedAt: now });
+        creators += 1;
+      }
+    }
+    return { listings, creators };
   },
 });

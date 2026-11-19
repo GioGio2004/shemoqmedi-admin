@@ -16,7 +16,7 @@ import { AgentPanel } from "./AgentDesk";
 import { LifecyclePanel } from "./LifecyclePanel";
 import { IntegrityPanel } from "./IntegrityPanel";
 import { BadgeKit } from "./BadgeKit";
-import { ClaimLink } from "./ClaimLink";
+import { ClaimLink, UnclaimButton } from "./ClaimLink";
 import { SOURCE_LABEL, safeHref, storefrontCreatorUrl } from "./format";
 
 /** Full control panel for one listing: details, media, lifecycle, scores. */
@@ -49,7 +49,7 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
 
   async function onDelete() {
     if (deleting || !listing) return;
-    if (!confirm(`Delete "${listing.title}" with its votes and media? This can't be undone.`)) return;
+    if (!confirm(`Delete "${listing.title}" with its votes, media and history? This can't be undone.`)) return;
     setDeleting(true);
     setDeleteError(null);
     try {
@@ -138,9 +138,9 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
               </p>
               <p className="text-xs leading-relaxed text-black/55">
                 Send this private link to the site&apos;s owner. Signing in through it claims the listing and makes its
-                links followed. It works once.
+                links followed. It is shown once when made, works once and expires after 14 days.
               </p>
-              <ClaimLink target={{ kind: "listing", id: listing.id }} token={listing.claimToken} rotatable />
+              <ClaimLink target={{ kind: "listing", id: listing.id }} status={listing.claimLink} rotatable />
               {listing.juror && (
                 <p className="text-xs leading-relaxed text-black/55">
                   Bundled with juror{" "}
@@ -152,6 +152,21 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
                     : ": their juror link claims this listing too."}
                 </p>
               )}
+            </section>
+          )}
+
+          {listing.isClaimed && (
+            <section className="admin-panel grid gap-4" aria-labelledby="claimed-heading">
+              <p id="claimed-heading" className="admin-eyebrow">
+                Claimed
+              </p>
+              <p className="text-xs leading-relaxed text-black/55">
+                Claimed by the wrong account, or changing hands? Take it back: the owner is cleared and the listing is
+                unclaimed again, ready for a new claim link. It is written to the audit log.
+              </p>
+              <div>
+                <UnclaimButton target={{ kind: "listing", id: listing.id }} />
+              </div>
             </section>
           )}
 
@@ -202,6 +217,20 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
                       {listing.creator.isClaimed ? " (claimed)" : " (unclaimed)"}
                     </>
                   )}
+                  {!listing.creator && listing.creditMatch && (
+                    <>
+                      {" · "}not linked: matches{" "}
+                      <a
+                        href={storefrontCreatorUrl(listing.creditMatch.slug)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline underline-offset-4"
+                      >
+                        {listing.creditMatch.name}
+                      </a>
+                      {listing.creditMatch.isClaimed ? " (claimed by another account)" : " (unclaimed)"}
+                    </>
+                  )}
                 </dd>
               </div>
               {listing.juror && (
@@ -241,6 +270,16 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
                       : `${SOURCE_LABEL[listing.source]} (no submitter)`}
                 </dd>
               </div>
+              <div className="wide">
+                <dt>Owner</dt>
+                <dd>
+                  {listing.owner
+                    ? `${listing.owner.name} (${listing.owner.email})`
+                    : listing.canGrantOwnership
+                      ? "Nobody yet: approve with ownership to give it to the submitter"
+                      : "Nobody (unclaimed)"}
+                </dd>
+              </div>
             </dl>
           </section>
 
@@ -249,7 +288,9 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
               Danger zone
             </p>
             <p className="mb-5 text-xs leading-relaxed text-black/55">
-              Deletes the listing, its votes, its screenshots and its video for good.
+              Deletes the listing for good: screenshots, video, votes, jury scores, round votes, claims, briefs,
+              revisions, revoked awards and unsent posts. Sent posts, emails and the award log are kept without the
+              link. A site with an active award can&apos;t be deleted: revoke it on the Awards page first.
             </p>
             {deleteError && (
               <p role="alert" className="mb-4 text-sm font-medium">

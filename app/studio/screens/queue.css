@@ -217,3 +217,23 @@
   .st-queue-feed { transition: none; }
   .st-qp-item, .st-qm-item { transition: none; }
 }
+
+/* ── Pending: what Claude asked to send or publish (components/studio/queue/Pending.tsx) ── */
+.st-pending { display: grid; gap: 10px; margin: 0 0 22px; }
+.st-pending-title { margin: 0; font: 700 19px/1.2 var(--st-font); letter-spacing: -.02em; color: var(--st-ink); }
+.st-pending-title span { margin-left: 6px; color: var(--st-ink-2); font-weight: 600; }
+.st-pending-lede { margin: 0; font: 500 14px/1.4 var(--st-font); color: var(--st-ink-2); }
+.st-pending-list { display: grid; gap: 14px; }
+@media (min-width: 900px) { .st-pending-list { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); } }
+.st-pending-card { display: grid; gap: 10px; padding: 16px; border-radius: 26px; }
+.st-pending-kind { margin: 0; font: 600 12px/1 var(--st-font); letter-spacing: .04em; text-transform: uppercase; color: var(--st-ink-2); }
+.st-pending-summary { margin: 0; font: 600 16px/1.3 var(--st-font); color: var(--st-ink); overflow-wrap: anywhere; }
+.st-pending-facts { display: grid; gap: 6px; margin: 0; }
+.st-pending-facts > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; font: 500 14px/1.4 var(--st-font); }
+.st-pending-facts dt { color: var(--st-ink-2); }
+.st-pending-facts dd { margin: 0; color: var(--st-ink); overflow-wrap: anywhere; }
+.st-pending-text summary { cursor: pointer; font: 600 14px/1.4 var(--st-font); color: var(--st-ink); }
+.st-pending-text p { margin: 6px 0 0; white-space: pre-line; font: 400 14px/1.5 var(--st-font); color: var(--st-ink); overflow-wrap: anywhere; }
+.st-pending-media { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+.st-pending-media::-webkit-scrollbar { display: none; }
+.st-pending-media > img, .st-pending-media > video { height: 88px; width: auto; border-radius: 12px; box-shadow: var(--st-ring); }

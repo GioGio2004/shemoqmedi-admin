@@ -19,9 +19,11 @@ const OWN_SITE = "You can't vote on your own site.";
 export const NO_BADGE =
   "Community voting is open to creators with a site of their own listed here. Get one of your sites listed first.";
 
-/** True when the user made, owns or was pre-assigned this listing. */
+/** True when the user made, owns, submitted or was pre-assigned this listing. */
 async function isOwnSite(ctx: QueryCtx, listing: Doc<"listings">, userId: Id<"users">) {
   if (listing.ownerId === userId) return true;
+  // Submitting doesn't make you the owner, but it is still your own site to vote on.
+  if (listing.submittedBy === userId) return true;
   if (listing.creatorId) {
     const creator = await ctx.db.get(listing.creatorId);
     if (creator?.claimedBy === userId) return true;

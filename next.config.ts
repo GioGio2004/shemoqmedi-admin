@@ -1,6 +1,16 @@
 import type { NextConfig } from "next";
 import createMDX from "@next/mdx";
 
+/** Sent with every response of this app (admin, Studio, docs). */
+export const SECURITY_HEADERS = [
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+  { key: "Permissions-Policy", value: "camera=(), geolocation=(), microphone=(self)" },
+];
+
 const nextConfig: NextConfig = {
   // Verification builds can be pointed elsewhere with NEXT_BUILD_DIR so a
   // `next build` never churns the `.next` directory a running `next dev`
@@ -16,6 +26,14 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     return [
+      {
+        // Every page of the admin, Studio and docs. frame-ancestors 'none' (and
+        // X-Frame-Options for old browsers) stops other sites from loading the
+        // admin in a hidden frame and tricking a signed-in admin into clicking
+        // approve, publish or delete (clickjacking).
+        source: "/:path*",
+        headers: SECURITY_HEADERS,
+      },
       {
         // The service worker (push for the Studio and admin PWAs). Never
         // cached, so a fix reaches every installed app on its next visit,

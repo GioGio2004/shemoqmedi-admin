@@ -332,10 +332,12 @@ export const queueRoundup = internalMutation({
 /**
  * Who to email about a listing: its owner (or the owner of its creator
  * profile), else the creator's private contact email. Unclaimed listings get
- * their claim link (minted from `freshToken` on first use).
+ * a new claim link (from `freshToken`), bound to the address it is sent to.
  */
 export const studioContact = internalMutation({
-  args: { listingId: v.id("listings"), freshToken: v.string() },
+  // The address the email will actually go to when the caller overrides it
+  // (MCP send_email `to`): the claim link is bound to that address.
+  args: { listingId: v.id("listings"), freshToken: v.string(), sendTo: v.optional(v.string()) },
   returns: v.union(
     v.object({
       email: v.string(),
@@ -349,7 +351,7 @@ export const studioContact = internalMutation({
     }),
     v.null(),
   ),
-  handler: async (ctx, { listingId, freshToken }) => {
+  handler: async (ctx, { listingId, freshToken, sendTo }) => {
     const listing = await ctx.db.get(listingId);
     if (!listing) return null;
     const creator = listing.creatorId ? await ctx.db.get(listing.creatorId) : null;
@@ -362,7 +364,8 @@ export const studioContact = internalMutation({
       name: owner?.name ?? creator?.name ?? listing.creditName,
       title: listing.title,
       pageUrl: `${siteUrl()}${sitePath(listing.slug)}`,
-      claimUrl: listing.isClaimed ? null : await ensureListingClaimUrl(ctx, listingId, freshToken),
+      // Bound to the address it is emailed to: only that inbox's account can claim with it.
+      claimUrl: listing.isClaimed ? null : await ensureListingClaimUrl(ctx, listingId, freshToken, sendTo?.trim() || email),
       creatorId: creator?._id ?? null,
       isOwner: Boolean(owner),
       isPublic: isPublicStatus(listing.status),
@@ -692,6 +695,64 @@ export async function approvePost(ctx: MutationCtx, id: Id<"socialPosts">, by: I
   if (!post) fail("Post not found.");
   const status = readStatus(post.status);
   if (status !== "waiting") fail(`This post is ${status}, not waiting.`);
+  await assertApprovable(ctx, post);
+  const now = Date.now();
+  const { publishJobId, publishRun } = await schedulePublish(ctx, post);
+  await ctx.db.patch(id, {
+    status: "scheduled",
+    approvedAt: now,
+    approvedBy: by,
+    publishJobId,
+    publishRun,
+    // No lease from an earlier run that died: the new schedule must not read as stalled (retryPost, socialPublishState).
+    publishingUntil: undefined,
+    // Older award rows keep their screenshot in `payload`: publishing reads `media`.
+    ...(post.media ? {} : { media: postMedia(post) }),
+    error: undefined,
+    updatedAt: now,
+  });
+  if (post.kind === "new_listing" && post.listingId) {
+    await ctx.scheduler.runAfter(0, internal.emails.featured, { listingId: post.listingId, postId: id });
+  }
+}
+
+/**
+ * approvePost without the approving: same checks, nothing written. The MCP
+ * connector runs it when Claude asks to publish, so a post that couldn't be
+ * approved is refused before it reaches the admin's pending actions.
+ */
+export async function checkApprovable(ctx: QueryCtx, id: Id<"socialPosts">) {
+  const post = await ctx.db.get(id);
+  if (!post) fail("Post not found.");
+  const status = readStatus(post.status);
+  if (status !== "waiting") fail(`This post is ${status}, not waiting.`);
+  await assertApprovable(ctx, post);
+  return post;
+}
+
+/** publishPost's checks without publishing (a scheduled post counts as waiting: it is unscheduled first). */
+export async function checkPublishable(ctx: QueryCtx, id: Id<"socialPosts">) {
+  const post = await ctx.db.get(id);
+  if (!post) fail("Post not found.");
+  const status = readStatus(post.status);
+  if (status === "failed" || status === "approved") {
+    fail(`This post is ${status}: retry it instead (or edit it, which sends it back to waiting).`);
+  } else if (status !== "waiting" && status !== "scheduled") fail(`This post is ${status}; it can't be published again.`);
+  if (status === "scheduled" && isPublishing(post)) fail("This post is being published right now; wait a few minutes.");
+  await assertApprovable(ctx, post);
+  return post;
+}
+
+/** retryPost's checks without scheduling. */
+export async function checkRetryable(ctx: QueryCtx, id: Id<"socialPosts">) {
+  const post = await ctx.db.get(id);
+  if (!post) fail("Post not found.");
+  assertRetryable(post);
+  return post;
+}
+
+/** The checks approval makes (captions, media, the award and listing still public). */
+async function assertApprovable(ctx: QueryCtx, post: Doc<"socialPosts">) {
   const captions = post.captions ?? {};
   if (captionedNetworks(post).length === 0) fail("Write at least one caption first.");
   if (post.placement === "story") {
@@ -714,24 +775,6 @@ export async function approvePost(ctx: MutationCtx, id: Id<"socialPosts">, by: I
   if (post.listingId) {
     const listing = await ctx.db.get(post.listingId);
     if (!listing || !isPublicStatus(listing.status)) fail("This site isn't public any more: reject the post instead.");
-  }
-  const now = Date.now();
-  const { publishJobId, publishRun } = await schedulePublish(ctx, post);
-  await ctx.db.patch(id, {
-    status: "scheduled",
-    approvedAt: now,
-    approvedBy: by,
-    publishJobId,
-    publishRun,
-    // No lease from an earlier run that died: the new schedule must not read as stalled (retryPost, socialPublishState).
-    publishingUntil: undefined,
-    // Older award rows keep their screenshot in `payload`: publishing reads `media`.
-    ...(post.media ? {} : { media: postMedia(post) }),
-    error: undefined,
-    updatedAt: now,
-  });
-  if (post.kind === "new_listing" && post.listingId) {
-    await ctx.scheduler.runAfter(0, internal.emails.featured, { listingId: post.listingId, postId: id });
   }
 }
 
@@ -767,6 +810,19 @@ export function isLegacyApproved(post: Doc<"socialPosts">) {
 export async function retryPost(ctx: MutationCtx, id: Id<"socialPosts">) {
   const post = await ctx.db.get(id);
   if (!post) fail("Post not found.");
+  assertRetryable(post);
+  const { publishJobId, publishRun } = await schedulePublish(ctx, post);
+  await ctx.db.patch(id, {
+    status: "scheduled",
+    publishJobId,
+    publishRun,
+    publishingUntil: undefined,
+    error: undefined,
+    updatedAt: Date.now(),
+  });
+}
+
+function assertRetryable(post: Doc<"socialPosts">) {
   const status = readStatus(post.status);
   if (isPublishing(post)) fail("This post is being published right now; wait a few minutes.");
   const crashed = status === "scheduled" && !!post.publishingUntil;
@@ -787,15 +843,6 @@ export async function retryPost(ctx: MutationCtx, id: Id<"socialPosts">) {
         : "Every network this post can go to is already sent; the others can't take it (a story goes to Instagram and Facebook only, and a network needs media meant for it).",
     );
   }
-  const { publishJobId, publishRun } = await schedulePublish(ctx, post);
-  await ctx.db.patch(id, {
-    status: "scheduled",
-    publishJobId,
-    publishRun,
-    publishingUntil: undefined,
-    error: undefined,
-    updatedAt: Date.now(),
-  });
 }
 
 /**
@@ -809,6 +856,7 @@ export async function createPost(
   input: {
     kind: SocialKind;
     listingId?: Id<"listings">;
+    awardId?: Id<"awards">; // award posts: the award it announces (checked by the caller)
     facts?: unknown;
     captions?: Partial<Record<Network, string>>;
     media?: MediaItem[];
@@ -823,6 +871,7 @@ export async function createPost(
   const id = await queuePost(ctx, {
     kind: input.kind,
     listingId: listing?._id,
+    awardId: input.awardId,
     facts: base ? { ...base, ...extra } : (input.facts ?? {}),
     media: base && !story ? base.screenshots.map((url) => ({ kind: "image" as const, url, role: "screenshot" })) : [],
   });

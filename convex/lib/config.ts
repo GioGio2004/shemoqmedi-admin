@@ -75,3 +75,23 @@ export function checkConfig(config: AwardConfig) {
     throw new Error('The Site of the Year date must look like "01-20".');
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MCP connector limits (convex/pendingActions.ts). Not admin-editable: a
+// prompt-injected agent must not be able to raise them, so they change only
+// with a deploy.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type McpCaps = {
+  /** Emails Claude may ask to send (send_email) in any 24 hours. */
+  emails: number;
+  /** Broadcasts Claude may ask to send in any 24 hours. */
+  broadcasts: number;
+  /** Posts Claude may ask to publish (approve_post, publish_post, retry_post) in any 24 hours. */
+  posts: number;
+};
+
+export const MCP_DAILY_CAPS: McpCaps = { emails: 20, broadcasts: 1, posts: 10 };
+
+/** How long a request waits for an admin before it can no longer be approved. */
+export const PENDING_ACTION_TTL_MS = 3 * 24 * 60 * 60 * 1000;

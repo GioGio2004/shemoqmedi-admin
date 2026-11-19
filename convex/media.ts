@@ -6,7 +6,7 @@ import { internal } from "./_generated/api";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { LIMITS } from "./lib/taxonomy";
 import { assertMedia, fail, slugify } from "./lib/listingHelpers";
-import { cleanDuration, deleteMedia, mediaUrl, vMediaId, type MediaId } from "./lib/media";
+import { cleanDuration, deleteMedia, isAdminUser, mediaUrl, vMediaId, type MediaActor, type MediaId } from "./lib/media";
 import { R2_LISTING_KEY, deleteObject, headObject, presignPut, r2Configured, r2PublicUrl } from "./lib/r2";
 import { mediaDesign, mediaDetail } from "./lib/design";
 import { designViewOf, mediaDetails, mediaEntryOf, mediaEntryWithDesign, roleOf } from "./lib/mediaEntry";
@@ -101,6 +101,19 @@ export const uploadAuth = action({
   },
 });
 
+/**
+ * Registering a file that already has a row hands back that row only to the
+ * user who uploaded it (or an admin). Anyone else gets an error, not the id:
+ * the id is what listing mutations attach, and withdrawing a listing deletes
+ * its files, so someone else's id would let a stranger delete them (audit
+ * C-01). No second row is made either, since deleting it would delete the
+ * same ImageKit / R2 file.
+ */
+function reuseOwn(existing: Doc<"media">, user: Doc<"users">) {
+  if (existing.uploadedBy === user._id || isAdminUser(user)) return existing._id;
+  throw new ConvexError("That upload did not come from this site. Please upload it again.");
+}
+
 /** Record a finished ImageKit upload (screenshots only); returns the id listing mutations take. */
 export const register = mutation({
   args: {
@@ -129,7 +142,7 @@ export const register = mutation({
       .query("media")
       .withIndex("by_fileId", (q) => q.eq("fileId", args.fileId))
       .first();
-    if (existing) return existing._id;
+    if (existing) return reuseOwn(existing, user);
     const id = await ctx.db.insert("media", {
       ...args,
       uploadedBy: user._id,
@@ -274,7 +287,7 @@ export const registerVideo = mutation({
       .query("media")
       .withIndex("by_fileId", (q) => q.eq("fileId", key))
       .first();
-    if (existing) return existing._id;
+    if (existing) return reuseOwn(existing, user);
     const url = r2PublicUrl(key);
     if (!url) throw new ConvexError("Video uploads are not configured yet. Please try again later.");
     const id = await ctx.db.insert("media", {
@@ -419,18 +432,18 @@ async function collectLegacy(ctx: QueryCtx) {
 }
 
 /** Put `to` wherever `from` sits on a listing (cover, gallery or video), checking its type. */
-async function swapOnListing(ctx: MutationCtx, listing: Doc<"listings">, from: MediaId, to: MediaId) {
+async function swapOnListing(ctx: MutationCtx, listing: Doc<"listings">, from: MediaId, to: MediaId, by: MediaActor) {
   if (listing.coverId === from) {
-    await assertMedia(ctx, to, "Cover screenshot", "image");
+    await assertMedia(ctx, to, "Cover screenshot", "image", by);
     await ctx.db.patch(listing._id, { coverId: to, updatedAt: Date.now() });
   } else if (listing.galleryIds?.includes(from)) {
-    await assertMedia(ctx, to, "Screenshot", "image");
+    await assertMedia(ctx, to, "Screenshot", "image", by);
     await ctx.db.patch(listing._id, {
       galleryIds: listing.galleryIds.map((g) => (g === from ? to : g)),
       updatedAt: Date.now(),
     });
   } else if (listing.videoId === from) {
-    await assertMedia(ctx, to, "Preview video", "video");
+    await assertMedia(ctx, to, "Preview video", "video", by);
     await ctx.db.patch(listing._id, { videoId: to, updatedAt: Date.now() });
   } else {
     fail("That file is no longer on this listing. Reload and try again.");
@@ -532,8 +545,8 @@ export const adoptFile = internalMutation({
     if (!listing) fail("Listing not found.");
     checkLimits(file.kind, file.contentType, file.size);
     const to = await ctx.db.insert("media", { ...file, createdAt: Date.now() });
-    await swapOnListing(ctx, listing, from, to);
-    await deleteMedia(ctx, from);
+    await swapOnListing(ctx, listing, from, to, "server");
+    await deleteMedia(ctx, from, "server");
     return to;
   },
 });
@@ -619,11 +632,11 @@ export const adoptLegacy = mutation({
   args: { listingId: v.id("listings"), from: vMediaId, to: v.id("media") },
   returns: v.null(),
   handler: async (ctx, { listingId, from, to }) => {
-    await requireAdmin(ctx);
+    const admin = await requireAdmin(ctx);
     const listing = await ctx.db.get(listingId);
     if (!listing) fail("Listing not found.");
-    await swapOnListing(ctx, listing, from, to);
-    await deleteMedia(ctx, from);
+    await swapOnListing(ctx, listing, from, to, admin);
+    await deleteMedia(ctx, from, admin);
     return null;
   },
 });

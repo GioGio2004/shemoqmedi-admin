@@ -1,17 +1,25 @@
 // Secret claim links for pre-created entities.
 //
-// An admin pre-creates a jury profile and/or a listing (unclaimed) and copies
-// its link, https://www.shemoqmedi.space/claim/<token>, into an outreach DM or
-// email. Whoever opens it, signs in and confirms becomes the owner:
+// An admin pre-creates a jury profile and/or a listing (unclaimed) and mints
+// its link, https://www.shemoqmedi.space/claim/<token>, for an outreach DM or
+// email. The invited person opens it, signs in and confirms:
 //
 //   juror token   → the jury profile, plus every unclaimed listing pre-created
 //                   for that juror (listings.jurorId): the "bundle"
 //   listing token → that listing alone
 //
 // Tokens are 32 random bytes (64 hex characters), minted only in actions
-// (queries and mutations are deterministic), single-use, and moved to
-// `claimTokenUsed` on claim so an old link resolves to a redirect instead of an
-// error. Claiming a listing also makes its outbound links followed (dofollow).
+// (queries and mutations are deterministic). Only their SHA-256 is stored
+// (the claimLinks table), so the raw link exists in one place: the admin's
+// screen or the email it was minted for. Links expire after 14 days and work
+// once; a used link keeps redirecting its claimer to what they got.
+//
+// The link alone is not proof: when the invitation has an email (the juror's
+// profile email, or the address a studio email went to), the account that
+// claims must have that email. A juror claimed with no email to check stays
+// off the public jury until an admin activates it (activateJuror). Claiming a
+// listing also makes its outbound links followed (dofollow). Admins can take
+// a claim back (unclaim) to hand the profile or listing to someone else.
 
 import { v } from "convex/values";
 import { action, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
@@ -20,12 +28,18 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { juryCategory } from "./schema";
 import { mediaUrl } from "./lib/media";
-import { claimedListingPatch, fail, isPublicStatus } from "./lib/listingHelpers";
-import { isClaimedJuror, jurorOf, jurorPhoto } from "./jury";
+import { claimIntent, claimedListingPatch, fail, isPublicStatus } from "./lib/listingHelpers";
+import { DAY_MS } from "./lib/time";
+import { audit } from "./lib/awards";
+import { isClaimedJuror, isPublicJuror, jurorOf, jurorPhoto } from "./jury";
 import { listingPaths, scheduleIndexNow, siteUrl } from "./seo";
+import { claimLinkStatus, linkStatus, revokeClaimLinks, type Target } from "./lib/claimLinkRows";
 
 /** A claim token: exactly 64 lowercase hex characters (never a valid listing slug, which is at most 60). */
 export const CLAIM_TOKEN = /^[a-f0-9]{64}$/;
+
+/** How long a claim link works after it is minted. */
+export const CLAIM_LINK_TTL = 14 * DAY_MS;
 
 function newToken() {
   const bytes = new Uint8Array(32);
@@ -33,45 +47,70 @@ function newToken() {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** What is stored for a token: its SHA-256, hex. */
+export async function hashClaimToken(token: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 const claimUrl = (token: string) => `${siteUrl()}/claim/${token}`;
+
+const sameEmail = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** "ana.beridze@gmail.com" → "an•••@gmail.com": enough to pick the right account, not enough to harvest. */
+function maskEmail(email: string) {
+  const [local, domain] = email.trim().toLowerCase().split("@");
+  if (!local || !domain) return null;
+  return `${local.slice(0, local.length > 2 ? 2 : 1)}•••@${domain}`;
+}
 
 /** A fresh claim token. Call it in an action and pass the result to a mutation. */
 export const newClaimToken = () => newToken();
-
-/**
- * The claim link of an unclaimed listing, storing `freshToken` (minted by the
- * calling action with newClaimToken) on first use; null once it is claimed.
- * For server-side senders (studio emails, the MCP connector) whose caller
- * was already checked.
- */
-export async function ensureListingClaimUrl(
-  ctx: MutationCtx,
-  listingId: Id<"listings">,
-  freshToken: string,
-): Promise<string | null> {
-  const listing = await ctx.db.get(listingId);
-  if (!listing || listing.isClaimed || listing.status === "rejected") return null;
-  if (listing.claimToken) return claimUrl(listing.claimToken);
-  if (!CLAIM_TOKEN.test(freshToken)) fail("Invalid token.");
-  await ctx.db.patch(listingId, { claimToken: freshToken, updatedAt: Date.now() });
-  return claimUrl(freshToken);
-}
 
 const target = v.union(
   v.object({ kind: v.literal("juror"), id: v.id("jurors") }),
   v.object({ kind: v.literal("listing"), id: v.id("listings") }),
 );
 
-async function jurorByToken(ctx: QueryCtx, field: "claimToken" | "claimTokenUsed", token: string) {
-  return field === "claimToken"
-    ? await ctx.db.query("jurors").withIndex("by_claimToken", (q) => q.eq("claimToken", token)).first()
-    : await ctx.db.query("jurors").withIndex("by_claimTokenUsed", (q) => q.eq("claimTokenUsed", token)).first();
+/** Stores the hash of a new link for a target. Returns the row and when it expires. */
+async function mintLink(
+  ctx: MutationCtx,
+  t: Target,
+  token: string,
+  opts: { email?: string; createdBy?: Id<"users">; now?: number } = {},
+) {
+  if (!CLAIM_TOKEN.test(token)) fail("Invalid token.");
+  const now = opts.now ?? Date.now();
+  const expiresAt = now + CLAIM_LINK_TTL;
+  const id = await ctx.db.insert("claimLinks", {
+    tokenHash: await hashClaimToken(token),
+    ...(t.kind === "juror" ? { jurorId: t.id } : { listingId: t.id }),
+    email: opts.email?.trim() ? opts.email.trim().toLowerCase() : undefined,
+    createdBy: opts.createdBy,
+    createdAt: now,
+    expiresAt,
+  });
+  return { id, expiresAt };
 }
 
-async function listingByToken(ctx: QueryCtx, field: "claimToken" | "claimTokenUsed", token: string) {
-  return field === "claimToken"
-    ? await ctx.db.query("listings").withIndex("by_claimToken", (q) => q.eq("claimToken", token)).first()
-    : await ctx.db.query("listings").withIndex("by_claimTokenUsed", (q) => q.eq("claimTokenUsed", token)).first();
+/**
+ * A new claim link for an unclaimed listing, from `freshToken` (minted by the
+ * calling action with newClaimToken), bound to `email` when the link is about
+ * to be emailed there; null once the listing is claimed. For server-side
+ * senders (studio emails, the MCP connector) whose caller was already
+ * checked. Every call makes a new link; earlier ones keep working until they
+ * expire, so a link already sent is never broken by a later one.
+ */
+export async function ensureListingClaimUrl(
+  ctx: MutationCtx,
+  listingId: Id<"listings">,
+  freshToken: string,
+  email?: string,
+): Promise<string | null> {
+  const listing = await ctx.db.get(listingId);
+  if (!listing || listing.isClaimed || listing.status === "rejected") return null;
+  await mintLink(ctx, { kind: "listing", id: listingId }, freshToken, { email });
+  return claimUrl(freshToken);
 }
 
 /** Unclaimed listings pre-created for a juror: claimed together with the profile. */
@@ -87,38 +126,44 @@ async function bundledListings(ctx: QueryCtx, jurorId: Id<"jurors">) {
 // Admin: minting links
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Stores a freshly minted token (or keeps the current one unless rotating). Returns the live token. */
+/** Stores a freshly minted token for an unclaimed target (revoking every older link when rotating). */
 export const storeToken = internalMutation({
   args: { target, token: v.string(), rotate: v.boolean() },
-  returns: v.string(),
+  returns: v.object({ expiresAt: v.number() }),
   handler: async (ctx, { target, token, rotate }) => {
-    await requireAdmin(ctx);
-    if (!CLAIM_TOKEN.test(token)) fail("Invalid token.");
+    const admin = await requireAdmin(ctx);
     const row = target.kind === "juror" ? await ctx.db.get(target.id) : await ctx.db.get(target.id);
     if (!row) fail(target.kind === "juror" ? "Juror not found." : "Listing not found.");
     const claimed =
       target.kind === "juror" ? isClaimedJuror(row as Doc<"jurors">) : (row as Doc<"listings">).isClaimed;
     if (claimed) fail("This has already been claimed, so it has no claim link.");
-    if (row.claimToken && !rotate) return row.claimToken;
-    await ctx.db.patch(target.id, { claimToken: token, updatedAt: Date.now() });
-    return token;
+    if (rotate) {
+      await revokeClaimLinks(ctx, target, Date.now());
+      // A legacy plaintext link dies with the rest.
+      if (row.claimToken) await ctx.db.patch(target.id, { claimToken: undefined });
+    }
+    const { expiresAt } = await mintLink(ctx, target, token, { createdBy: admin._id });
+    return { expiresAt };
   },
 });
 
 /**
- * Admin: the claim link of an unclaimed juror or listing, minting one on first
- * use. `rotate` replaces it (the old link stops working).
+ * Admin: a new claim link for an unclaimed juror or listing. The URL is in
+ * this result only and can't be read back later (only its hash is stored),
+ * so it is copied now. Earlier links keep working until they expire, unless
+ * `rotate` kills them first.
  */
 export const link = action({
   args: { target, rotate: v.optional(v.boolean()) },
-  returns: v.object({ url: v.string(), token: v.string() }),
-  handler: async (ctx, { target, rotate }): Promise<{ url: string; token: string }> => {
-    const token: string = await ctx.runMutation(internal.claimLinks.storeToken, {
+  returns: v.object({ url: v.string(), token: v.string(), expiresAt: v.number() }),
+  handler: async (ctx, { target, rotate }): Promise<{ url: string; token: string; expiresAt: number }> => {
+    const token = newToken();
+    const { expiresAt }: { expiresAt: number } = await ctx.runMutation(internal.claimLinks.storeToken, {
       target,
-      token: newToken(),
+      token,
       rotate: rotate ?? false,
     });
-    return { url: claimUrl(token), token };
+    return { url: claimUrl(token), token, expiresAt };
   },
 });
 
@@ -146,19 +191,21 @@ async function sendClaimEmail(to: string, name: string, link: string, bundled: n
   const text = [
     `Hi ${first},`,
     "",
-    "We'd like you on the founding jury of Shemoqmedi, the website awards platform. Jurors score sites in their voting week on design, usability, creativity and code, and leave a short comment that is shown on each site's page.",
+    "We'd like you on the founding jury of Shemoqmedi, the website awards platform. Jurors score sites in their voting week on design, usability, creativity and content, and leave a short comment that is shown on each site's page.",
     "",
     `Your jury profile is ready. Open this private link to claim it:${extra}`,
     link,
+    "",
+    `Sign in with this address (${to}) to claim it. The link works once and expires in 14 days.`,
     "",
     "Shemoqmedi",
   ].join("\n");
   const html = `<div style="font-family:Inter,Arial,sans-serif;color:#000;max-width:520px;line-height:1.6">
 <p>Hi ${escapeHtml(first)},</p>
-<p>We'd like you on the founding jury of <strong>Shemoqmedi</strong>, the website awards platform. Jurors score sites in their voting week on design, usability, creativity and code, and leave a short comment that is shown on each site's page.</p>
+<p>We'd like you on the founding jury of <strong>Shemoqmedi</strong>, the website awards platform. Jurors score sites in their voting week on design, usability, creativity and content, and leave a short comment that is shown on each site's page.</p>
 <p>Your jury profile is ready.${escapeHtml(extra)}</p>
 <p><a href="${escapeHtml(link)}" style="display:inline-block;background:#000;color:#fff;padding:12px 22px;border-radius:999px;text-decoration:none;font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase">Claim your jury spot</a></p>
-<p style="font-size:12px;color:#555">This link is private and works once.</p>
+<p style="font-size:12px;color:#555">Sign in with this address (${escapeHtml(to)}) to claim it. This link is private, works once and expires in 14 days.</p>
 </div>`;
   try {
     const res = await fetch("https://api.resend.com/emails", {
@@ -176,25 +223,22 @@ async function sendClaimEmail(to: string, name: string, link: string, bundled: n
   }
 }
 
-/** Admin: email an unclaimed juror their claim link (needs their email on the profile). */
+/** Admin: email an unclaimed juror a new claim link (needs their email on the profile). */
 export const emailJuror = action({
   args: { jurorId: v.id("jurors") },
   returns: v.object({ url: v.string(), sent: v.boolean(), error: v.union(v.string(), v.null()) }),
   handler: async (ctx, { jurorId }): Promise<{ url: string; sent: boolean; error: string | null }> => {
     const contact = await ctx.runQuery(internal.claimLinks.jurorContact, { jurorId });
     if (!contact.email) fail("Add the juror's email to their profile first, or copy the link and send it yourself.");
-    const token: string = await ctx.runMutation(internal.claimLinks.storeToken, {
-      target: { kind: "juror", id: jurorId },
-      token: newToken(),
-      rotate: false,
-    });
+    const token = newToken();
+    await ctx.runMutation(internal.claimLinks.storeToken, { target: { kind: "juror", id: jurorId }, token, rotate: false });
     const url = claimUrl(token);
     const error = await sendClaimEmail(contact.email, contact.name, url, contact.bundled);
     return { url, sent: error === null, error };
   },
 });
 
-/** Admin: everything still waiting to be claimed, for outreach. */
+/** Admin: everything still waiting to be claimed, for outreach. Link status only, never a link. */
 export const outreach = query({
   args: {},
   returns: v.object({
@@ -204,7 +248,7 @@ export const outreach = query({
         name: v.string(),
         title: v.string(),
         email: v.union(v.string(), v.null()),
-        claimToken: v.union(v.string(), v.null()),
+        claimLink: claimLinkStatus,
         listings: v.array(v.object({ id: v.id("listings"), title: v.string() })),
         createdAt: v.number(),
       }),
@@ -216,7 +260,7 @@ export const outreach = query({
         title: v.string(),
         status: v.string(),
         isStartup: v.boolean(),
-        claimToken: v.union(v.string(), v.null()),
+        claimLink: claimLinkStatus,
         juror: v.union(v.string(), v.null()), // bundled with this (unclaimed) juror
         createdAt: v.number(),
       }),
@@ -238,24 +282,136 @@ export const outreach = query({
             name: j.name,
             title: j.title,
             email: j.email ?? null,
-            claimToken: j.claimToken ?? null,
+            claimLink: await linkStatus(ctx, { kind: "juror", id: j._id }, j),
             listings: (await bundledListings(ctx, j._id)).map((l) => ({ id: l._id, title: l.title })),
             createdAt: j.joinedAt,
           })),
       ),
-      listings: listings.map((l) => ({
-        id: l._id,
-        slug: l.slug,
-        title: l.title,
-        status: l.status,
-        isStartup: l.isStartup ?? false,
-        claimToken: l.claimToken ?? null,
-        juror: (l.jurorId && jurorName.get(l.jurorId)) || null,
-        createdAt: l.createdAt,
-      })),
+      listings: await Promise.all(
+        listings.map(async (l) => ({
+          id: l._id,
+          slug: l.slug,
+          title: l.title,
+          status: l.status,
+          isStartup: l.isStartup ?? false,
+          claimLink: await linkStatus(ctx, { kind: "listing", id: l._id }, l),
+          juror: (l.jurorId && jurorName.get(l.jurorId)) || null,
+          createdAt: l.createdAt,
+        })),
+      ),
     };
   },
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// What a link points to, and whether it can still be used
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A link row, or a legacy plaintext token read off the juror/listing itself (id null). */
+type FoundLink = {
+  id: Id<"claimLinks"> | null;
+  target: Target;
+  email?: string;
+  expiresAt: number | null; // null: legacy, no expiry until the migration gives it one
+  usedBy?: Id<"users">;
+  revoked: boolean;
+};
+
+async function findLink(ctx: QueryCtx, token: string): Promise<FoundLink | null> {
+  const tokenHash = await hashClaimToken(token);
+  const row = await ctx.db
+    .query("claimLinks")
+    .withIndex("by_tokenHash", (q) => q.eq("tokenHash", tokenHash))
+    .first();
+  if (row) {
+    const t: Target | null = row.jurorId
+      ? { kind: "juror", id: row.jurorId }
+      : row.listingId
+        ? { kind: "listing", id: row.listingId }
+        : null;
+    if (!t) return null;
+    return { id: row._id, target: t, email: row.email, expiresAt: row.expiresAt, usedBy: row.usedBy, revoked: !!row.revokedAt };
+  }
+
+  // Legacy plaintext tokens, read until migrations:hashClaimTokens has moved them.
+  const juror = await ctx.db.query("jurors").withIndex("by_claimToken", (q) => q.eq("claimToken", token)).first();
+  if (juror) return { id: null, target: { kind: "juror", id: juror._id }, expiresAt: null, revoked: false };
+  const listing = await ctx.db.query("listings").withIndex("by_claimToken", (q) => q.eq("claimToken", token)).first();
+  if (listing) return { id: null, target: { kind: "listing", id: listing._id }, expiresAt: null, revoked: false };
+  const usedJuror = await ctx.db
+    .query("jurors")
+    .withIndex("by_claimTokenUsed", (q) => q.eq("claimTokenUsed", token))
+    .first();
+  if (usedJuror) {
+    const usedBy = usedJuror.userId;
+    return { id: null, target: { kind: "juror", id: usedJuror._id }, expiresAt: null, usedBy, revoked: !usedBy };
+  }
+  const usedListing = await ctx.db
+    .query("listings")
+    .withIndex("by_claimTokenUsed", (q) => q.eq("claimTokenUsed", token))
+    .first();
+  if (usedListing) {
+    const usedBy = usedListing.ownerId;
+    return { id: null, target: { kind: "listing", id: usedListing._id }, expiresAt: null, usedBy, revoked: !usedBy };
+  }
+  return null;
+}
+
+/** Where a claimed juror or listing lives now (for used links and after claiming). */
+function jurorHome(j: Doc<"jurors">) {
+  return j.active ? `/jury/${j.slug}` : "/jury";
+}
+function listingHome(l: Doc<"listings">) {
+  return isPublicStatus(l.status) ? `/sites/${l.slug}` : "/account";
+}
+
+type Inspection =
+  | { state: "invalid" }
+  | { state: "expired" }
+  | { state: "claimed"; kind: "juror" | "listing"; redirect: string; ownerId: Id<"users"> | null; juror: Doc<"jurors"> | null }
+  | {
+      state: "open";
+      kind: "juror" | "bundle" | "listing";
+      juror: Doc<"jurors"> | null;
+      listings: Doc<"listings">[];
+      invitedEmail: string | null;
+    };
+
+async function inspect(ctx: QueryCtx, link: FoundLink, now: number): Promise<Inspection> {
+  if (link.revoked) return { state: "invalid" };
+  const expired = link.expiresAt !== null && link.expiresAt <= now;
+
+  if (link.target.kind === "juror") {
+    const juror = await ctx.db.get(link.target.id);
+    if (!juror) return { state: "invalid" };
+    if (isClaimedJuror(juror)) {
+      // Taken back by an admin and claimed again since: this link is dead.
+      if (link.usedBy && link.usedBy !== juror.userId) return { state: "invalid" };
+      return { state: "claimed", kind: "juror", redirect: jurorHome(juror), ownerId: juror.userId ?? null, juror };
+    }
+    // Used, then an admin took the claim back: a new owner needs a new link.
+    if (link.usedBy) return { state: "invalid" };
+    if (expired) return { state: "expired" };
+    const listings = await bundledListings(ctx, juror._id);
+    return {
+      state: "open",
+      kind: listings.length > 0 ? "bundle" : "juror",
+      juror,
+      listings,
+      invitedEmail: juror.email ?? null,
+    };
+  }
+
+  const listing = await ctx.db.get(link.target.id);
+  if (!listing) return { state: "invalid" };
+  if (listing.isClaimed) {
+    if (link.usedBy && link.usedBy !== listing.ownerId) return { state: "invalid" };
+    return { state: "claimed", kind: "listing", redirect: listingHome(listing), ownerId: listing.ownerId ?? null, juror: null };
+  }
+  if (link.usedBy) return { state: "invalid" };
+  if (expired) return { state: "expired" };
+  return { state: "open", kind: "listing", juror: null, listings: [listing], invitedEmail: link.email ?? null };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public: the /claim/<token> page
@@ -311,83 +467,76 @@ async function previewListing(ctx: QueryCtx, l: Doc<"listings">) {
   };
 }
 
-/** Where a claimed juror or listing lives now (for used links and after claiming). */
-function jurorHome(j: Doc<"jurors">) {
-  return j.active ? `/jury/${j.slug}` : "/jury";
-}
-function listingHome(l: Doc<"listings">) {
-  return isPublicStatus(l.status) ? `/sites/${l.slug}` : "/account";
-}
-
 /**
  * What a claim link points to. "open": claimable (kind juror, bundle or
- * listing, with previews). "claimed": already used (redirect to the claimed
- * profile or listing). "invalid": unknown, rotated or malformed.
+ * listing, with previews, and a masked hint of the invited email when there
+ * is one). "claimed": already used (redirect to the claimed profile or
+ * listing). "expired": older than 14 days. "invalid": unknown, rotated,
+ * revoked or malformed.
  */
 export const resolve = query({
   args: { token: v.string() },
   returns: v.object({
-    state: v.union(v.literal("open"), v.literal("claimed"), v.literal("invalid")),
+    state: v.union(v.literal("open"), v.literal("claimed"), v.literal("expired"), v.literal("invalid")),
     kind: v.union(v.literal("juror"), v.literal("bundle"), v.literal("listing"), v.null()),
     juror: v.union(jurorPreview, v.null()),
     listings: v.array(listingPreview),
     redirect: v.union(v.string(), v.null()),
+    emailHint: v.union(v.string(), v.null()), // "an•••@gmail.com": sign in with this address
   }),
   handler: async (ctx, { token }) => {
-    const none = { juror: null, listings: [], redirect: null };
-    if (!CLAIM_TOKEN.test(token)) return { state: "invalid" as const, kind: null, ...none };
-
-    const juror = await jurorByToken(ctx, "claimToken", token);
-    if (juror && !isClaimedJuror(juror)) {
-      const listings = await bundledListings(ctx, juror._id);
-      return {
-        state: "open" as const,
-        kind: listings.length > 0 ? ("bundle" as const) : ("juror" as const),
-        juror: await previewJuror(ctx, juror),
-        listings: await Promise.all(listings.map((l) => previewListing(ctx, l))),
-        redirect: null,
-      };
-    }
-    const listing = await listingByToken(ctx, "claimToken", token);
-    if (listing && !listing.isClaimed) {
-      return {
-        state: "open" as const,
-        kind: "listing" as const,
-        juror: null,
-        listings: [await previewListing(ctx, listing)],
-        redirect: null,
-      };
-    }
-    const usedJuror = await jurorByToken(ctx, "claimTokenUsed", token);
-    if (usedJuror) return { state: "claimed" as const, kind: "juror" as const, ...none, redirect: jurorHome(usedJuror) };
-    const usedListing = await listingByToken(ctx, "claimTokenUsed", token);
-    if (usedListing) {
-      return { state: "claimed" as const, kind: "listing" as const, ...none, redirect: listingHome(usedListing) };
-    }
-    return { state: "invalid" as const, kind: null, ...none };
+    const none = { kind: null, juror: null, listings: [], redirect: null, emailHint: null };
+    if (!CLAIM_TOKEN.test(token)) return { ...none, state: "invalid" as const };
+    const link = await findLink(ctx, token);
+    if (!link) return { ...none, state: "invalid" as const };
+    const seen = await inspect(ctx, link, Date.now());
+    if (seen.state === "invalid" || seen.state === "expired") return { ...none, state: seen.state };
+    if (seen.state === "claimed") return { ...none, state: "claimed" as const, kind: seen.kind, redirect: seen.redirect };
+    return {
+      state: "open" as const,
+      kind: seen.kind,
+      juror: seen.juror ? await previewJuror(ctx, seen.juror) : null,
+      listings: await Promise.all(seen.listings.map((l) => previewListing(ctx, l))),
+      redirect: null,
+      emailHint: seen.invitedEmail ? maskEmail(seen.invitedEmail) : null,
+    };
   },
 });
 
-/** Approving a claim (by link or by request) rejects other pending requests for that listing. */
+/**
+ * Approving a claim (by link or by request) rejects other pending ownership
+ * claims for that listing. Removal requests stay open: someone asking for
+ * the site to come down still deserves an answer once it has an owner.
+ */
 export async function rejectCompetingClaims(ctx: MutationCtx, listingId: Id<"listings">, now: number) {
   const pending = await ctx.db
     .query("claims")
     .withIndex("by_listing", (q) => q.eq("listingId", listingId))
     .collect();
   for (const c of pending) {
-    if (c.status === "pending") {
+    if (c.status === "pending" && claimIntent(c) === "claim") {
       await ctx.db.patch(c._id, { status: "rejected", reviewNote: "The site was claimed by its owner.", reviewedAt: now });
     }
   }
 }
 
-async function claimListing(ctx: MutationCtx, listing: Doc<"listings">, userId: Id<"users">, now: number) {
+async function claimListing(
+  ctx: MutationCtx,
+  listing: Doc<"listings">,
+  userId: Id<"users">,
+  now: number,
+  keep?: Id<"claimLinks">,
+) {
   await ctx.db.patch(listing._id, claimedListingPatch(listing, userId, now));
   await rejectCompetingClaims(ctx, listing._id, now);
+  await revokeClaimLinks(ctx, { kind: "listing", id: listing._id }, now, keep);
 }
 
+const PENDING_REDIRECT = "/account?jury=pending";
+
 /**
- * The signed-in user claims what the link points to. Returns where to go next.
+ * The signed-in user claims what the link points to. Returns where to go
+ * next; `pending` when the jury profile waits for an admin to activate it.
  * Re-opening a link you already used just returns its destination.
  */
 export const claim = mutation({
@@ -395,54 +544,162 @@ export const claim = mutation({
   returns: v.object({
     kind: v.union(v.literal("juror"), v.literal("bundle"), v.literal("listing")),
     redirect: v.string(),
+    pending: v.boolean(),
   }),
   handler: async (ctx, { token }) => {
     const user = await requireUser(ctx);
     if (!CLAIM_TOKEN.test(token)) fail("This claim link is not valid.");
     const now = Date.now();
+    const link = await findLink(ctx, token);
+    if (!link) fail("This claim link is not valid. Ask us for a new one.");
+    const seen = await inspect(ctx, link, now);
 
-    const juror = await jurorByToken(ctx, "claimToken", token);
-    if (juror && !isClaimedJuror(juror)) {
+    if (seen.state === "invalid") fail("This claim link is not valid. Ask us for a new one.");
+    if (seen.state === "expired") fail("This claim link has expired: links work for 14 days. Ask us for a new one.");
+    if (seen.state === "claimed") {
+      if (seen.ownerId !== user._id) {
+        fail("This claim link has already been used by another account. If that wasn't you, contact us.");
+      }
+      if (seen.juror?.claimPending) return { kind: "juror" as const, redirect: PENDING_REDIRECT, pending: true };
+      return { kind: seen.kind, redirect: seen.kind === "juror" ? "/jury/profile" : seen.redirect, pending: false };
+    }
+
+    // Bound to the invited address: the link alone could have been forwarded.
+    if (seen.invitedEmail && !sameEmail(seen.invitedEmail, user.email)) {
+      fail(
+        `This invitation was sent to a different email address. You're signed in as ${user.email}. ` +
+          "Sign out and sign in with the address the invitation was sent to.",
+      );
+    }
+    if (seen.juror) {
       const existing = await jurorOf(ctx, user._id);
-      if (existing && existing._id !== juror._id) {
+      if (existing && existing._id !== seen.juror._id) {
         fail(`This account already has a jury profile (${existing.name}). Sign in with another account to claim this one.`);
       }
-      const listings = await bundledListings(ctx, juror._id);
+    }
+
+    // A legacy plaintext link becomes a hashed row now, so it is burned like any other.
+    let linkId = link.id;
+    if (!linkId) {
+      linkId = (await mintLink(ctx, link.target, token, { now })).id;
+      await ctx.db.patch(link.target.id, { claimToken: undefined });
+    }
+    await ctx.db.patch(linkId, { usedBy: user._id, usedAt: now });
+
+    if (seen.juror) {
+      const juror = seen.juror;
+      // Public at once only when the account's email matched the invitation.
+      const verified = seen.invitedEmail !== null;
       await ctx.db.patch(juror._id, {
         userId: user._id,
         status: "claimed",
-        claimToken: undefined,
-        claimTokenUsed: token,
         claimedAt: now,
-        active: true,
+        active: verified,
+        claimPending: verified ? undefined : true,
         updatedAt: now,
       });
-      for (const l of listings) await claimListing(ctx, l, user._id, now);
-      const paths: (string | null)[] = ["/jury", `/jury/${juror.slug}`];
-      for (const l of listings) if (isPublicStatus(l.status)) paths.push(...(await listingPaths(ctx, l)));
-      await scheduleIndexNow(ctx, paths);
-      return { kind: listings.length > 0 ? ("bundle" as const) : ("juror" as const), redirect: "/jury/profile?claimed=1" };
+      await revokeClaimLinks(ctx, { kind: "juror", id: juror._id }, now, linkId);
+      for (const l of seen.listings) await claimListing(ctx, l, user._id, now);
+      const paths: (string | null)[] = verified ? ["/jury", `/jury/${juror.slug}`] : [];
+      for (const l of seen.listings) if (isPublicStatus(l.status)) paths.push(...(await listingPaths(ctx, l)));
+      if (paths.length > 0) await scheduleIndexNow(ctx, paths);
+      const kind = seen.listings.length > 0 ? ("bundle" as const) : ("juror" as const);
+      return verified
+        ? { kind, redirect: "/jury/profile?claimed=1", pending: false }
+        : { kind, redirect: PENDING_REDIRECT, pending: true };
     }
 
-    const listing = await listingByToken(ctx, "claimToken", token);
-    if (listing && !listing.isClaimed) {
-      await claimListing(ctx, listing, user._id, now);
+    const listing = seen.listings[0];
+    await claimListing(ctx, listing, user._id, now, linkId);
+    if (isPublicStatus(listing.status)) await scheduleIndexNow(ctx, await listingPaths(ctx, listing));
+    // The account page is rendered per request; the public page is cached
+    // and would still show the unclaimed state for up to a minute.
+    return { kind: "listing" as const, redirect: "/account?claimed=1", pending: false };
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin: activating and taking back claims
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Admin: put a juror who claimed without an email check (no email on the
+ * profile) on the public jury, after checking it is really them.
+ */
+export const activateJuror = mutation({
+  args: { jurorId: v.id("jurors") },
+  returns: v.null(),
+  handler: async (ctx, { jurorId }) => {
+    const admin = await requireAdmin(ctx);
+    const juror = await ctx.db.get(jurorId);
+    if (!juror) fail("Juror not found.");
+    if (!isClaimedJuror(juror)) fail("Nobody has claimed this profile yet.");
+    await ctx.db.patch(jurorId, { active: true, claimPending: undefined, updatedAt: Date.now() });
+    await audit(ctx, { kind: "juror_activated", actorId: admin._id, details: { jurorId, userId: juror.userId ?? null } });
+    await scheduleIndexNow(ctx, ["/jury", `/jury/${juror.slug}`]);
+    return null;
+  },
+});
+
+/**
+ * Admin: take a listing or jury profile back from whoever claimed it (a
+ * wrong account, or to transfer it). Clears the owner, not just the claimed
+ * flag, kills open links, and logs it to the audit log. Mint a new claim
+ * link to hand it to the right person. A juror's evaluations stay with the
+ * profile.
+ */
+export const unclaim = mutation({
+  args: { target, reason: v.optional(v.string()) },
+  returns: v.null(),
+  handler: async (ctx, { target, reason }) => {
+    const admin = await requireAdmin(ctx);
+    const now = Date.now();
+    const why = reason?.trim().slice(0, 500) || undefined;
+    if (target.kind === "listing") {
+      const listing = await ctx.db.get(target.id);
+      if (!listing) fail("Listing not found.");
+      if (!listing.isClaimed && !listing.ownerId) fail("This listing isn't claimed.");
+      await ctx.db.patch(listing._id, {
+        ownerId: undefined,
+        isClaimed: false,
+        // Back to automatic: nofollow while unclaimed.
+        isDoFollow: undefined,
+        claimToken: undefined,
+        updatedAt: now,
+      });
+      await revokeClaimLinks(ctx, target, now);
+      await audit(ctx, {
+        kind: "unclaimed",
+        listingId: listing._id,
+        actorId: admin._id,
+        reason: why,
+        details: { target: "listing", previousOwner: listing.ownerId ?? null },
+      });
       if (isPublicStatus(listing.status)) await scheduleIndexNow(ctx, await listingPaths(ctx, listing));
-      // The account page is rendered per request; the public page is cached
-      // and would still show the unclaimed state for up to a minute.
-      return { kind: "listing" as const, redirect: "/account?claimed=1" };
+      return null;
     }
 
-    const usedJuror = await jurorByToken(ctx, "claimTokenUsed", token);
-    if (usedJuror) {
-      if (usedJuror.userId === user._id) return { kind: "juror" as const, redirect: "/jury/profile" };
-      fail("This claim link has already been used.");
-    }
-    const usedListing = await listingByToken(ctx, "claimTokenUsed", token);
-    if (usedListing) {
-      if (usedListing.ownerId === user._id) return { kind: "listing" as const, redirect: listingHome(usedListing) };
-      fail("This claim link has already been used.");
-    }
-    fail("This claim link is not valid. Ask us for a new one.");
+    const juror = await ctx.db.get(target.id);
+    if (!juror) fail("Juror not found.");
+    if (!isClaimedJuror(juror)) fail("This jury profile isn't claimed.");
+    await ctx.db.patch(juror._id, {
+      userId: undefined,
+      status: "unclaimed",
+      claimedAt: undefined,
+      claimPending: undefined,
+      // Unclaimed profiles are private whatever this says; true is how new ones start.
+      active: true,
+      claimToken: undefined,
+      updatedAt: now,
+    });
+    await revokeClaimLinks(ctx, target, now);
+    await audit(ctx, {
+      kind: "unclaimed",
+      actorId: admin._id,
+      reason: why,
+      details: { target: "juror", jurorId: juror._id, previousUser: juror.userId ?? null },
+    });
+    if (isPublicJuror(juror)) await scheduleIndexNow(ctx, ["/jury", `/jury/${juror.slug}`]);
+    return null;
   },
 });

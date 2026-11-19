@@ -29,11 +29,13 @@ import {
   listingSlugTaken,
   normalizeUrl,
   previousSlugsAfterRename,
+  restorePatch,
   scoreFields,
   slugify,
   uniqueSlug,
 } from "./lib/listingHelpers";
 import { hasJuryEvaluations } from "./jury";
+import { revokeClaimLinks } from "./lib/claimLinkRows";
 import { mergeSocials, normalizeEmail } from "./lib/contacts";
 import { awardPaths, creatorPath, listingPaths, scheduleIndexNow, sitePath } from "./seo";
 import { copyOf, recordRevision } from "./lib/revisions";
@@ -122,9 +124,9 @@ export const createListing = mutation({
       fail("Give a reason for the awards (it goes in the award log).");
     }
 
-    await assertMedia(ctx, args.coverId, "Cover screenshot", "image");
-    const galleryIds = await checkGallery(ctx, args.galleryIds);
-    if (args.videoId) await assertMedia(ctx, args.videoId, "Preview video", "video");
+    await assertMedia(ctx, args.coverId, "Cover screenshot", "image", admin);
+    const galleryIds = await checkGallery(ctx, args.galleryIds, admin);
+    if (args.videoId) await assertMedia(ctx, args.videoId, "Preview video", "video", admin);
     const config = await getConfig(ctx);
     const domain = await checkDomain(ctx, url, {
       redesignOf: args.redesignOf,
@@ -301,9 +303,13 @@ export async function applyListingEdit(
   if (args.isClaimed !== undefined) {
     patch.isClaimed = args.isClaimed;
     // A claimed listing has no open claim link.
-    if (args.isClaimed && listing.claimToken) {
-      patch.claimToken = undefined;
-      patch.claimTokenUsed = listing.claimToken;
+    if (args.isClaimed) {
+      if (listing.claimToken) patch.claimToken = undefined;
+      await revokeClaimLinks(ctx, { kind: "listing", id }, Date.now());
+    } else if (listing.ownerId) {
+      // Unclaiming takes the listing from its owner too, not just the badge
+      // (claimLinks.unclaim does the same and logs it).
+      patch.ownerId = undefined;
     }
   }
   if (args.isStartup !== undefined) patch.isStartup = args.isStartup || undefined;
@@ -356,7 +362,9 @@ export const updateListing = mutation({
  * window by hand. Scores are kept. Awards are not set here: they are given
  * and revoked on the Awards page (awards.grant / awards.revoke), where each
  * change needs a reason and is logged. A site with active awards can only be
- * unpublished (rejected) until they are revoked.
+ * unpublished (rejected) until they are revoked. A site its owner withdrew
+ * can be restored to the status it had (awards and all); only the owner
+ * withdraws (listings.withdraw).
  */
 export const setLifecycle = mutation({
   args: {
@@ -371,6 +379,15 @@ export const setLifecycle = mutation({
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
     const now = Date.now();
+    if (status === "withdrawn") fail("Only the owner can withdraw a site. Unpublish it (Rejected) instead.");
+    if (listing.status === "withdrawn" && status === (listing.withdrawnFrom ?? "archived")) {
+      const patch = restorePatch(listing, now);
+      await ctx.db.patch(id, { ...patch, reviewedBy: admin._id, reviewedAt: now });
+      if (isPublicStatus(patch.status)) {
+        await scheduleIndexNow(ctx, [...(await listingPaths(ctx, listing)), ...awardPaths(listing.awards)]);
+      }
+      return null;
+    }
     if (status === "awarded") fail("Give awards on the Awards page: each one needs a reason and is logged.");
     // The honorary First 100 badge is not a result: it stays whatever the status.
     const won = listing.awards.filter((a) => a !== "F100");
@@ -378,7 +395,16 @@ export const setLifecycle = mutation({
       fail(`Revoke this site's awards (${won.join(", ")}) on the Awards page first.`);
     }
     const scores = scoreFields(listing.editorialScores, listing.communityTotals, listing.communityVotesCount);
-    const base = { status, reviewedBy: admin._id, reviewedAt: now, updatedAt: now, ...scores };
+    // Moving a withdrawn site anywhere else ends the withdrawal.
+    const base = {
+      status,
+      reviewedBy: admin._id,
+      reviewedAt: now,
+      updatedAt: now,
+      withdrawnFrom: undefined,
+      withdrawnAt: undefined,
+      ...scores,
+    };
 
     switch (status) {
       case "in_voting": {
@@ -458,13 +484,13 @@ export const removeMedia = mutation({
   args: { id: v.id("listings"), kind: v.literal("video") },
   returns: v.null(),
   handler: async (ctx, { id }) => {
-    await requireAdmin(ctx);
+    const admin = await requireAdmin(ctx);
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
     const current = listing.videoId;
     if (!current) return null;
     await ctx.db.patch(id, { videoId: undefined, updatedAt: Date.now() });
-    await deleteMedia(ctx, current);
+    await deleteMedia(ctx, current, admin);
     return null;
   },
 });
@@ -755,7 +781,8 @@ export const wipeShowcase = internalMutation({
   returns: v.object({ listings: v.number(), creators: v.number(), done: v.boolean() }),
   handler: async (ctx) => {
     const listings = await ctx.db.query("listings").take(50);
-    for (const l of listings) await deleteListing(ctx, l);
+    // Everything goes, award winners included: that's what the confirm is for.
+    for (const l of listings) await deleteListing(ctx, l, "server", { evenWithActiveAwards: true });
     let creators = 0;
     if (listings.length < 50) {
       const rows = await ctx.db.query("creators").take(200);

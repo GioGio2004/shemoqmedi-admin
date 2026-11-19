@@ -15,6 +15,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { getUserByExternalId } from "./users";
 import { juryCategory, juryExperience, juryWork, pillars } from "./schema";
+import { claimLinkStatus, linkStatus } from "./lib/claimLinkRows";
 import { LIMITS, isCategory } from "./lib/taxonomy";
 import { averagePillars, finalScore, normalizePillars, readPillars, round2, weighted, type Pillars } from "./lib/scoring";
 import { conflictReason } from "./lib/conflicts";
@@ -25,6 +26,7 @@ import {
   cleanText,
   fail,
   isPublicStatus,
+  judgingClosed,
   normalizeUrl,
   scoreFields,
   slugify,
@@ -277,13 +279,21 @@ export async function toJurorPublic(ctx: QueryCtx, juror: Doc<"jurors">) {
   };
 }
 
+/**
+ * How many evaluations a juror has made, counting only listings whose judging
+ * has closed: a count that ticks up mid-vote would show a listing's progress.
+ */
 async function evaluationCount(ctx: QueryCtx, jurorId: Id<"jurors">) {
-  return (
-    await ctx.db
-      .query("juryEvaluations")
-      .withIndex("by_juror", (q) => q.eq("jurorId", jurorId))
-      .take(1000)
-  ).length;
+  const evaluations = await ctx.db
+    .query("juryEvaluations")
+    .withIndex("by_juror", (q) => q.eq("jurorId", jurorId))
+    .take(1000);
+  let count = 0;
+  for (const e of evaluations) {
+    const listing = await ctx.db.get(e.listingId);
+    if (listing && judgingClosed(listing)) count += 1;
+  }
+  return count;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -320,7 +330,11 @@ export const publicSlugs = query({
   },
 });
 
-/** A juror's public page (/jury/<slug>) with their evaluations. Null if unclaimed or off the jury. */
+/**
+ * A juror's public page (/jury/<slug>) with their evaluations. Null if
+ * unclaimed or off the jury. Evaluations of listings still in voting are left
+ * out until judging closes, so nobody reads a juror's score mid-vote.
+ */
 export const getBySlug = query({
   args: { slug: v.string() },
   returns: v.union(
@@ -351,7 +365,7 @@ export const getBySlug = query({
     const reviews = [];
     for (const e of evaluations) {
       const listing = await ctx.db.get(e.listingId);
-      if (!listing || !isPublicStatus(listing.status)) continue;
+      if (!listing || !judgingClosed(listing)) continue;
       const s = readPillars(e.scores);
       reviews.push({
         listing: { slug: listing.slug, title: listing.title, coverUrl: await mediaUrl(ctx, listing.coverId) },
@@ -367,7 +381,12 @@ export const getBySlug = query({
   },
 });
 
-/** Jury evaluations of a public listing, oldest first, for its page. */
+/**
+ * Jury evaluations of a public listing, oldest first, for its page. Empty
+ * while the listing is still in voting: scores and comments are revealed once
+ * judging closes (judgingClosed). Jurors read their own through myEvaluation,
+ * admins every one through evaluationsForListing.
+ */
 export const reviewsForListing = query({
   args: { slug: v.string() },
   returns: v.array(
@@ -382,7 +401,7 @@ export const reviewsForListing = query({
   ),
   handler: async (ctx, { slug }) => {
     const listing = await listingBySlug(ctx, slug);
-    if (!listing || !isPublicStatus(listing.status)) return [];
+    if (!listing || !judgingClosed(listing)) return [];
     const evaluations = await ctx.db
       .query("juryEvaluations")
       .withIndex("by_listing", (q) => q.eq("listingId", listing._id))
@@ -439,8 +458,9 @@ export const dropPresetPhoto = mutation({
   handler: async (ctx) => {
     const { juror } = await requireJuror(ctx);
     if (!juror.avatarId) return null;
-    await deleteMedia(ctx, juror.avatarId);
     await ctx.db.patch(juror._id, { avatarId: undefined, updatedAt: Date.now() });
+    // The preset photo was attached by an admin (createJuror / updateJuror), so it is deleted like an admin's file.
+    await deleteMedia(ctx, juror.avatarId, "server");
     await scheduleIndexNow(ctx, ["/jury", `/jury/${juror.slug}`]);
     return null;
   },
@@ -555,9 +575,9 @@ export const createJuror = mutation({
   args: adminProfileArgs,
   returns: v.object({ id: v.id("jurors"), slug: v.string() }),
   handler: async (ctx, args) => {
-    await requireAdmin(ctx);
+    const admin = await requireAdmin(ctx);
     const name = cleanText(args.name, "Name", LIMITS.creditName);
-    if (args.avatarId) await assertMedia(ctx, args.avatarId, "Photo", "image");
+    if (args.avatarId) await assertMedia(ctx, args.avatarId, "Photo", "image", admin);
     const now = Date.now();
     const slug = await uniqueJurorSlug(ctx, name);
     const id = await ctx.db.insert("jurors", {
@@ -602,7 +622,7 @@ export const updateJuror = mutation({
   },
   returns: v.object({ slug: v.string() }),
   handler: async (ctx, { jurorId, ...args }) => {
-    await requireAdmin(ctx);
+    const admin = await requireAdmin(ctx);
     const juror = await ctx.db.get(jurorId);
     if (!juror) fail("Juror not found.");
     const patch: Partial<Doc<"jurors">> = {};
@@ -624,11 +644,14 @@ export const updateJuror = mutation({
     if (args.experience !== undefined) patch.experience = cleanExperience(args.experience);
     if (args.work !== undefined) patch.work = cleanWork(args.work);
     if (args.avatarId !== undefined) {
-      if (args.avatarId) await assertMedia(ctx, args.avatarId, "Photo", "image");
-      if (juror.avatarId && juror.avatarId !== args.avatarId) await deleteMedia(ctx, juror.avatarId);
+      if (args.avatarId) await assertMedia(ctx, args.avatarId, "Photo", "image", admin);
       patch.avatarId = args.avatarId ?? undefined;
     }
     await ctx.db.patch(jurorId, { ...patch, updatedAt: Date.now() });
+    // After the patch, so the old photo no longer counts as in use by this juror.
+    if (args.avatarId !== undefined && juror.avatarId && juror.avatarId !== args.avatarId) {
+      await deleteMedia(ctx, juror.avatarId, admin);
+    }
     const slug = patch.slug ?? juror.slug;
     if (isPublicJuror(juror)) await scheduleIndexNow(ctx, ["/jury", `/jury/${slug}`]);
     return { slug };
@@ -640,7 +663,7 @@ export const deleteJuror = mutation({
   args: { jurorId: v.id("jurors") },
   returns: v.null(),
   handler: async (ctx, { jurorId }) => {
-    await requireAdmin(ctx);
+    const admin = await requireAdmin(ctx);
     const juror = await ctx.db.get(jurorId);
     if (!juror) fail("Juror not found.");
     if (isClaimedJuror(juror)) fail("This profile has been claimed. Remove the juror from the jury instead.");
@@ -649,13 +672,13 @@ export const deleteJuror = mutation({
       .withIndex("by_juror", (q) => q.eq("jurorId", jurorId))
       .collect();
     for (const l of linked) await ctx.db.patch(l._id, { jurorId: undefined, updatedAt: Date.now() });
-    if (juror.avatarId) await deleteMedia(ctx, juror.avatarId);
     await ctx.db.delete(jurorId);
+    if (juror.avatarId) await deleteMedia(ctx, juror.avatarId, admin);
     return null;
   },
 });
 
-/** Admin: every juror, claimed or not, with linked listings and claim tokens. */
+/** Admin: every juror, claimed or not, with linked listings and claim link status. */
 export const adminOverview = query({
   args: {},
   returns: v.array(
@@ -666,7 +689,10 @@ export const adminOverview = query({
       email: v.union(v.string(), v.null()), // contact email, or the account's once claimed
       accountEmail: v.union(v.string(), v.null()),
       avatarId: v.union(vMediaId, v.null()),
-      claimToken: v.union(v.string(), v.null()),
+      // Whether an unclaimed profile has an open claim link, never the link itself.
+      claimLink: claimLinkStatus,
+      // Claimed with no email to check: off the public jury until activated.
+      claimPending: v.boolean(),
       active: v.boolean(),
       joinedAt: v.number(),
       claimedAt: v.union(v.number(), v.null()),
@@ -699,7 +725,8 @@ export const adminOverview = query({
           email: j.email ?? account?.email ?? null,
           accountEmail: account?.email ?? null,
           avatarId: j.avatarId ?? null,
-          claimToken: isClaimedJuror(j) ? null : (j.claimToken ?? null),
+          claimLink: isClaimedJuror(j) ? null : await linkStatus(ctx, { kind: "juror", id: j._id }, j),
+          claimPending: isClaimedJuror(j) && (j.claimPending ?? false),
           active: j.active,
           joinedAt: j.joinedAt,
           claimedAt: j.claimedAt ?? null,
@@ -738,7 +765,8 @@ export const setJurorActive = mutation({
     await requireAdmin(ctx);
     const juror = await ctx.db.get(jurorId);
     if (!juror) fail("Juror not found.");
-    await ctx.db.patch(jurorId, { active, updatedAt: Date.now() });
+    // Restoring also settles a claim that waited for activation.
+    await ctx.db.patch(jurorId, { active, ...(active ? { claimPending: undefined } : {}), updatedAt: Date.now() });
     if (isClaimedJuror(juror)) await scheduleIndexNow(ctx, ["/jury", `/jury/${juror.slug}`]);
     return null;
   },

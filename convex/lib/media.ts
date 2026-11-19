@@ -49,19 +49,74 @@ export async function mediaInfo(
   return meta ? { contentType: meta.contentType ?? "", size: meta.size } : null;
 }
 
-/** Delete a screenshot or video: the Convex file, or the media row + the ImageKit / R2 file. */
-export async function deleteMedia(ctx: MutationCtx, id: MediaId) {
-  const mediaId = ctx.db.normalizeId("media", id);
-  if (mediaId) {
-    const row = await ctx.db.get(mediaId);
-    if (!row) return;
-    await ctx.db.delete(mediaId);
-    if (row.store === "r2") await ctx.scheduler.runAfter(0, internal.media.deleteR2, { keys: [row.fileId] });
-    else await ctx.scheduler.runAfter(0, internal.media.deleteRemote, { fileIds: [row.fileId] });
-    return;
+/** Platform admins (and super admins) may attach and delete any file. */
+export function isAdminUser(user: Doc<"users">) {
+  return user.role === "admin" || user.role === "super_admin";
+}
+
+/**
+ * Who is asking for a file to be attached or deleted: a signed-in user, or
+ * "server" for internal functions and CLI scripts (trusted like an admin).
+ */
+export type MediaActor = Doc<"users"> | "server";
+
+function trusted(by: MediaActor) {
+  return by === "server" || isAdminUser(by);
+}
+
+/**
+ * The ids among `ids` that a listing (cover, screenshots, video) or a juror
+ * (photo) still points at. Callers detach the file from their own document
+ * first, so anything left here belongs to someone else.
+ */
+export async function mediaStillUsed(ctx: QueryCtx, ids: MediaId[]): Promise<Set<string>> {
+  const wanted = new Set<string>(ids);
+  const used = new Set<string>();
+  if (!wanted.size) return used;
+  const mark = (id: string | undefined) => {
+    if (id && wanted.has(id)) used.add(id);
+  };
+  for await (const l of ctx.db.query("listings")) {
+    mark(l.coverId);
+    for (const g of l.galleryIds ?? []) mark(g);
+    mark(l.videoId);
+    if (used.size === wanted.size) return used;
   }
-  const storageId = ctx.db.system.normalizeId("_storage", id);
-  if (storageId) await ctx.storage.delete(storageId);
+  for await (const j of ctx.db.query("jurors")) mark(j.avatarId);
+  return used;
+}
+
+/**
+ * Delete screenshots or videos: the Convex file, or the media row + the
+ * ImageKit / R2 file. A file another listing or juror still points at is
+ * kept, and when a non-admin triggers the delete (an owner withdrawing their
+ * listing) a media row is only deleted if that user uploaded it: media ids
+ * used to be attachable by anyone (audit C-01), so a listing can point at a
+ * file it doesn't own.
+ */
+export async function deleteMediaMany(ctx: MutationCtx, ids: MediaId[], by: MediaActor) {
+  const unique = [...new Set(ids)];
+  const used = await mediaStillUsed(ctx, unique);
+  for (const id of unique) {
+    if (used.has(id)) continue;
+    const mediaId = ctx.db.normalizeId("media", id);
+    if (mediaId) {
+      const row = await ctx.db.get(mediaId);
+      if (!row) continue;
+      if (!trusted(by) && row.uploadedBy !== (by as Doc<"users">)._id) continue;
+      await ctx.db.delete(mediaId);
+      if (row.store === "r2") await ctx.scheduler.runAfter(0, internal.media.deleteR2, { keys: [row.fileId] });
+      else await ctx.scheduler.runAfter(0, internal.media.deleteRemote, { fileIds: [row.fileId] });
+      continue;
+    }
+    const storageId = ctx.db.system.normalizeId("_storage", id);
+    if (storageId) await ctx.storage.delete(storageId);
+  }
+}
+
+/** Delete one screenshot or video (see deleteMediaMany for what is kept). */
+export async function deleteMedia(ctx: MutationCtx, id: MediaId, by: MediaActor) {
+  await deleteMediaMany(ctx, [id], by);
 }
 
 /**

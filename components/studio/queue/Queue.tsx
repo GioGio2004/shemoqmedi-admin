@@ -12,6 +12,7 @@ import { ErrorBoundary, PageHead, Segmented, Skel } from "../ui";
 import { useFeedLayout } from "./layout";
 import { PostCard, type OpenFrom, type Post } from "./PostCard";
 import { PostDetail } from "./PostDetail";
+import { StudioPending } from "./Pending";
 import { channelMap } from "./view";
 
 /** Updates the address bar without a server round trip (Next keeps useSearchParams in sync). */
@@ -89,6 +90,8 @@ export function Queue({ initialTab, postId }: { initialTab: QueueTab; postId: st
   return (
     <div className="st-queue">
       <PageHead section="Shemoqmedi Studio" title="Queue" lede={<span aria-live="polite">{summary}</span>} />
+
+      <StudioPending />
 
       <div className="st-queue-filter">
         <Segmented

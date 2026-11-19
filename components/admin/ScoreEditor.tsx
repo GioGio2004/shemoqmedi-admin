@@ -80,7 +80,7 @@ export function ScoreEditor(props: Props) {
   }
 
   function onClear() {
-    if (!confirm("Clear the jury score? The final score falls back to the community score.")) return;
+    if (!confirm("Clear the jury score? The site has no final score until the jury scores it again.")) return;
     void run("clear", async () => {
       await clear({ id: props.id });
       setDraft(toDraft(null));

@@ -7,7 +7,10 @@ import { captionWord, reelDraftStatus, reelRecipe } from "./lib/reel";
  * Listing lifecycle:
  *   pending ──approve──▶ in_voting (7 days) ──close──▶ awarded | archived
  *      └──reject──▶ rejected        (admins can also unpublish → rejected)
- * Public pages show in_voting, awarded and archived.
+ *   any once-public status ──owner withdraws──▶ withdrawn ──restore──▶ the status it had
+ * Public pages show in_voting, awarded and archived. "withdrawn" is the
+ * owner's own archive: hidden from the site, every award, vote and post kept,
+ * so it can come back exactly as it was (listings.withdraw / listings.restore).
  */
 export const listingStatus = v.union(
   v.literal("pending"),
@@ -15,7 +18,20 @@ export const listingStatus = v.union(
   v.literal("awarded"),
   v.literal("archived"),
   v.literal("rejected"),
+  v.literal("withdrawn"),
 );
+
+/** The statuses a listing can be withdrawn from (and is restored to). */
+export const withdrawableStatus = v.union(
+  v.literal("pending"),
+  v.literal("in_voting"),
+  v.literal("awarded"),
+  v.literal("archived"),
+  v.literal("rejected"),
+);
+
+/** What a claim request asks for (convex/claims.ts). */
+export const claimIntentValue = v.union(v.literal("claim"), v.literal("remove"));
 
 /** What a social post is about (convex/social.ts). */
 export const socialPostKind = v.union(
@@ -91,6 +107,24 @@ export const emailKind = v.union(
   v.literal("custom"),
 );
 
+/**
+ * What the MCP connector asked to do that reaches people outside the system
+ * (convex/pendingActions.ts). Claude can only ask; an admin approves it in
+ * the admin or the Studio, signed in with Clerk.
+ */
+export const pendingActionKind = v.union(
+  v.literal("send_email"),
+  v.literal("send_broadcast"),
+  v.literal("publish_post"), // approve_post and publish_post
+  v.literal("retry_post"),
+);
+export const pendingActionStatus = v.union(
+  v.literal("pending"),
+  v.literal("approved"),
+  v.literal("rejected"),
+  v.literal("expired"),
+);
+
 export const creatorTier = v.union(v.literal("solo"), v.literal("agency"));
 export const region = v.union(v.literal("georgia"), v.literal("global"));
 /**
@@ -141,6 +175,9 @@ export const auditKind = v.union(
   v.literal("team_site"), // an admin marked or unmarked a Shemoqmedi team site
   v.literal("queue_removed"), // an admin took a site out of the SOTD queue
   v.literal("settings"), // award settings changed
+  v.literal("unclaimed"), // an admin took a listing or jury profile away from its owner (claimLinks.unclaim)
+  v.literal("juror_activated"), // an admin made a juror claimed without an email match public (claimLinks.activateJuror)
+  v.literal("listing_deleted"), // an admin deleted a listing; its earlier audit rows lose their link
 );
 
 /** A screenshot or video: Convex storage file or ImageKit `media` row (see lib/media.ts). */
@@ -272,8 +309,16 @@ export default defineSchema({
 
   // A website in the showcase. /sites/<slug>
   listings: defineTable({
-    // Submitter / verified owner. Absent for admin imports until claimed.
+    // Verified owner: set when a claim link or claim request is approved, or
+    // when an admin approves a submission and gives ownership to its
+    // submitter. Older submissions set it at submit time. Absent: unowned.
     ownerId: v.optional(v.id("users")),
+    // Who sent the submission in. Recorded at submit, before anyone has checked
+    // the site is theirs: it lets them see and withdraw their own pending
+    // submission (listings.myListings / withdraw), and keeps them from voting
+    // on or judging it, but grants no ownership, no claim and no followed link.
+    // Absent on admin imports and on submissions from before it existed.
+    submittedBy: v.optional(v.id("users")),
     creatorId: v.optional(v.id("creators")),
     source: v.union(v.literal("submission"), v.literal("import"), v.literal("seed")),
     submissionTier: v.union(v.literal("standard"), v.literal("express")),
@@ -345,8 +390,9 @@ export default defineSchema({
     // Unclaimed = admin-created and not yet owned (ownerId empty). Claiming
     // (claimLinks.claim, or an approved claim request) sets ownerId.
     isClaimed: v.boolean(),
-    // Secret claim link token (64 hex chars) while unclaimed; moved to
-    // claimTokenUsed when claimed so an old link redirects instead of failing.
+    // Legacy plaintext claim link tokens. Links now live hashed in the
+    // claimLinks table; migrations:hashClaimTokens moves these over and
+    // clears them. Read only as a fallback until that has run.
     claimToken: v.optional(v.string()),
     claimTokenUsed: v.optional(v.string()),
     // Pre-created for an invited juror: claiming the juror's link claims this too.
@@ -359,12 +405,18 @@ export default defineSchema({
     // admin on /featured. Absent: not featured.
     featuredRank: v.optional(v.number()),
 
+    // Status "withdrawn": the status it had when the owner withdrew it (restore
+    // returns it there) and when.
+    withdrawnFrom: v.optional(withdrawableStatus),
+    withdrawnAt: v.optional(v.number()),
+
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_slug", ["slug"])
     .index("by_url", ["url"])
     .index("by_owner", ["ownerId"])
+    .index("by_submittedBy", ["submittedBy"])
     .index("by_creator", ["creatorId"])
     .index("by_status", ["status", "createdAt"])
     .index("by_status_published", ["status", "publishedAt"])
@@ -413,9 +465,14 @@ export default defineSchema({
     // CATEGORIES slugs the juror wants in their digest of new submissions.
     interests: v.optional(v.array(v.string())),
     lastDigestAt: v.optional(v.number()),
+    // Legacy plaintext claim tokens (see listings.claimToken).
     claimToken: v.optional(v.string()),
     claimTokenUsed: v.optional(v.string()),
     claimedAt: v.optional(v.number()),
+    // Claimed by an account whose email could not be checked against the
+    // invitation (no email on the profile): stays off the public jury
+    // (active false) until an admin activates it.
+    claimPending: v.optional(v.boolean()),
     active: v.boolean(),
     joinedAt: v.number(), // created (unclaimed) or joined
     updatedAt: v.number(),
@@ -425,6 +482,29 @@ export default defineSchema({
     .index("by_active", ["active", "joinedAt"])
     .index("by_claimToken", ["claimToken"])
     .index("by_claimTokenUsed", ["claimTokenUsed"]),
+
+  // Secret claim links (claimLinks.ts). Only the SHA-256 of the token is
+  // stored: the raw link is shown to the admin (or put in an email) once,
+  // when it is minted. A target can have several open links (each email or
+  // copy mints one); claiming uses one and revokes the rest, "New link"
+  // revokes them all. Links expire CLAIM_LINK_TTL (14 days) after minting.
+  claimLinks: defineTable({
+    tokenHash: v.string(), // sha256 hex of the 64-hex token
+    jurorId: v.optional(v.id("jurors")), // exactly one of jurorId / listingId
+    listingId: v.optional(v.id("listings")),
+    // Lowercased address the link was emailed to (studio emails). A juror
+    // link is bound to the juror's own email instead, read at claim time.
+    email: v.optional(v.string()),
+    createdBy: v.optional(v.id("users")), // admin; absent for server-side senders
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    usedBy: v.optional(v.id("users")),
+    usedAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
+  })
+    .index("by_tokenHash", ["tokenHash"])
+    .index("by_juror", ["jurorId"])
+    .index("by_listing", ["listingId"]),
 
   // Legacy: email invitations from before pre-created profiles and claim
   // links. Nothing writes here any more; kept so existing rows stay valid.
@@ -623,6 +703,39 @@ export default defineSchema({
     .index("by_kind", ["kind", "createdAt"])
     .index("by_status", ["status", "createdAt"]),
 
+  // Sends and publishes the MCP connector asked for (convex/pendingActions.ts).
+  // Nothing in a row has happened yet while it is pending: an admin approves
+  // or rejects it in the admin (Social) or the Studio (Queue). `payload` holds
+  // exactly what will go out (recipient, subject and text; audience; the
+  // post's captions and media at the time of asking).
+  pendingActions: defineTable({
+    kind: pendingActionKind,
+    payload: v.any(),
+    summary: v.string(), // one line for lists and pushes
+    requestedBy: v.id("users"), // the admin whose connector asked
+    createdAt: v.number(),
+    status: pendingActionStatus,
+    decidedBy: v.optional(v.id("users")),
+    decidedAt: v.optional(v.number()),
+    result: v.optional(v.any()), // what executing it returned (delivery status, broadcast id, error)
+  })
+    .index("by_status", ["status", "createdAt"])
+    .index("by_kind", ["kind", "createdAt"]),
+
+  // Every MCP tool call (lib/mcp/server.ts logs it through mcp.logCall): which
+  // tool, a short summary of its arguments with emails and tokens redacted,
+  // who called it and whether it worked. Never edited.
+  mcpAudit: defineTable({
+    tool: v.string(),
+    args: v.string(), // redacted, at most a few hundred characters
+    userId: v.optional(v.id("users")),
+    outcome: v.union(v.literal("ok"), v.literal("error")),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_created", ["createdAt"])
+    .index("by_tool", ["tool", "createdAt"]),
+
   // The accounts posts are published to (convex/channels.ts), seeded from the
   // Convex env vars META_PAGE_ACCESS_TOKEN, THREADS_ACCESS_TOKEN and
   // LINKEDIN_ACCESS_TOKEN. Tokens are read by internal functions only.
@@ -686,7 +799,12 @@ export default defineSchema({
     message: v.string(),
     proofUrl: v.optional(v.string()),
     status: v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected")),
+    // "claim" asks for ownership, "remove" asks for the listing to be taken
+    // down. Older rows have no intent: read them with claimIntent()
+    // (lib/listingHelpers.ts), which spots the old "Removal request: " prefix.
+    intent: v.optional(claimIntentValue),
     reviewNote: v.optional(v.string()),
+    reviewedBy: v.optional(v.id("users")), // the admin who approved or rejected it
     reviewedAt: v.optional(v.number()),
     createdAt: v.number(),
   })

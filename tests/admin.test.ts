@@ -72,9 +72,11 @@ describe("admin: listings", () => {
 
   it("creates a live listing with a 7-day window and jury score", async () => {
     const env = await setup();
-    const { slug } = await create(env, { editorialScores: p(8.4) });
+    const { slug, id } = await create(env, { editorialScores: p(8.4) });
     const pub = await env.t.query(api.listings.getPublicBySlug, { slug });
-    expect(pub).toMatchObject({ status: "in_voting", finalScore: 8.4, isClaimed: false, technologies: ["WebGL", "GSAP"] });
+    // The score is sealed in public until judging closes; admins see it.
+    expect(pub).toMatchObject({ status: "in_voting", finalScore: null, isClaimed: false, technologies: ["WebGL", "GSAP"] });
+    expect(await env.owner.query(api.listings.reviewDetail, { id })).toMatchObject({ finalScore: 8.4 });
     expect(pub!.votingEndsAt - Date.now()).toBeGreaterThan(6.9 * DAY);
   });
 

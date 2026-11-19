@@ -2,15 +2,20 @@
 
 import { showAlert, showError } from "./Alerts";
 import { useState } from "react";
-import { useAction } from "convex/react";
+import { useAction, useMutation } from "convex/react";
 import type { FunctionArgs } from "convex/server";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 
-// Secret claim links (convex/claimLinks.ts). The link is minted on the first
-// copy and stays the same until "New link" rotates it.
+// Secret claim links (convex/claimLinks.ts). Only a hash of each link is
+// stored, so a link is shown once, when it is made: copy it then. Each copy
+// makes a new link (older ones keep working until they expire, 14 days);
+// "Revoke and make new" kills the older ones first.
 
 export type ClaimTarget = FunctionArgs<typeof api.claimLinks.link>["target"];
+
+/** What the queries say about a target's links: when the newest open one expires (null expiresAt: an old plaintext link). */
+export type ClaimLinkStatus = { expiresAt: number | null } | null;
 
 async function copyText(text: string) {
   try {
@@ -41,34 +46,41 @@ export function CopyUrl({ url, label = "Copy" }: { url: string; label?: string }
   );
 }
 
+function statusText(status: ClaimLinkStatus) {
+  if (!status) return "No open link.";
+  if (status.expiresAt === null) return "An older link is open (no expiry until the claim-link migration runs).";
+  return `An open link expires ${new Date(status.expiresAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}.`;
+}
+
 /**
- * "Copy claim link" for an unclaimed juror or listing: mints the link on
- * first use, then copies it. `token` (from the query) only says whether a
- * link exists yet. `rotatable` adds "New link", which kills the old one.
+ * "Copy new claim link" for an unclaimed juror or listing: makes a link,
+ * copies it and shows it this once. `status` (from the query) says whether
+ * an open link exists. `rotatable` adds "Revoke and make new", which kills
+ * every earlier link first.
  */
 export function ClaimLink({
   target,
-  token,
+  status,
   rotatable = false,
 }: {
   target: ClaimTarget;
-  token?: string | null;
+  status?: ClaimLinkStatus;
   rotatable?: boolean;
 }) {
   const link = useAction(api.claimLinks.link);
   const [busy, setBusy] = useState(false);
-  // Shown when the clipboard refused, or after a rotate so the new URL is visible.
+  // The link just made: it can't be read back later.
   const [shown, setShown] = useState<string | null>(null);
 
   async function run(rotate: boolean) {
     if (busy) return;
-    if (rotate && !confirm("Make a new claim link? The old link stops working.")) return;
+    if (rotate && !confirm("Revoke every earlier claim link and make a new one? Links already sent stop working.")) return;
     setBusy(true);
     try {
       const { url } = await link({ target, rotate });
       const copied = await copyText(url);
-      setShown(copied && !rotate ? null : url);
-      if (copied) showAlert(rotate ? "New claim link copied." : "Claim link copied.", "success");
+      setShown(url);
+      if (copied) showAlert(rotate ? "New claim link copied. Older links are revoked." : "Claim link copied.", "success");
     } catch (err) {
       showError(err);
     } finally {
@@ -80,17 +92,55 @@ export function ClaimLink({
     <div className="grid min-w-0 gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className="admin-button admin-button-secondary" disabled={busy} onClick={() => run(false)}>
-          {busy ? "Working…" : "Copy claim link"}
+          {busy ? "Working…" : "Copy new claim link"}
         </button>
-        {rotatable && token && (
+        {rotatable && status && (
           <button type="button" className="admin-text-link" disabled={busy} onClick={() => run(true)}>
-            New link
+            Revoke and make new
           </button>
         )}
-        {!token && !shown && <span className="text-xs text-black/55">No link yet. Copying makes one.</span>}
       </div>
-      {shown && <CopyUrl url={shown} />}
+      {!shown && <span className="text-xs text-black/55">{statusText(status ?? null)}</span>}
+      {shown && (
+        <>
+          <CopyUrl url={shown} />
+          <span className="text-xs text-black/55">Shown once: it can&apos;t be read back later. Works once, for 14 days.</span>
+        </>
+      )}
     </div>
+  );
+}
+
+/**
+ * "Take claim back" for a claimed listing or jury profile: clears the owner
+ * (claimLinks.unclaim) so a new claim link can hand it to the right person.
+ */
+export function UnclaimButton({ target, label = "Take claim back" }: { target: ClaimTarget; label?: string }) {
+  const unclaim = useMutation(api.claimLinks.unclaim);
+  const [busy, setBusy] = useState(false);
+
+  async function onClick() {
+    if (busy) return;
+    const reason = prompt(
+      "Take this back from the account that claimed it? It becomes unclaimed again; send a new claim link to the right person. Reason (optional, for the audit log):",
+      "",
+    );
+    if (reason === null) return;
+    setBusy(true);
+    try {
+      await unclaim({ target, reason: reason || undefined });
+      showAlert("Claim taken back. It is unclaimed again.", "success");
+    } catch (err) {
+      showError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button type="button" className="admin-button admin-button-secondary" disabled={busy} onClick={onClick}>
+      {busy ? "Working…" : label}
+    </button>
   );
 }
 

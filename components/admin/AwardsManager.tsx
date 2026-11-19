@@ -483,6 +483,9 @@ const KIND_LABEL: Record<string, string> = {
   team_site: "Team site",
   queue_removed: "Left the queue",
   settings: "Settings changed",
+  unclaimed: "Claim taken back",
+  juror_activated: "Juror activated",
+  listing_deleted: "Listing deleted",
 };
 
 function AuditLog() {

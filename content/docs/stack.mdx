@@ -63,7 +63,8 @@ Names only. Set values in the Vercel project settings or with `npx convex env se
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Public key the Studio uses to subscribe to push |
 | `GRAPHICS_RENDER_KEY` | Shared secret: Convex sends it to `/api/graphics` to render social graphics. Same value as on Convex. |
 | `MCP_SERVICE_SECRET` | Signs short-lived tokens the MCP server sends to Convex. Same value as on Convex. |
-| `MCP_OAUTH_AUDIENCE` | Optional. Binds MCP OAuth tokens to this server's URL. |
+| `MCP_OAUTH_AUDIENCE` | Required in production (`https://admin.shemoqmedi.space/api/mcp`). Binds MCP OAuth tokens to this server; unset, the connector refuses every request. |
+| `MCP_OAUTH_CLIENT_IDS` | Optional. Comma-separated Clerk OAuth client ids allowed to use the connector. |
 | `GRAPHICS_TIMING` | Optional debug switch: `1` logs graphics render timings |
 | `NEXT_BUILD_DIR` | Optional. Points a local verification build at another folder. |
 

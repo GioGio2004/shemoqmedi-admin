@@ -9,7 +9,7 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { JURY_CATEGORIES, LIMITS, type JuryCategory } from "@/convex/lib/taxonomy";
 import { formatDate, STOREFRONT_URL } from "@/lib/storefront";
-import { ClaimLink, CopyUrl, EmailClaimLink } from "./ClaimLink";
+import { ClaimLink, CopyUrl, EmailClaimLink, UnclaimButton } from "./ClaimLink";
 import { MediaPicker, useMediaUpload } from "./MediaUpload";
 import {
   cleanExperience,
@@ -576,7 +576,13 @@ function EditJurorForm({ juror, onDone }: { juror: Juror; onDone: () => void }) 
 function StatusChip({ juror }: { juror: Juror }) {
   // Reuses the listing status styles: filled = live, muted = off.
   const [label, status] =
-    juror.status === "unclaimed" ? ["Unclaimed", undefined] : juror.active ? ["Claimed", "in_voting"] : ["Off the jury", "rejected"];
+    juror.status === "unclaimed"
+      ? ["Unclaimed", undefined]
+      : juror.claimPending
+        ? ["Waiting for activation", "pending"]
+        : juror.active
+          ? ["Claimed", "in_voting"]
+          : ["Off the jury", "rejected"];
   return (
     <span className="admin-status" data-status={status}>
       <span className="admin-status-dot" aria-hidden="true" />
@@ -616,6 +622,7 @@ function ProfileListSummary({ juror }: { juror: Juror }) {
 
 function JurorRow({ juror }: { juror: Juror }) {
   const setActive = useMutation(api.jury.setJurorActive);
+  const activate = useMutation(api.claimLinks.activateJuror);
   const remove = useMutation(api.jury.deleteJuror);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -636,6 +643,12 @@ function JurorRow({ juror }: { juror: Juror }) {
   function toggleActive() {
     if (juror.active && !confirm(`Take ${juror.name} off the jury? Their evaluations stay on the sites.`)) return;
     void run(() => setActive({ jurorId: juror.id, active: !juror.active }));
+  }
+
+  function onActivate() {
+    const account = juror.accountEmail ? ` (signed in as ${juror.accountEmail})` : "";
+    if (!confirm(`Put ${juror.name} on the public jury? Their profile had no email to check, so make sure the account${account} is really them.`)) return;
+    void run(() => activate({ jurorId: juror.id }));
   }
 
   function onDelete() {
@@ -709,17 +722,22 @@ function JurorRow({ juror }: { juror: Juror }) {
             <button type="button" className="admin-button admin-button-secondary" disabled={busy} onClick={onDelete}>
               Delete
             </button>
+          ) : juror.claimPending ? (
+            <button type="button" className="admin-button" disabled={busy} onClick={onActivate}>
+              Activate
+            </button>
           ) : (
             <button type="button" className="admin-button admin-button-secondary" disabled={busy} onClick={toggleActive}>
               {juror.active ? "Remove from jury" : "Restore"}
             </button>
           )}
+          {!unclaimed && <UnclaimButton target={{ kind: "juror", id: juror.id }} />}
         </div>
       </div>
 
       {unclaimed && (
         <div className="grid gap-3 md:grid-cols-2">
-          <ClaimLink target={{ kind: "juror", id: juror.id }} token={juror.claimToken} rotatable />
+          <ClaimLink target={{ kind: "juror", id: juror.id }} status={juror.claimLink} rotatable />
           <EmailClaimLink jurorId={juror.id} email={juror.email} name={juror.name} />
         </div>
       )}

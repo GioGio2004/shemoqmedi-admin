@@ -9,12 +9,19 @@
 // writes the recipe, Giorgi renders it); email studios; broadcast to an audience;
 // and run the listing desk (draft listing copy for briefs Giorgi queued, see
 // convex/editorial.ts).
+//
+// Nothing here reaches people outside the system by itself: sending an email,
+// a broadcast, and approving, publishing or retrying a post only ask, as a
+// row in pendingActions that an admin approves in the admin or the Studio
+// (convex/pendingActions.ts). Every tool call is logged in mcpAudit (logCall).
 
 import { v } from "convex/values";
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { adminFromToken, requireTokenAdmin } from "./lib/mcpAuth";
+import { summarizeArgs } from "./lib/mcpAudit";
+import { requestPostAction, requestView, type BroadcastPayload, type EmailPayload } from "./pendingActions";
 import { fail, slugify } from "./lib/listingHelpers";
 import { mergeSocials, normalizeEmail } from "./lib/contacts";
 import { readPillars } from "./lib/scoring";
@@ -26,7 +33,6 @@ import { reelDraftStatus } from "./lib/reel";
 import { draftSummary, draftView, insertDraft, patchDraft, resolveLooseRecipe, summarize, viewDraft } from "./reels";
 import { rowUrl } from "./lib/media";
 import {
-  approvePost as approve,
   countPosts,
   captionsValidator,
   createPost as create,
@@ -37,16 +43,15 @@ import {
   mediaValidator,
   postDetailView,
   postView,
-  publishPost as publish,
   readStatus,
   rejectPost as reject,
-  retryPost as retry,
   unschedulePost as unschedule,
   viewPost,
 } from "./social";
 import { channelView, type ChannelView } from "./channels";
-import { audience, deliver, type Message } from "./emails";
+import { audience } from "./emails";
 import { ensureListingClaimUrl, newClaimToken } from "./claimLinks";
+import { linkStatus } from "./lib/claimLinkRows";
 import { siteUrl } from "./seo";
 import { getConfig } from "./lib/config";
 import { editorialRules as rulesText } from "./lib/editorial";
@@ -83,6 +88,35 @@ export const checkToken = internalQuery({
   args: { token },
   returns: v.id("users"),
   handler: async (ctx, { token }) => (await requireTokenAdmin(ctx, token))._id,
+});
+
+/**
+ * One row in mcpAudit per tool call, written by the admin app's tool wrapper
+ * (lib/mcp/audit.ts) after the call, whatever the tool: name, redacted
+ * arguments, who, and whether it worked. A call whose token isn't an admin's
+ * is still logged, without a user.
+ */
+export const logCall = mutation({
+  args: {
+    token,
+    tool: v.string(),
+    args: v.optional(v.any()),
+    outcome: v.union(v.literal("ok"), v.literal("error")),
+    error: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, { token, tool, args, outcome, error }) => {
+    const user = await adminFromToken(ctx, token);
+    await ctx.db.insert("mcpAudit", {
+      tool: tool.slice(0, 60),
+      args: summarizeArgs(args),
+      userId: user?._id,
+      outcome,
+      ...(error ? { error: summarizeArgs(error).slice(0, 300) } : {}),
+      createdAt: Date.now(),
+    });
+    return null;
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -159,7 +193,8 @@ export const getListing = query({
       private: {
         contactEmail: creator?.contactEmail ?? null,
         owner: owner ? { name: owner.name, email: owner.email } : null,
-        claimLink: listing.claimToken ? `${siteUrl()}/claim/${listing.claimToken}` : null,
+        // Only hashes are stored: claim_link mints a new link when one is needed.
+        claimLink: listing.isClaimed ? null : await linkStatus(ctx, { kind: "listing", id: listing._id }, listing),
         reviewNote: listing.reviewNote ?? null,
       },
       jury: evaluations.map((e, i) => ({
@@ -184,6 +219,7 @@ export const listAwards = query({
       awards.map(async (a) => {
         const listing = await ctx.db.get(a.listingId);
         return {
+          awardSlug: a.slug,
           tier: a.tier,
           name: TIER_NAMES[a.tier],
           period: a.period,
@@ -286,7 +322,7 @@ export const ensureClaim = internalMutation({
   },
 });
 
-/** The claim link of an unclaimed listing (minted on first use), for outreach. */
+/** A new claim link for an unclaimed listing, for outreach (only its hash is stored, so each call mints one). */
 export const claimLink = action({
   args: { token, slug: v.string() },
   returns: v.union(v.string(), v.null()),
@@ -382,43 +418,78 @@ export const updatePost = mutation({
   },
 });
 
+/**
+ * The award a post announces: it must exist, be active (not revoked), not be
+ * the honorary First 100, and its site must not be a team site (byTeam sites
+ * are never eligible for awards). An award post the database didn't queue
+ * would otherwise bypass every award check.
+ */
+async function awardForPost(ctx: Parameters<typeof requireTokenAdmin>[0], awardSlug: string | undefined, listingSlug: string | undefined) {
+  const wanted = awardSlug?.trim().toLowerCase();
+  if (!wanted) fail("An award post needs awardSlug: the award it announces (list_awards).");
+  const award = await ctx.db
+    .query("awards")
+    .withIndex("by_slug", (q) => q.eq("slug", wanted))
+    .first();
+  if (!award) fail(`No award with the slug "${awardSlug}". Use list_awards to find it.`);
+  if (award.status !== "active") fail("This award is not active (it was revoked): there is nothing to announce.");
+  if (award.tier === "F100") fail("The First 100 is honorary and has no award post.");
+  const listing = await ctx.db.get(award.listingId);
+  if (!listing) fail("The award's site is gone.");
+  if (listing.byTeam) fail("This site was built by the Shemoqmedi team: team sites are never awarded, so there is no award post.");
+  if (listingSlug && listingSlug.trim().toLowerCase() !== listing.slug) fail(`This award belongs to "${listing.slug}", not "${listingSlug}".`);
+  return { award, listing };
+}
+
 export const createPost = mutation({
   args: {
     token,
     kind: socialPostKind,
     listingSlug: v.optional(v.string()),
+    awardSlug: v.optional(v.string()),
     facts: v.optional(v.any()),
     captions: v.optional(captionsValidator),
     media: v.optional(mediaValidator),
     placement: v.optional(socialPlacement),
   },
   returns: postView,
-  handler: async (ctx, { token, listingSlug, ...input }) => {
+  handler: async (ctx, { token, listingSlug, awardSlug, ...input }) => {
     await requireTokenAdmin(ctx, token);
+    if (input.kind === "award") {
+      const { award, listing } = await awardForPost(ctx, awardSlug, listingSlug);
+      const id = await create(ctx, { ...input, listingId: listing._id, awardId: award._id });
+      return await viewPost(ctx, (await ctx.db.get(id))!);
+    }
+    if (awardSlug) fail("awardSlug is only for award posts (kind award).");
     const listing = listingSlug ? await listingBySlug(ctx, listingSlug) : null;
     const id = await create(ctx, { ...input, listingId: listing?._id });
     return await viewPost(ctx, (await ctx.db.get(id))!);
   },
 });
 
+/**
+ * Asks an admin to approve a waiting post (publishing it now or at its
+ * publish time). Never publishes: the request waits in pendingActions with
+ * the post's captions and media as they are now, after the same checks as
+ * approval. Claude saying Giorgi approved is not approval; only an admin
+ * signed in to the admin or the Studio is.
+ */
 export const approvePost = mutation({
   args: { token, id: v.id("socialPosts") },
-  returns: postView,
+  returns: requestView,
   handler: async (ctx, { token, id }) => {
     const admin = await requireTokenAdmin(ctx, token);
-    await approve(ctx, id, admin._id);
-    return await viewPost(ctx, (await ctx.db.get(id))!);
+    return await requestPostAction(ctx, { postId: id, mode: "approve", requestedBy: admin._id });
   },
 });
 
-/** Approve and publish in one step: now, or at `at` (epoch ms) when that is in the future. */
+/** Asks to approve and publish in one step: now, or at `at` (epoch ms) when that is in the future. Never publishes itself. */
 export const publishPost = mutation({
   args: { token, id: v.id("socialPosts"), at: v.optional(v.number()) },
-  returns: postView,
+  returns: requestView,
   handler: async (ctx, { token, id, at }) => {
     const admin = await requireTokenAdmin(ctx, token);
-    await publish(ctx, id, admin._id, at);
-    return await viewPost(ctx, (await ctx.db.get(id))!);
+    return await requestPostAction(ctx, { postId: id, mode: "publish", at, requestedBy: admin._id });
   },
 });
 
@@ -442,13 +513,13 @@ export const rejectPost = mutation({
   },
 });
 
+/** Asks to publish a failed post again (the networks not sent yet). Never publishes itself. */
 export const retryPost = mutation({
   args: { token, id: v.id("socialPosts") },
-  returns: postView,
+  returns: requestView,
   handler: async (ctx, { token, id }) => {
-    await requireTokenAdmin(ctx, token);
-    await retry(ctx, id);
-    return await viewPost(ctx, (await ctx.db.get(id))!);
+    const admin = await requireTokenAdmin(ctx, token);
+    return await requestPostAction(ctx, { postId: id, mode: "retry", requestedBy: admin._id });
   },
 });
 
@@ -781,7 +852,16 @@ export const listingIdBySlug = internalQuery({
   handler: async (ctx, { slug }) => (await listingBySlug(ctx, slug))._id,
 });
 
-type EmailPreview = { sent: boolean; to: string; subject: string; text: string; status?: string; error?: string };
+type EmailPreview = {
+  sent: boolean;
+  to: string;
+  subject: string;
+  text: string;
+  status?: string;
+  error?: string;
+  pendingActionId?: Id<"pendingActions">;
+  message?: string;
+};
 type StudioContact = {
   email: string;
   name: string;
@@ -799,13 +879,16 @@ const emailPreview = v.object({
   text: v.string(),
   status: v.optional(v.string()),
   error: v.optional(v.string()),
+  pendingActionId: v.optional(v.id("pendingActions")),
+  message: v.optional(v.string()),
 });
 
 /**
  * One email Claude wrote, to a listing's studio (owner or contact email; its
  * claim link available as {claimLink} in the body), a creator, or any address
  * (outreach to a studio that isn't listed yet). Without `confirm` it only
- * returns the preview.
+ * returns the preview; with it, the exact email waits in pendingActions for
+ * an admin to approve. It is never sent from here.
  */
 export const sendEmail = action({
   args: {
@@ -819,7 +902,7 @@ export const sendEmail = action({
   },
   returns: emailPreview,
   handler: async (ctx, args): Promise<EmailPreview> => {
-    await ctx.runQuery(internal.mcp.checkToken, { token: args.token });
+    const requestedBy: Id<"users"> = await ctx.runQuery(internal.mcp.checkToken, { token: args.token });
     const subject = args.subject.trim();
     if (!subject || subject.length > 200) fail("The subject must be 1–200 characters.");
     if (!args.body.trim() || args.body.length > 10_000) fail("The body must be 1–10,000 characters.");
@@ -831,6 +914,7 @@ export const sendEmail = action({
       const contact: StudioContact | null = await ctx.runMutation(internal.social.studioContact, {
         listingId,
         freshToken: newClaimToken(),
+        sendTo: args.to,
       });
       if (!contact && !args.to) fail("This listing's studio has no email yet: set one with update_creator, or pass `to`.");
       to = args.to ?? contact!.email;
@@ -854,26 +938,60 @@ export const sendEmail = action({
     if (args.body.includes("{claimLink}") && !claimLink) fail("{claimLink} works only for an unclaimed listing (listingSlug).");
     const text: string = args.body.replaceAll("{claimLink}", claimLink ?? "").trim();
     if (!args.confirm) return { sent: false, to, subject, text };
-    const message: Message = { subject, text };
-    const result = await deliver(ctx, to, message, meta);
-    return { sent: result.status === "sent", to, subject, text, status: result.status, ...(result.error ? { error: result.error } : {}) };
+    const payload: EmailPayload = { to, subject, text, meta };
+    const pending: { pendingActionId: Id<"pendingActions">; message: string } = await ctx.runMutation(internal.pendingActions.request, {
+      kind: "send_email",
+      payload,
+      summary: `Email "${subject}" to ${to}`,
+      requestedBy,
+    });
+    return {
+      sent: false,
+      to,
+      subject,
+      text,
+      status: "waiting for approval in Studio",
+      pendingActionId: pending.pendingActionId,
+      message: pending.message,
+    };
   },
 });
 
-/** Preview (count + a few addresses) or, with `confirm`, start a broadcast in the background. */
+/**
+ * Preview (count + a few addresses) or, with `confirm`, ask an admin to
+ * approve the broadcast (pendingActions). It is never started from here.
+ */
 export const sendBroadcast = action({
   args: { token, audience, subject: v.string(), body: v.string(), confirm: v.boolean() },
-  returns: v.object({ started: v.boolean(), recipients: v.number(), sample: v.array(v.string()), broadcastId: v.optional(v.string()) }),
+  returns: v.object({
+    started: v.boolean(),
+    recipients: v.number(),
+    sample: v.array(v.string()),
+    broadcastId: v.optional(v.string()),
+    pendingActionId: v.optional(v.id("pendingActions")),
+    message: v.optional(v.string()),
+  }),
   handler: async (ctx, { token, audience, subject, body, confirm }) => {
-    await ctx.runQuery(internal.mcp.checkToken, { token });
+    const requestedBy: Id<"users"> = await ctx.runQuery(internal.mcp.checkToken, { token });
     if (!subject.trim() || subject.length > 200) fail("The subject must be 1–200 characters.");
     if (!body.trim() || body.length > 20_000) fail("The body must be 1–20,000 characters.");
     const emails: string[] = await ctx.runQuery(internal.emails.audienceEmails, { audience });
     if (!confirm) return { started: false, recipients: emails.length, sample: emails.slice(0, 10) };
     if (emails.length === 0) fail("Nobody is in this audience.");
-    const broadcastId = `b${Date.now().toString(36)}`;
-    await ctx.scheduler.runAfter(0, internal.emails.broadcast, { audience, subject: subject.trim(), body, broadcastId });
-    return { started: true, recipients: emails.length, sample: emails.slice(0, 10), broadcastId };
+    const payload: BroadcastPayload = { audience, subject: subject.trim(), body, recipients: emails.length, sample: emails.slice(0, 10) };
+    const pending: { pendingActionId: Id<"pendingActions">; message: string } = await ctx.runMutation(internal.pendingActions.request, {
+      kind: "send_broadcast",
+      payload,
+      summary: `Broadcast "${subject.trim()}" to ${audience} (${emails.length} people)`,
+      requestedBy,
+    });
+    return {
+      started: false,
+      recipients: emails.length,
+      sample: emails.slice(0, 10),
+      pendingActionId: pending.pendingActionId,
+      message: pending.message,
+    };
   },
 });
 

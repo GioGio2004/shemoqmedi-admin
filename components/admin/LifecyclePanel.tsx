@@ -53,7 +53,11 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
   const closeVoting = useMutation(api.listings.closeVotingNow);
 
   const status = listing.status;
-  const [target, setTarget] = useState<ListingStatus>(status === "awarded" ? "archived" : status);
+  const [target, setTarget] = useState<ListingStatus>(
+    status === "awarded" || status === "withdrawn" ? "archived" : status,
+  );
+  // An unlinked submission whose "Made by" matches an existing profile: link it on approval?
+  const [linkCreator, setLinkCreator] = useState(false);
   const [endsAt, setEndsAt] = useState(() => defaultVotingEnd(listing.votingEndsAt));
   const [note, setNote] = useState(listing.reviewNote ?? "");
   const [busy, setBusy] = useState(false);
@@ -93,8 +97,19 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
     setMessage(null);
   }
 
-  function onApprove() {
-    void run(() => approve({ id: listing.id }));
+  function onApprove(grantOwnership: boolean) {
+    void run(() =>
+      approve({
+        id: listing.id,
+        grantOwnership,
+        linkCreator: listing.creditMatch ? linkCreator : undefined,
+      }),
+    );
+  }
+
+  function onRestore() {
+    const back = listing.withdrawnFrom ?? "archived";
+    void run(() => setLifecycle({ id: listing.id, status: back }));
   }
 
   function onApply() {
@@ -176,6 +191,16 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
             </dd>
           </div>
         )}
+        {status === "withdrawn" && (
+          <div className="grid gap-1">
+            <dt className="text-black/55">Withdrawn by the owner</dt>
+            <dd className="text-xs leading-relaxed">
+              {listing.withdrawnAt ? formatDate(listing.withdrawnAt) : "—"}, from{" "}
+              {STATUS_LABEL[listing.withdrawnFrom ?? "archived"].toLowerCase()}. Hidden from the site; awards,
+              votes and posts are kept.
+            </dd>
+          </div>
+        )}
         {status === "rejected" && listing.reviewNote && (
           <div className="grid gap-1">
             <dt className="text-black/55">Reason</dt>
@@ -191,9 +216,49 @@ export function LifecyclePanel({ listing }: { listing: Listing }) {
       )}
 
       <div className="mt-5 grid gap-3">
-        {(status === "pending" || status === "rejected") && (
-          <button type="button" className="admin-button w-full" disabled={busy} onClick={onApprove}>
-            Approve: start 7-day voting <span aria-hidden="true">↗</span>
+        {(status === "pending" || status === "rejected") && listing.creditMatch && (
+          <label className="flex items-start gap-3 text-xs leading-relaxed text-black/70">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={linkCreator}
+              onChange={(e) => setLinkCreator(e.target.checked)}
+            />
+            <span>
+              Credit it to the existing profile “{listing.creditMatch.name}”
+              {listing.creditMatch.isClaimed ? ", which another account has claimed" : ""}. Left unticked, the
+              site goes live without a creator profile.
+            </span>
+          </label>
+        )}
+        {(status === "pending" || status === "rejected") &&
+          (listing.canGrantOwnership ? (
+            <>
+              <button type="button" className="admin-button w-full" disabled={busy} onClick={() => onApprove(true)}>
+                Approve and give ownership to {listing.submitter?.name ?? "the submitter"}{" "}
+                <span aria-hidden="true">↗</span>
+              </button>
+              <button
+                type="button"
+                className="admin-button admin-button-secondary w-full"
+                disabled={busy}
+                onClick={() => onApprove(false)}
+              >
+                Approve without ownership
+              </button>
+              <p className="text-xs leading-relaxed text-black/55">
+                Ownership makes the listing theirs: claimed, followed links, and its new creator profile. Give it
+                only when you&apos;re sure they made or own the site. Both start 7-day voting.
+              </p>
+            </>
+          ) : (
+            <button type="button" className="admin-button w-full" disabled={busy} onClick={() => onApprove(false)}>
+              Approve: start 7-day voting <span aria-hidden="true">↗</span>
+            </button>
+          ))}
+        {status === "withdrawn" && (
+          <button type="button" className="admin-button w-full" disabled={busy} onClick={onRestore}>
+            Restore to {STATUS_LABEL[listing.withdrawnFrom ?? "archived"].toLowerCase()}
           </button>
         )}
         {status === "in_voting" && (

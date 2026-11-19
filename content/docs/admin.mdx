@@ -119,7 +119,7 @@ Everyone who signed up, with their number of listings and votes. Grant or remove
 
 ### Claims (`/claims`)
 
-"This is mine" requests from the storefront: someone asks to own an unclaimed site or creator profile, with a message and an optional proof link. Tabs for `pending`, `approved` and `rejected`. Approve or reject each request. A new claim sends a push to admins.
+"This is mine" requests from the storefront, with a message and an optional proof link. Each card says which kind it is. A **Claim** asks to own an unclaimed site or creator profile: "Give ownership" makes the claimant the owner and rejects other pending claims for it. A **Removal** asks for a site to be taken down: "Take down" moves the listing to `rejected` (off the public site, nothing deleted, re-publish it from the listing's lifecycle controls) and nobody gets ownership. Approving one kind never closes requests of the other kind. Tabs for `pending`, `approved` and `rejected`; every decision records which admin made it. A new request sends a push to admins.
 
 ### Import (`/seed`)
 

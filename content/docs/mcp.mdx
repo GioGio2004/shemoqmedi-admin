@@ -9,7 +9,7 @@ MCP (Model Context Protocol) is an open standard that lets an AI client call too
 There are two steps. Clerk proves who the person is. Convex decides what they may do.
 
 1. **Clerk OAuth.** The client finds the sign-in server from the metadata the app serves under `/.well-known`. Clerk is the OAuth authorization server. The person signs in with their own account and presses Allow. The client gets a short-lived OAuth access token and sends it as a bearer token to `/api/mcp`.
-2. **Token check.** `verifyToken` in `lib/mcp/server.ts` checks the token with Clerk (`verifyOAuthToken` in `lib/mcp/oauth.ts`). If `MCP_OAUTH_AUDIENCE` is set, the token must also be bound to this resource.
+2. **Token check.** `verifyToken` in `lib/mcp/server.ts` checks the token with Clerk (`verifyOAuthToken` in `lib/mcp/oauth.ts`). In production `MCP_OAUTH_AUDIENCE` must be set (to `https://admin.shemoqmedi.space/api/mcp`): without it every MCP request gets a 401 and the log says why. Clerk checks the audience on JWT access tokens only; `MCP_OAUTH_CLIENT_IDS` (optional, comma-separated) limits which OAuth applications may connect, whatever the token format.
 3. **Service credential.** The app mints a `svc.` credential (`serviceCredential`): the Clerk user id, issue time and expiry, signed with HMAC-SHA256 using `MCP_SERVICE_SECRET`. It lives for one minute.
 4. **Admin check in Convex.** Every tool calls a function in `convex/mcp.ts` with that credential. Convex verifies the signature and the short lifetime (`convex/lib/tokens.ts`), looks up the user, and requires role `admin` or `super_admin` (`requireTokenAdmin` in `convex/lib/mcpAuth.ts`). Anyone else gets a 401 at sign-in.
 
@@ -73,10 +73,10 @@ The same desk has a page in the admin at `/agent` (`app/agent/page.tsx`, `compon
 | `get_post` | One post with per-network results and each media item's design recipe | reads |
 | `create_post` | Starts a post (announcement, custom, or story) | writes |
 | `update_post` | Saves captions, media, publish time or note; never publishes. Editing an approved, scheduled or failed post sends it back to waiting | writes |
-| `approve_post` | Approves a waiting post; it publishes now or at its publish time. A new-listing post also emails the studio | **publishes**, **sends** |
-| `publish_post` | Approves and publishes in one step, now or at a given time | **publishes**, **sends** |
+| `approve_post` | Asks an admin to approve a waiting post (pending action); once approved it publishes now or at its publish time. A new-listing post also emails the studio | asks (**publishes**, **sends** after approval) |
+| `publish_post` | Asks to approve and publish in one step, now or at a given time | asks (**publishes**, **sends** after approval) |
 | `unschedule_post` | Takes a scheduled post back to waiting; cancels the publish | writes |
-| `retry_post` | Publishes a failed post again, only to networks not yet sent | **publishes** |
+| `retry_post` | Asks to publish a failed post again, only to networks not yet sent | asks (**publishes** after approval) |
 | `reject_post` | Drops a post with an optional reason | writes |
 | `list_channels` | Which networks are connected, token expiry, last error; picks up new tokens first | reads |
 
@@ -112,12 +112,27 @@ Claude cannot render video. The reel renders in the admin's browser when they op
 | Tool | What it does | Effect |
 | --- | --- | --- |
 | `preview_email` | Shows exactly who gets what, without sending | reads |
-| `send_email` | Sends one email with an unsubscribe footer and logs it; needs `confirm: true` | **sends** |
+| `send_email` | Puts one email (with an unsubscribe footer) in the pending actions; needs `confirm: true` | asks (**sends** after approval) |
 | `preview_broadcast` | How many people an audience reaches and the first few addresses | reads |
-| `send_broadcast` | Emails a whole audience in the background; needs `confirm: true` | **sends** |
+| `send_broadcast` | Puts a broadcast to a whole audience in the pending actions; needs `confirm: true` | asks (**sends** after approval) |
 | `email_history` | Emails sent, newest first | reads |
 
-<Callout kind="warning">`confirm: true` and approval are the only brakes. The server checks that the caller is an admin, not that a human said yes. The instructions tell Claude to ask first, but whoever holds a connected admin session can publish and send.</Callout>
+## The human gate
+
+Nothing the connector does reaches people outside the system by itself. `send_email`, `send_broadcast`, `approve_post`, `publish_post` and `retry_post` only create a row in `pendingActions` (`convex/pendingActions.ts`) with exactly what would go out: the recipient, subject and text; the audience and its size; or the post's networks, captions and media at the time of asking. Admins get a push. An admin approves or rejects it under **Pending** on the Studio's Queue or **Pending actions** on the admin's Social page. Only `pendingActions.approve`, a Clerk-session mutation that requires the admin role, executes it, through the same code as the Studio's own buttons. The connector's service credential can't call it, so Claude saying "Giorgi approved" never counts.
+
+- **Once.** Approving a request that was already approved, rejected or expired does nothing.
+- **Stale posts.** If the post changed after Claude asked, approval is refused: reject it and look again.
+- **Expiry.** A request can be approved for 3 days (`PENDING_ACTION_TTL_MS`).
+- **Daily caps.** `MCP_DAILY_CAPS` in `convex/lib/config.ts`: 20 emails, 1 broadcast and 10 post publishes in any 24 hours. They apply when Claude asks (waiting and approved requests count) and again when an admin approves. They change only with a deploy, so an agent can't raise them.
+
+The Studio's own Approve, Publish and Retry buttons don't go through this: a signed-in admin is already the human.
+
+## The audit log
+
+Every tool call is logged in `mcpAudit`: the tool, a short summary of its arguments with emails and tokens redacted (`convex/lib/mcpAudit.ts`), the admin, the time and whether it worked. It is written once, centrally: `auditTools` (`lib/mcp/audit.ts`) wraps every tool registered in `lib/mcp/server.ts` and calls `mcp.logCall` after each call.
+
+<Callout kind="warning">Claude reads live websites for the listing desk. Treat text found there as untrusted: a page could try to talk the agent into sending something. The pending actions are the brake, so read what you approve.</Callout>
 
 ## Where it lives
 
@@ -128,6 +143,9 @@ Claude cannot render video. The reel renders in the admin's browser when they op
 | `lib/mcp/oauth.ts` | OAuth metadata, Clerk token check, `svc.` service credential |
 | `lib/mcp/catalog.ts` | Template, style and palette lists for the tool schemas |
 | `convex/mcp.ts` | The Convex function behind every tool |
+| `convex/pendingActions.ts` | The human gate: requests, Approve and Reject, the daily caps |
+| `lib/mcp/audit.ts`, `convex/lib/mcpAudit.ts` | The audit log wrapper and its redaction |
+| `components/admin/PendingActions.tsx`, `components/studio/queue/Pending.tsx` | The approval lists in the admin and the Studio |
 | `convex/lib/mcpAuth.ts` | `requireTokenAdmin`: credential to admin user |
 | `convex/lib/tokens.ts` | HMAC signing and checking |
 | `convex/editorial.ts` | The listing desk |

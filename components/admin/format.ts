@@ -5,8 +5,8 @@ import { STOREFRONT_URL } from "@/lib/storefront";
 // Status lists live here (not in the "use client" components) because server
 // pages need them too: a value imported from a client module is only a client
 // reference on the server, not the real array.
-export type ListingStatus = "pending" | "in_voting" | "awarded" | "archived" | "rejected";
-export const REVIEW_STATUSES: ListingStatus[] = ["pending", "in_voting", "awarded", "archived", "rejected"];
+export type ListingStatus = "pending" | "in_voting" | "awarded" | "archived" | "rejected" | "withdrawn";
+export const REVIEW_STATUSES: ListingStatus[] = ["pending", "in_voting", "awarded", "archived", "rejected", "withdrawn"];
 
 export type ClaimStatus = "pending" | "approved" | "rejected";
 export const CLAIM_STATUSES: ClaimStatus[] = ["pending", "approved", "rejected"];

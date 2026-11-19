@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { award, creatorTier, listingStatus, pillars, region } from "../schema";
-import { deleteMedia, mediaInfo, mediaUrl, type MediaId } from "./media";
+import { deleteMediaMany, isAdminUser, mediaInfo, mediaStillUsed, mediaUrl, type MediaActor, type MediaId } from "./media";
 import { CATEGORIES, LIMITS, isCategory, isTechnology, type CategorySlug, type CreatorTier, type RegionSlug } from "./taxonomy";
 import { ZERO_PILLARS, readPillars, round2, summarize, type Pillars, type StoredPillars } from "./scoring";
 
@@ -148,12 +148,12 @@ export async function uniqueSlug(
  * rolls the whole mutation back, deletes included.)
  */
 /** Validate extra screenshots: unique, at most LIMITS.gallery, all images. */
-export async function checkGallery(ctx: MutationCtx, ids: MediaId[] | undefined) {
+export async function checkGallery(ctx: MutationCtx, ids: MediaId[] | undefined, by: MediaActor) {
   const gallery = [...new Set(ids ?? [])];
   if (gallery.length > LIMITS.gallery) {
     fail(`Add up to ${LIMITS.gallery} more screenshots (${LIMITS.gallery + 1} in all).`);
   }
-  for (const id of gallery) await assertMedia(ctx, id, "Screenshot", "image");
+  for (const id of gallery) await assertMedia(ctx, id, "Screenshot", "image", by);
   return gallery.length ? gallery : undefined;
 }
 
@@ -162,9 +162,20 @@ export async function assertMedia(
   id: MediaId,
   field: string,
   kind: "image" | "video",
+  by: MediaActor,
 ) {
   const meta = await mediaInfo(ctx, id);
   if (!meta) fail(`${field} upload was not found. Please upload it again.`);
+  // A non-admin may only attach their own uploads (audit C-01): otherwise
+  // anyone could attach another listing's file and delete it by withdrawing.
+  // Convex storage files carry no uploader (users can't upload there any
+  // more), so a non-admin may only use one nothing else points at.
+  if (by !== "server" && !isAdminUser(by)) {
+    const mediaId = ctx.db.normalizeId("media", id);
+    const row = mediaId ? await ctx.db.get(mediaId) : null;
+    const owned = row ? row.uploadedBy === by._id : !(await mediaStillUsed(ctx, [id])).size;
+    if (!owned) fail(`${field} upload was not found. Please upload it again.`);
+  }
   const type = meta.contentType ?? "";
   if (kind === "image") {
     if (!type.startsWith("image/") || meta.size > LIMITS.imageBytes) {
@@ -180,7 +191,11 @@ export async function assertMedia(
 // Creators
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Finds a creator by name-derived slug, or creates one. */
+/**
+ * Finds a creator by name-derived slug, or creates one. New creators start
+ * unclaimed: a profile only gets an owner through a claim (link or approved
+ * request) or an admin's explicit choice (listings.approve with ownership).
+ */
 export async function findOrCreateCreator(
   ctx: MutationCtx,
   input: {
@@ -189,28 +204,50 @@ export async function findOrCreateCreator(
     region: RegionSlug;
     website?: string;
     location?: string;
-    claimedBy?: Id<"users">;
   },
 ): Promise<Id<"creators">> {
-  const base = slugify(input.name, "creator");
-  const existing = await ctx.db
-    .query("creators")
-    .withIndex("by_slug", (q) => q.eq("slug", base))
-    .first();
+  const existing = await creatorByName(ctx, input.name);
   if (existing) return existing._id;
   const now = Date.now();
   return await ctx.db.insert("creators", {
-    slug: base,
+    slug: slugify(input.name, "creator"),
     name: input.name,
     tier: input.tier,
     region: input.region,
     location: input.location,
     website: input.website,
-    isClaimed: Boolean(input.claimedBy),
-    claimedBy: input.claimedBy,
+    isClaimed: false,
     createdAt: now,
     updatedAt: now,
   });
+}
+
+/** The creator whose slug the credit name maps to, if any. */
+export async function creatorByName(ctx: QueryCtx, name: string) {
+  const slug = slugify(name, "creator");
+  return await ctx.db
+    .query("creators")
+    .withIndex("by_slug", (q) => q.eq("slug", slug))
+    .first();
+}
+
+/**
+ * The creator profile a new submission is credited to, or undefined. Typing a
+ * studio's name must not attach a site to a profile another account has
+ * claimed (it would show on their page under their name), so such a match
+ * leaves the submission unlinked: the admin sees the match on review and can
+ * link it when approving (listings.approve linkCreator). The submitter's own
+ * claimed profile and unclaimed profiles are fine to use, since nothing is
+ * public until the admin approves the site.
+ */
+export async function creatorForSubmission(
+  ctx: MutationCtx,
+  input: { name: string; tier: CreatorTier; region: RegionSlug; website?: string },
+  submitter: Id<"users">,
+): Promise<Id<"creators"> | undefined> {
+  const existing = await creatorByName(ctx, input.name);
+  if (existing && existing.isClaimed && existing.claimedBy !== submitter) return undefined;
+  return await findOrCreateCreator(ctx, input);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -242,26 +279,158 @@ export const EMPTY_SCORES = {
   awards: [] as Doc<"listings">["awards"],
 };
 
-export async function deleteListing(ctx: MutationCtx, listing: Doc<"listings">) {
-  await deleteMedia(ctx, listing.coverId);
-  for (const id of listing.galleryIds ?? []) await deleteMedia(ctx, id);
-  if (listing.videoId) await deleteMedia(ctx, listing.videoId);
-  const votes = await ctx.db
-    .query("votes")
-    .withIndex("by_listing", (q) => q.eq("listingId", listing._id))
+/**
+ * Whether a listing was ever on the public site: it has a publish date, a
+ * public status (older rows may lack the date), or it was withdrawn from one.
+ */
+export function wasEverPublic(listing: Doc<"listings">) {
+  return listing.publishedAt !== undefined || isPublicStatus(listing.status) || listing.status === "withdrawn";
+}
+
+/**
+ * The patch that brings a withdrawn listing back to the status it had. Its
+ * awards, votes and posts were never touched, so nothing else changes.
+ */
+export function restorePatch(listing: Doc<"listings">, now: number) {
+  return {
+    status: listing.withdrawnFrom ?? ("archived" as const),
+    withdrawnFrom: undefined,
+    withdrawnAt: undefined,
+    updatedAt: now,
+  };
+}
+
+/** A listing's award rows, revoked ones included. */
+export async function awardRowsOf(ctx: QueryCtx, listingId: Id<"listings">) {
+  return await ctx.db
+    .query("awards")
+    .withIndex("by_listing", (q) => q.eq("listingId", listingId))
     .collect();
-  for (const vote of votes) await ctx.db.delete(vote._id);
-  const claims = await ctx.db
-    .query("claims")
-    .withIndex("by_listing", (q) => q.eq("listingId", listing._id))
-    .collect();
-  for (const claim of claims) await ctx.db.delete(claim._id);
+}
+
+/**
+ * Whether the owner may delete the listing for good rather than archive it:
+ * only a submission that never went public and never won anything. Anything
+ * else has a history (an indexed page, badges on other sites, votes, posts,
+ * emails) that has to survive, so it is withdrawn instead (listings.withdraw).
+ */
+export async function ownerCanDelete(ctx: QueryCtx, listing: Doc<"listings">) {
+  if (wasEverPublic(listing)) return false;
+  return (await awardRowsOf(ctx, listing._id)).length === 0;
+}
+
+/**
+ * Deletes a listing with everything that points at it. Refuses while it
+ * holds an active award: revoke it on the Awards page first, so the badge and
+ * award page are retired on the record. Rows that only make sense with the
+ * listing go with it (votes, evaluations, round votes, conflicts, claims,
+ * briefs, revisions, revoked awards, unsent posts). History that must stay is
+ * kept with its link cleared: the award audit (plus one "listing_deleted"
+ * entry saying what was deleted), sent posts and the email log. Listings that
+ * were a redesign of it lose the pointer, and rounds drop it as a candidate.
+ * `by` is who asked: an owner only deletes files they uploaded, and no file
+ * another listing or juror still uses is deleted (deleteMediaMany, audit C-01).
+ */
+export async function deleteListing(
+  ctx: MutationCtx,
+  listing: Doc<"listings">,
+  by: MediaActor,
+  // wipeShowcase (CLI, deletes everything) is the only caller that skips the award check.
+  options: { evenWithActiveAwards?: boolean } = {},
+) {
+  const actorId = by === "server" ? undefined : by._id;
+  const id = listing._id;
+  const awards = await awardRowsOf(ctx, id);
+  const active = awards.filter((a) => a.status === "active");
+  if (active.length > 0 && !options.evenWithActiveAwards) {
+    fail(
+      `This site holds ${active.map((a) => a.tier).join(", ")}. Revoke ${active.length === 1 ? "it" : "them"} on the Awards page before deleting the listing.`,
+    );
+  }
+  const awardIds = new Set<string>(awards.map((a) => a._id));
+  const keepAward = (awardId: Id<"awards"> | undefined) => (awardId && awardIds.has(awardId) ? undefined : awardId);
+
+  const files = [listing.coverId, ...(listing.galleryIds ?? []), ...(listing.videoId ? [listing.videoId] : [])];
+
+  const votes = await ctx.db.query("votes").withIndex("by_listing", (q) => q.eq("listingId", id)).collect();
+  for (const row of votes) await ctx.db.delete(row._id);
+  const claims = await ctx.db.query("claims").withIndex("by_listing", (q) => q.eq("listingId", id)).collect();
+  for (const row of claims) await ctx.db.delete(row._id);
   const evaluations = await ctx.db
     .query("juryEvaluations")
-    .withIndex("by_listing", (q) => q.eq("listingId", listing._id))
+    .withIndex("by_listing", (q) => q.eq("listingId", id))
     .collect();
-  for (const e of evaluations) await ctx.db.delete(e._id);
-  await ctx.db.delete(listing._id);
+  for (const row of evaluations) await ctx.db.delete(row._id);
+  const conflicts = await ctx.db.query("conflicts").withIndex("by_listing", (q) => q.eq("listingId", id)).collect();
+  for (const row of conflicts) await ctx.db.delete(row._id);
+  const roundVotes = await ctx.db
+    .query("roundVotes")
+    .withIndex("by_listing_juror", (q) => q.eq("listingId", id))
+    .collect();
+  for (const row of roundVotes) await ctx.db.delete(row._id);
+  const briefs = await ctx.db.query("listingBriefs").withIndex("by_listing", (q) => q.eq("listingId", id)).collect();
+  for (const row of briefs) await ctx.db.delete(row._id);
+  const revisions = await ctx.db
+    .query("listingRevisions")
+    .withIndex("by_listing", (q) => q.eq("listingId", id))
+    .collect();
+  for (const row of revisions) await ctx.db.delete(row._id);
+
+  // Posts: what went out stays as history (unlinked); the rest goes, with its publish job.
+  const posts = await ctx.db.query("socialPosts").withIndex("by_listing_kind", (q) => q.eq("listingId", id)).collect();
+  for (const a of awards) {
+    const forAward = await ctx.db.query("socialPosts").withIndex("by_award", (q) => q.eq("awardId", a._id)).collect();
+    for (const post of forAward) if (!posts.some((p) => p._id === post._id)) posts.push(post);
+  }
+  for (const post of posts) {
+    if (post.status === "sent") {
+      await ctx.db.patch(post._id, { listingId: undefined, awardId: keepAward(post.awardId) });
+      continue;
+    }
+    if (post.publishJobId) {
+      const job = await ctx.db.system.get(post.publishJobId);
+      if (job && (job.state.kind === "pending" || job.state.kind === "inProgress")) {
+        await ctx.scheduler.cancel(post.publishJobId);
+      }
+    }
+    await ctx.db.delete(post._id);
+  }
+
+  const emails = await ctx.db.query("emailLog").withIndex("by_listing_kind", (q) => q.eq("listingId", id)).collect();
+  for (const row of emails) await ctx.db.patch(row._id, { listingId: undefined });
+
+  const audit = await ctx.db.query("awardAudit").withIndex("by_listing", (q) => q.eq("listingId", id)).collect();
+  for (const row of audit) await ctx.db.patch(row._id, { listingId: undefined, awardId: keepAward(row.awardId) });
+  for (const a of awards) await ctx.db.delete(a._id);
+
+  const redesigns = await ctx.db.query("listings").withIndex("by_redesignOf", (q) => q.eq("redesignOf", id)).collect();
+  for (const row of redesigns) await ctx.db.patch(row._id, { redesignOf: undefined });
+
+  // Rounds are few (one a month, one a year), so a bounded scan is fine.
+  for (const round of await ctx.db.query("rounds").take(500)) {
+    if (!round.candidates.includes(id) && round.winnerId !== id) continue;
+    await ctx.db.patch(round._id, {
+      candidates: round.candidates.filter((c) => c !== id),
+      ...(round.winnerId === id ? { winnerId: undefined } : {}),
+    });
+  }
+
+  await ctx.db.insert("awardAudit", {
+    kind: "listing_deleted",
+    actorId,
+    details: {
+      listingId: id,
+      slug: listing.slug,
+      title: listing.title,
+      url: listing.url,
+      status: listing.status,
+      revokedAwards: awards.map((a) => ({ tier: a.tier, period: a.period, slug: a.slug })),
+    },
+    createdAt: Date.now(),
+  });
+  await ctx.db.delete(id);
+  // After the listing is gone, so its own files don't count as "still used".
+  await deleteMediaMany(ctx, files, by);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -273,6 +442,18 @@ export const PUBLIC_STATUSES = ["in_voting", "awarded", "archived"] as const;
 /** in_voting, awarded and archived listings have a public page. */
 export function isPublicStatus(status: Doc<"listings">["status"]) {
   return (PUBLIC_STATUSES as readonly string[]).includes(status);
+}
+
+/**
+ * Whether a listing's judging has closed, so its scores, juror reviews and
+ * vote counts may be shown publicly. Judging closes in closeVoting
+ * (lib/awards.ts), which moves the listing out of in_voting to archived or
+ * awarded; until then every number is a running tally, and showing it would
+ * let jurors herd and owners lobby. The cron can run a little after
+ * votingEndsAt, so status (not the clock) is the single source of truth.
+ */
+export function judgingClosed(listing: Pick<Doc<"listings">, "status">) {
+  return listing.status === "awarded" || listing.status === "archived";
 }
 
 export const publicListing = v.object({
@@ -294,7 +475,9 @@ export const publicListing = v.object({
   awards: v.array(award),
   editorialScores: v.union(pillars, v.null()),
   communityScores: v.union(pillars, v.null()),
-  communityVotesCount: v.number(),
+  /** Scores and vote counts are null while judging is open (see judgingClosed). */
+  scoresRevealed: v.boolean(),
+  communityVotesCount: v.union(v.number(), v.null()),
   editorialAverage: v.union(v.number(), v.null()),
   communityAverage: v.union(v.number(), v.null()),
   finalScore: v.union(v.number(), v.null()),
@@ -306,7 +489,7 @@ export const publicListing = v.object({
   /** The Tbilisi day it won Site of the Day ("2026-11-12"), or null. */
   sotdDay: v.union(v.string(), v.null()),
   /** Jury votes counted in the score (eligibility needs the configured minimum). */
-  juryVotes: v.number(),
+  juryVotes: v.union(v.number(), v.null()),
   /** Built by the Shemoqmedi team: shown as such, never eligible for awards. */
   byTeam: v.boolean(),
   /** A redesign of this earlier listing (its slug). */
@@ -348,6 +531,8 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
       ).find((a) => a.tier === "SOTD" && a.status === "active")
     : undefined;
   const previous = listing.redesignOf ? await ctx.db.get(listing.redesignOf) : null;
+  // While judging is open every score and count below is a live tally: hide them.
+  const revealed = judgingClosed(listing);
   return {
     slug: listing.slug,
     title: listing.title,
@@ -365,9 +550,9 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
     creator: creator ? { slug: creator.slug, name: creator.name } : null,
     status: listing.status,
     awards: listing.awards,
-    editorialScores: listing.editorialScores ? readPillars(listing.editorialScores) : null,
+    editorialScores: revealed && listing.editorialScores ? readPillars(listing.editorialScores) : null,
     communityScores:
-      count > 0
+      revealed && count > 0
         ? {
             design: round2(t.design / count),
             usability: round2(t.usability / count),
@@ -375,16 +560,17 @@ export async function toPublic(ctx: QueryCtx, listing: Doc<"listings">) {
             content: round2(t.content / count),
           }
         : null,
-    communityVotesCount: count,
-    editorialAverage: listing.editorialAverage ?? null,
-    communityAverage: listing.communityAverage ?? null,
-    finalScore: listing.finalScore ?? null,
+    scoresRevealed: revealed,
+    communityVotesCount: revealed ? count : null,
+    editorialAverage: revealed ? (listing.editorialAverage ?? null) : null,
+    communityAverage: revealed ? (listing.communityAverage ?? null) : null,
+    finalScore: revealed ? (listing.finalScore ?? null) : null,
     publishedAt,
     votingEndsAt: listing.votingEndsAt ?? publishedAt,
     votingExtended: listing.votingExtendedAt !== undefined,
     awardedAt: listing.awardedAt ?? null,
     sotdDay: sotd?.period ?? null,
-    juryVotes: listing.juryVotes ?? 0,
+    juryVotes: revealed ? (listing.juryVotes ?? 0) : null,
     byTeam: listing.byTeam ?? false,
     redesignOf: previous && isPublicStatus(previous.status) ? previous.slug : null,
     isClaimed: listing.isClaimed,
@@ -406,7 +592,8 @@ export function isDoFollow(listing: Pick<Doc<"listings">, "isDoFollow" | "isClai
 
 /**
  * The fields that hand a listing to its owner: claimed, followed links, and
- * the claim link burned (kept as claimTokenUsed so the old URL redirects).
+ * any legacy plaintext claim token cleared (hashed links are burned in the
+ * claimLinks table by the caller).
  */
 export function claimedListingPatch(listing: Doc<"listings">, ownerId: Id<"users">, now: number) {
   return {
@@ -416,9 +603,23 @@ export function claimedListingPatch(listing: Doc<"listings">, ownerId: Id<"users
     // the links to nofollow, and no stale admin override survives the claim.
     isDoFollow: undefined,
     claimToken: undefined,
-    ...(listing.claimToken ? { claimTokenUsed: listing.claimToken } : {}),
     updatedAt: now,
   };
+}
+
+/**
+ * Removal requests used to be ordinary claims whose message started with
+ * this. Those rows have no `intent`, so the prefix is how we still tell them
+ * apart: approving one must never hand over ownership.
+ */
+export const LEGACY_REMOVAL_PREFIX = "Removal request: ";
+
+export type ClaimIntent = "claim" | "remove";
+
+/** What a claim row asks for. Rows from before `intent` existed default to "claim". */
+export function claimIntent(claim: Pick<Doc<"claims">, "intent" | "message">): ClaimIntent {
+  if (claim.intent) return claim.intent;
+  return claim.message.startsWith(LEGACY_REMOVAL_PREFIX) ? "remove" : "claim";
 }
 
 /** A listing's categories, primary first (older rows only have `category`). */

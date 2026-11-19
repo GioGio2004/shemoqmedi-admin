@@ -22,6 +22,7 @@ export const STATUS_LABEL: Record<ReviewStatus, string> = {
   awarded: "Awarded",
   archived: "Closed",
   rejected: "Rejected",
+  withdrawn: "Withdrawn",
 };
 
 const TABS: { status: ReviewStatus; label: string }[] = [
@@ -30,6 +31,7 @@ const TABS: { status: ReviewStatus; label: string }[] = [
   { status: "awarded", label: "Awarded" },
   { status: "archived", label: "Closed" },
   { status: "rejected", label: "Rejected" },
+  { status: "withdrawn", label: "Withdrawn" },
 ];
 
 const EMPTY: Record<ReviewStatus, { title: string; body: string }> = {
@@ -38,6 +40,10 @@ const EMPTY: Record<ReviewStatus, { title: string; body: string }> = {
   awarded: { title: "No awards yet.", body: "Awards are assigned when a voting window closes." },
   archived: { title: "Nothing closed yet.", body: "Sites that close without an award land here." },
   rejected: { title: "Nothing rejected.", body: "Rejected and unpublished sites land here." },
+  withdrawn: {
+    title: "Nothing withdrawn.",
+    body: "Sites their owners took off the site land here, awards and history kept. Restore one from its page.",
+  },
 };
 
 export function StatusBadge({ status }: { status: ReviewStatus }) {

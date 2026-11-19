@@ -236,7 +236,7 @@ export const audienceEmails = internalQuery({
 /**
  * Sends one message to an audience through Resend's batch endpoint (100 per
  * request), each with its own unsubscribe link. Scheduled by
- * mcp.sendBroadcast after the admin confirmed the preview.
+ * pendingActions.approve, when an admin approves a broadcast Claude asked for.
  */
 export const broadcast = internalAction({
   args: { audience, subject: v.string(), body: v.string(), broadcastId: v.string() },

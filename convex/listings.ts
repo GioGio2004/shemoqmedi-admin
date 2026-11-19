@@ -1,10 +1,11 @@
 import { hasJuryEvaluations } from "./jury";
 import { v } from "convex/values";
 import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
-import { mutation, query } from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
+import { mutation, query, type QueryCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
-import { award, creatorTier, listingStatus, pillars, region } from "./schema";
+import { award, creatorTier, listingStatus, pillars, region, withdrawableStatus } from "./schema";
+import { claimLinkStatus, linkStatus } from "./lib/claimLinkRows";
 import { LIMITS, isTechnology } from "./lib/taxonomy";
 import { normalizePillars, readPillars } from "./lib/scoring";
 import { batchVotingEnds, weekOf } from "./lib/time";
@@ -18,16 +19,22 @@ import {
   checkGallery,
   categoryName,
   checkCategories,
+  claimedListingPatch,
   cleanText,
+  creatorByName,
+  creatorForSubmission,
   deleteListing,
   fail,
   findOrCreateCreator,
   isDoFollow,
   isPublicStatus,
+  judgingClosed,
   listingCategories,
   mediaUrls,
   normalizeUrl,
+  ownerCanDelete,
   publicListing,
+  restorePatch,
   scoreFields,
   slugify,
   toPublic,
@@ -124,7 +131,32 @@ export const publicSlugs = query({
 // Signed-in users: submit and manage their own listings
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The user's listings: the ones they own, and submissions they sent in that
+ * nobody owns yet (a submitter only becomes the owner when an admin approves
+ * it with ownership, or through a claim). Newest first.
+ */
+async function listingsOf(ctx: QueryCtx, userId: Id<"users">) {
+  const owned = await ctx.db
+    .query("listings")
+    .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+    .collect();
+  const submitted = (
+    await ctx.db
+      .query("listings")
+      .withIndex("by_submittedBy", (q) => q.eq("submittedBy", userId))
+      .collect()
+  ).filter((l) => l.ownerId === undefined);
+  return [...owned, ...submitted].sort((a, b) => b._creationTime - a._creationTime);
+}
 
+/**
+ * Submit a site for review. It is created pending with the user recorded as
+ * its submitter only: no ownership, no claim, no followed link and no claimed
+ * creator profile until an admin approves it and chooses to hand ownership to
+ * the submitter (approve with grantOwnership). The submitter can still see and
+ * withdraw it (myListings / withdraw read submittedBy).
+ */
 export const submit = mutation({
   args: {
     title: v.string(),
@@ -168,14 +200,11 @@ export const submit = mutation({
     }
     if (!technologies.every(isTechnology)) fail("Unknown technology selected.");
 
-    await assertMedia(ctx, args.coverId, "Cover screenshot", "image");
-    const galleryIds = await checkGallery(ctx, args.galleryIds);
-    if (args.videoId) await assertMedia(ctx, args.videoId, "Preview video", "video");
+    await assertMedia(ctx, args.coverId, "Cover screenshot", "image", user);
+    const galleryIds = await checkGallery(ctx, args.galleryIds, user);
+    if (args.videoId) await assertMedia(ctx, args.videoId, "Preview video", "video", user);
 
-    const mine = await ctx.db
-      .query("listings")
-      .withIndex("by_owner", (q) => q.eq("ownerId", user._id))
-      .collect();
+    const mine = await listingsOf(ctx, user._id);
     if (mine.filter((l) => l.status === "pending").length >= LIMITS.pendingPerUser) {
       fail(
         `You already have ${LIMITS.pendingPerUser} sites waiting for review. Please wait for a decision first.`,
@@ -200,18 +229,18 @@ export const submit = mutation({
     });
     if (!domain.ok) fail(domain.reason);
 
-    const creatorId = await findOrCreateCreator(ctx, {
-      name: creditName,
-      tier: args.creatorTier,
-      region: args.region,
-      website: creditUrl,
-      claimedBy: user._id,
-    });
+    // Unclaimed (new) or the submitter's own profile; unlinked when the name
+    // belongs to someone else's claimed profile (lib/listingHelpers.ts).
+    const creatorId = await creatorForSubmission(
+      ctx,
+      { name: creditName, tier: args.creatorTier, region: args.region, website: creditUrl },
+      user._id,
+    );
 
     const now = Date.now();
     const slug = await uniqueSlug(ctx, "listings", slugify(title));
     const id = await ctx.db.insert("listings", {
-      ownerId: user._id,
+      submittedBy: user._id,
       isStartup: args.isStartup || undefined,
       domainKey: domainKey(url),
       redesignOf: domain.redesignOf,
@@ -234,7 +263,8 @@ export const submit = mutation({
       videoId: args.videoId,
       status: "pending",
       ...EMPTY_SCORES,
-      isClaimed: true,
+      // Not claimed (and so nofollow) until an admin gives the submitter ownership.
+      isClaimed: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -260,6 +290,15 @@ const ownListing = v.object({
   votingEndsAt: v.union(v.number(), v.null()),
   createdAt: v.number(),
   coverUrl: v.union(v.string(), v.null()),
+  /**
+   * What the user's "remove" does: "delete" (never public, no awards: gone for
+   * good), "archive" (hidden from the site, everything kept, restorable) or
+   * null (nothing: a submission they sent but don't own once it is public,
+   * or one already withdrawn, which offers restore instead).
+   */
+  removal: v.union(v.literal("delete"), v.literal("archive"), v.null()),
+  /** Withdrawn by the owner: restore brings it back as it was. */
+  canRestore: v.boolean(),
 });
 
 export const myListings = query({
@@ -273,11 +312,7 @@ export const myListings = query({
       .withIndex("byExternalId", (q) => q.eq("externalId", identity.subject))
       .unique();
     if (!user) return [];
-    const rows = await ctx.db
-      .query("listings")
-      .withIndex("by_owner", (q) => q.eq("ownerId", user._id))
-      .order("desc")
-      .collect();
+    const rows = await listingsOf(ctx, user._id);
     return Promise.all(
       rows.map(async (row) => ({
         id: row._id,
@@ -287,27 +322,85 @@ export const myListings = query({
         status: row.status,
         reviewNote: row.reviewNote ?? null,
         awards: row.awards,
-        finalScore: row.finalScore ?? null,
+        // Even the owner waits for judging to close: a live score invites lobbying.
+        finalScore: judgingClosed(row) ? (row.finalScore ?? null) : null,
         votingEndsAt: row.votingEndsAt ?? null,
         createdAt: row.createdAt,
         coverUrl: await mediaUrl(ctx, row.coverId),
+        removal: await removalFor(ctx, row, user._id),
+        canRestore: row.status === "withdrawn" && row.ownerId === user._id,
       })),
     );
   },
 });
 
-/** Owners can withdraw (delete) their own listing at any stage. */
+/** What withdrawing does for this user (see ownListing.removal). */
+async function removalFor(ctx: QueryCtx, listing: Doc<"listings">, userId: Id<"users">) {
+  if (listing.status === "withdrawn") return null;
+  const owner = listing.ownerId === userId;
+  const submitter = listing.ownerId === undefined && listing.submittedBy === userId;
+  if (!owner && !submitter) return null;
+  if (await ownerCanDelete(ctx, listing)) return "delete" as const;
+  // Only a verified owner can take a site that has been public off the site.
+  return owner ? ("archive" as const) : null;
+}
+
+/**
+ * Withdraw your listing. A submission that never went public and never won
+ * anything is deleted for good. Anything else (it has been public, or holds
+ * an award, even a revoked one) is archived instead: status "withdrawn",
+ * hidden from the site, with every award, vote, post and email kept so its
+ * history stays whole and `restore` can bring it back as it was. Only the
+ * owner can archive; the submitter of an unowned submission can only delete
+ * it while it is still unpublished.
+ */
 export const withdraw = mutation({
+  args: { id: v.id("listings") },
+  returns: v.object({ result: v.union(v.literal("deleted"), v.literal("archived")) }),
+  handler: async (ctx, { id }) => {
+    const user = await requireUser(ctx);
+    const listing = await ctx.db.get(id);
+    const owner = listing?.ownerId === user._id;
+    const submitter = listing?.ownerId === undefined && listing?.submittedBy === user._id;
+    if (!listing || (!owner && !submitter)) fail("Listing not found.");
+    if (listing.status === "withdrawn") fail("This site is already withdrawn.");
+    const removal = await removalFor(ctx, listing, user._id);
+    if (removal === "delete") {
+      await deleteListing(ctx, listing, user);
+      return { result: "deleted" as const };
+    }
+    if (removal !== "archive") fail("Only the site's owner can take it off the site. Ask us to transfer ownership.");
+    const now = Date.now();
+    await ctx.db.patch(id, {
+      status: "withdrawn",
+      withdrawnFrom: listing.status,
+      withdrawnAt: now,
+      // Out of the Site of the Day queue, as when an admin unpublishes it.
+      sotdQueuedAt: undefined,
+      updatedAt: now,
+    });
+    // Ping the hidden pages so engines recrawl them and see the 404.
+    if (isPublicStatus(listing.status)) {
+      await scheduleIndexNow(ctx, [...(await listingPaths(ctx, listing)), ...awardPaths(listing.awards)]);
+    }
+    return { result: "archived" as const };
+  },
+});
+
+/** The owner brings a withdrawn listing back, in the status it had. */
+export const restore = mutation({
   args: { id: v.id("listings") },
   returns: v.null(),
   handler: async (ctx, { id }) => {
     const user = await requireUser(ctx);
     const listing = await ctx.db.get(id);
     if (!listing || listing.ownerId !== user._id) fail("Listing not found.");
-    // Ping the removed page so engines recrawl it and see the 404.
-    const paths = isPublicStatus(listing.status) ? await listingPaths(ctx, listing) : [];
-    await deleteListing(ctx, listing);
-    await scheduleIndexNow(ctx, paths);
+    if (listing.status !== "withdrawn") fail("This site is not withdrawn.");
+    const patch = restorePatch(listing, Date.now());
+    await ctx.db.patch(id, patch);
+    if (isPublicStatus(patch.status)) {
+      await scheduleIndexNow(ctx, [...(await listingPaths(ctx, listing)), ...awardPaths(listing.awards)]);
+    }
     return null;
   },
 });
@@ -335,8 +428,20 @@ const reviewListing = v.object({
     v.object({ slug: v.string(), name: v.string(), isClaimed: v.boolean() }),
     v.null(),
   ),
+  /**
+   * Not linked to a creator, but "Made by" matches this existing profile (a
+   * submission typed the name of a profile someone else has claimed). The
+   * admin can link it when approving (approve linkCreator).
+   */
+  creditMatch: v.union(
+    v.object({ slug: v.string(), name: v.string(), isClaimed: v.boolean() }),
+    v.null(),
+  ),
   source: v.union(v.literal("submission"), v.literal("import"), v.literal("seed")),
   status: listingStatus,
+  /** Status "withdrawn": the status it had (restoring returns it there). */
+  withdrawnFrom: v.union(withdrawableStatus, v.null()),
+  withdrawnAt: v.union(v.number(), v.null()),
   reviewNote: v.union(v.string(), v.null()),
   reviewedAt: v.union(v.number(), v.null()),
   publishedAt: v.union(v.number(), v.null()),
@@ -361,15 +466,20 @@ const reviewListing = v.object({
   doFollowSetting: v.union(v.boolean(), v.null()),
   /** Pre-created for this juror (bundled claim link). */
   juror: v.union(v.object({ id: v.id("jurors"), name: v.string(), claimed: v.boolean() }), v.null()),
-  /** Secret claim link token while unclaimed (admin only). */
-  claimToken: v.union(v.string(), v.null()),
+  /** Whether an unclaimed listing has an open claim link (admin only); never the link itself. */
+  claimLink: claimLinkStatus,
   createdAt: v.number(),
   coverUrl: v.union(v.string(), v.null()),
   galleryUrls: v.array(v.string()),
   /** Extra screenshots with their ids, in order (for the admin media panel). */
   gallery: v.array(v.object({ id: vMediaId, url: v.union(v.string(), v.null()) })),
   videoUrl: v.union(v.string(), v.null()),
+  /** Who sent the submission in (older submissions: their owner). */
   submitter: v.union(v.object({ name: v.string(), email: v.string() }), v.null()),
+  /** The verified owner, if any. */
+  owner: v.union(v.object({ name: v.string(), email: v.string() }), v.null()),
+  /** Approve can hand ownership to the submitter: a submission nobody owns yet. */
+  canGrantOwnership: v.boolean(),
 });
 
 async function jurorRef(ctx: Parameters<typeof mediaUrls>[0], id: Doc<"listings">["jurorId"]) {
@@ -379,7 +489,9 @@ async function jurorRef(ctx: Parameters<typeof mediaUrls>[0], id: Doc<"listings"
 
 async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"listings">) {
   const owner = listing.ownerId ? await ctx.db.get(listing.ownerId) : null;
+  const submitter = listing.submittedBy ? await ctx.db.get(listing.submittedBy) : owner;
   const creator = listing.creatorId ? await ctx.db.get(listing.creatorId) : null;
+  const match = creator ? null : await creatorByName(ctx, listing.creditName);
   return {
     id: listing._id,
     slug: listing.slug,
@@ -396,8 +508,11 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
     creditName: listing.creditName,
     creditUrl: listing.creditUrl ?? null,
     creator: creator ? { slug: creator.slug, name: creator.name, isClaimed: creator.isClaimed } : null,
+    creditMatch: match ? { slug: match.slug, name: match.name, isClaimed: match.isClaimed } : null,
     source: listing.source,
     status: listing.status,
+    withdrawnFrom: listing.withdrawnFrom ?? null,
+    withdrawnAt: listing.withdrawnAt ?? null,
     reviewNote: listing.reviewNote ?? null,
     reviewedAt: listing.reviewedAt ?? null,
     publishedAt: listing.publishedAt ?? null,
@@ -422,13 +537,15 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
     isDoFollow: isDoFollow(listing),
     doFollowSetting: listing.isDoFollow ?? null,
     juror: await jurorRef(ctx, listing.jurorId),
-    claimToken: listing.isClaimed ? null : (listing.claimToken ?? null),
+    claimLink: listing.isClaimed ? null : await linkStatus(ctx, { kind: "listing", id: listing._id }, listing),
     createdAt: listing.createdAt,
     ...(await mediaUrls(ctx, listing)),
     gallery: await Promise.all(
       (listing.galleryIds ?? []).map(async (id) => ({ id, url: await mediaUrl(ctx, id) })),
     ),
-    submitter: owner ? { name: owner.name, email: owner.email } : null,
+    submitter: submitter ? { name: submitter.name, email: submitter.email } : null,
+    owner: owner ? { name: owner.name, email: owner.email } : null,
+    canGrantOwnership: listing.submittedBy !== undefined && listing.ownerId === undefined,
   };
 }
 
@@ -440,6 +557,7 @@ export const reviewCounts = query({
     awarded: v.number(),
     archived: v.number(),
     rejected: v.number(),
+    withdrawn: v.number(),
   }),
   handler: async (ctx) => {
     await requireAdmin(ctx);
@@ -456,6 +574,7 @@ export const reviewCounts = query({
       awarded: await count("awarded"),
       archived: await count("archived"),
       rejected: await count("rejected"),
+      withdrawn: await count("withdrawn"),
     };
   },
 });
@@ -518,11 +637,24 @@ export const setEditorialScores = mutation({
 /**
  * Approve: the site goes public and joins this week's batch (Monday to
  * Sunday, Tbilisi). The jury scores the batch until the end of next week.
+ *
+ * Ownership is the admin's explicit choice, never implied by submitting:
+ * grantOwnership hands the listing to its submitter (claimed, followed links,
+ * shown in their account as theirs) and, when its creator profile is
+ * unclaimed and credits nothing else, that profile too. Without it the site
+ * goes public unowned (nofollow; a claim link or request can hand it over
+ * later). linkCreator links an unlinked submission to the existing profile
+ * its "Made by" matches (see reviewListing.creditMatch); without it an
+ * unlinked submission gets a new unclaimed profile only if the name is free.
  */
 export const approve = mutation({
-  args: { id: v.id("listings") },
+  args: {
+    id: v.id("listings"),
+    grantOwnership: v.optional(v.boolean()),
+    linkCreator: v.optional(v.boolean()),
+  },
   returns: v.null(),
-  handler: async (ctx, { id }) => {
+  handler: async (ctx, { id, grantOwnership, linkCreator }) => {
     const admin = await requireAdmin(ctx);
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
@@ -530,7 +662,39 @@ export const approve = mutation({
       fail("Only pending or rejected sites can be approved.");
     }
     const now = Date.now();
+    const extra: Partial<Doc<"listings">> = {};
+    let creatorId = listing.creatorId;
+    if (!creatorId) {
+      const match = await creatorByName(ctx, listing.creditName);
+      if (match && linkCreator) creatorId = match._id;
+      else if (!match) {
+        creatorId = await findOrCreateCreator(ctx, {
+          name: listing.creditName,
+          tier: listing.creatorTier,
+          region: listing.region,
+          website: listing.creditUrl,
+        });
+      }
+      if (creatorId) extra.creatorId = creatorId;
+    }
+    if (grantOwnership) {
+      const submitter = listing.ownerId === undefined ? listing.submittedBy : undefined;
+      if (!submitter) fail("This site has no submitter to give ownership to.");
+      Object.assign(extra, claimedListingPatch(listing, submitter, now));
+      const creator = creatorId ? await ctx.db.get(creatorId) : null;
+      if (creator && !creator.isClaimed) {
+        const credits = await ctx.db
+          .query("listings")
+          .withIndex("by_creator", (q) => q.eq("creatorId", creator._id))
+          .take(2);
+        // A profile that credits other sites may be a real studio: that goes through a claim request.
+        if (credits.every((l) => l._id === id)) {
+          await ctx.db.patch(creator._id, { isClaimed: true, claimedBy: submitter, updatedAt: now });
+        }
+      }
+    }
     await ctx.db.patch(id, {
+      ...extra,
       status: "in_voting",
       reviewNote: undefined,
       reviewedBy: admin._id,
@@ -596,18 +760,22 @@ export const closeVotingNow = mutation({
   },
 });
 
+/**
+ * Admin: delete a listing for good, with what points at it (lib/listingHelpers.ts
+ * deleteListing). Refused while it holds an active award: revoke it first.
+ */
 export const remove = mutation({
   args: { id: v.id("listings") },
   returns: v.null(),
   handler: async (ctx, { id }) => {
-    await requireAdmin(ctx);
+    const admin = await requireAdmin(ctx);
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
     // Ping the removed page so engines recrawl it and see the 404.
     const paths = isPublicStatus(listing.status)
       ? [...(await listingPaths(ctx, listing)), ...awardPaths(listing.awards)]
       : [];
-    await deleteListing(ctx, listing);
+    await deleteListing(ctx, listing, admin);
     await scheduleIndexNow(ctx, paths);
     return null;
   },
@@ -624,13 +792,14 @@ async function swapMedia(
   listing: Doc<"listings">,
   kind: "cover" | "video",
   storageId: Doc<"listings">["coverId"],
+  by: Doc<"users">,
 ) {
   const label = kind === "cover" ? "Cover screenshot" : "Preview video";
-  await assertMedia(ctx, storageId, label, kind === "video" ? "video" : "image");
+  await assertMedia(ctx, storageId, label, kind === "video" ? "video" : "image", by);
   const field = kind === "cover" ? "coverId" : "videoId";
   const previous = listing[field];
   await ctx.db.patch(listing._id, { [field]: storageId, updatedAt: Date.now() });
-  if (previous && previous !== storageId) await deleteMedia(ctx, previous);
+  if (previous && previous !== storageId) await deleteMedia(ctx, previous, by);
 }
 
 /** Admin: replace a listing's cover screenshot or video. */
@@ -638,10 +807,10 @@ export const replaceMedia = mutation({
   args: { id: v.id("listings"), kind: mediaKind, storageId: vMediaId },
   returns: v.null(),
   handler: async (ctx, { id, kind, storageId }) => {
-    await requireAdmin(ctx);
+    const admin = await requireAdmin(ctx);
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
-    await swapMedia(ctx, listing, kind, storageId);
+    await swapMedia(ctx, listing, kind, storageId, admin);
     return null;
   },
 });
@@ -651,10 +820,10 @@ export const addGalleryImage = mutation({
   args: { id: v.id("listings"), storageId: vMediaId },
   returns: v.null(),
   handler: async (ctx, { id, storageId }) => {
-    await requireAdmin(ctx);
+    const admin = await requireAdmin(ctx);
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
-    const galleryIds = await checkGallery(ctx, [...(listing.galleryIds ?? []), storageId]);
+    const galleryIds = await checkGallery(ctx, [...(listing.galleryIds ?? []), storageId], admin);
     await ctx.db.patch(id, { galleryIds, updatedAt: Date.now() });
     return null;
   },
@@ -665,14 +834,14 @@ export const removeGalleryImage = mutation({
   args: { id: v.id("listings"), storageId: vMediaId },
   returns: v.null(),
   handler: async (ctx, { id, storageId }) => {
-    await requireAdmin(ctx);
+    const admin = await requireAdmin(ctx);
     const listing = await ctx.db.get(id);
     if (!listing) fail("Listing not found.");
     const gallery = listing.galleryIds ?? [];
     if (!gallery.includes(storageId)) fail("That screenshot is not on this listing.");
     const rest = gallery.filter((g) => g !== storageId);
     await ctx.db.patch(id, { galleryIds: rest.length ? rest : undefined, updatedAt: Date.now() });
-    await deleteMedia(ctx, storageId);
+    await deleteMedia(ctx, storageId, admin);
     return null;
   },
 });

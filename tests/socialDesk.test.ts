@@ -108,9 +108,12 @@ describe("social queue", () => {
     await env.t.mutation(api.mcp.updatePost, { token: env.token, id: post._id, captions: { instagram: "New on Shemoqmedi", linkedin: "I'm glad…" }, media: [] });
     await expect(env.t.mutation(api.mcp.approvePost, { token: env.token, id: post._id })).rejects.toThrow(/Instagram needs/);
     await env.t.mutation(api.mcp.updatePost, { token: env.token, id: post._id, captions: { instagram: "" } });
-    const approved = await env.t.mutation(api.mcp.approvePost, { token: env.token, id: post._id });
-    // Approval schedules publishing; with no network connected the post waits as approved.
-    expect(approved.status).toBe("scheduled");
+    // Claude only asks; the admin approves it (pendingActions), which schedules publishing.
+    const asked = await env.t.mutation(api.mcp.approvePost, { token: env.token, id: post._id });
+    expect(asked.status).toBe("pending");
+    await env.admin.mutation(api.pendingActions.approve, { id: asked.pendingActionId });
+    // With no network connected the post waits as approved.
+    expect((await env.t.run((ctx) => ctx.db.get(post._id)))!.status).toBe("scheduled");
     await drain(env);
     expect((await env.t.run((ctx) => ctx.db.get(post._id)))!).toMatchObject({ status: "approved", error: expect.stringMatching(/no connected account/) });
 
@@ -118,8 +121,13 @@ describe("social queue", () => {
     expect(log).toHaveLength(1);
     // No Resend key in tests: tried, logged as failed, to the studio's contact email.
     expect(log[0]).toMatchObject({ to: "hello@studio.example", kind: "featured", status: "failed", listingId: s.id });
-    // The unclaimed listing got a claim link for the email.
-    expect((await env.t.run((ctx) => ctx.db.get(s.id)))!.claimToken).toMatch(/^[a-f0-9]{64}$/);
+    // The unclaimed listing got a claim link for the email: stored hashed, bound to the studio's address.
+    const links = await env.t.run((ctx) =>
+      ctx.db.query("claimLinks").withIndex("by_listing", (q) => q.eq("listingId", s.id)).collect(),
+    );
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({ tokenHash: expect.stringMatching(/^[a-f0-9]{64}$/), email: "hello@studio.example" });
+    expect((await env.t.run((ctx) => ctx.db.get(s.id)))!.claimToken).toBeUndefined();
 
     // Editing an approved post sends it back to waiting.
     const back = await env.t.mutation(api.mcp.updatePost, { token: env.token, id: post._id, note: "tweak" });
@@ -160,7 +168,9 @@ describe("emails", () => {
       body: "Hi!\n\nClaim it: {claimLink}",
       confirm: true,
     });
-    expect(sent).toMatchObject({ sent: false, status: "skipped", to: "team@studio.example" });
+    expect(sent).toMatchObject({ sent: false, to: "team@studio.example" });
+    await env.admin.mutation(api.pendingActions.approve, { id: sent.pendingActionId! });
+    await drain(env);
     expect((await emails(env))[0]).toMatchObject({ status: "skipped", error: "Unsubscribed." });
   });
 
@@ -213,12 +223,16 @@ describe("emails", () => {
     const preview = await env.t.action(api.mcp.sendBroadcast, { token: env.token, audience: "studios", subject: "News", body: "Hello", confirm: false });
     expect(preview).toMatchObject({ started: false, recipients: 1, sample: ["one@studio.example"] });
     expect(await emails(env)).toHaveLength(0);
-    const started = await env.t.action(api.mcp.sendBroadcast, { token: env.token, audience: "studios", subject: "News", body: "Hello", confirm: true });
-    expect(started.started).toBe(true);
+    const asked = await env.t.action(api.mcp.sendBroadcast, { token: env.token, audience: "studios", subject: "News", body: "Hello", confirm: true });
+    expect(asked.started).toBe(false);
     await drain(env);
+    expect(await emails(env)).toHaveLength(0);
+    await env.admin.mutation(api.pendingActions.approve, { id: asked.pendingActionId! });
+    await drain(env);
+    const row = await env.t.run((ctx) => ctx.db.get(asked.pendingActionId!));
     const log = await emails(env);
     expect(log.map((e) => e.to)).toEqual(["one@studio.example"]);
-    expect(log[0]).toMatchObject({ kind: "broadcast", broadcastId: started.broadcastId });
+    expect(log[0]).toMatchObject({ kind: "broadcast", broadcastId: row!.result.broadcastId });
   });
 });
 
@@ -239,8 +253,9 @@ describe("review fixes", () => {
     const queue = await env.t.query(api.mcp.socialQueue, { token: env.token });
     expect(queue.map((p) => p.id)).toContain(id);
     await env.t.mutation(api.mcp.updatePost, { token: env.token, id, captions: { instagram: "Honorable Mention" } });
-    const approved = await env.t.mutation(api.mcp.approvePost, { token: env.token, id });
-    expect(approved).toMatchObject({ status: "scheduled", media: [{ url: "https://img.example/a.jpg" }] });
+    const asked = await env.t.mutation(api.mcp.approvePost, { token: env.token, id });
+    await env.admin.mutation(api.pendingActions.approve, { id: asked.pendingActionId });
+    expect(await env.t.run((ctx) => ctx.db.get(id))).toMatchObject({ status: "scheduled", media: [{ url: "https://img.example/a.jpg" }] });
   });
 
   it("refuses to approve a post whose site was unpublished, and sends no featured email", async () => {

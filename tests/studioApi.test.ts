@@ -427,7 +427,11 @@ describe("MCP: publish, unschedule, placement", () => {
     });
     expect(created.placement).toBe("story");
     const at = Date.now() + 2 * HOUR;
-    expect(await env.t.mutation(api.mcp.publishPost, { token: env.token, id: created.id, at })).toMatchObject({ status: "scheduled", scheduledFor: at });
+    // MCP only asks; the admin's approval publishes (pendingActions).
+    const asked = await env.t.mutation(api.mcp.publishPost, { token: env.token, id: created.id, at });
+    expect(asked.status).toBe("pending");
+    expect(await env.admin.mutation(api.pendingActions.approve, { id: asked.pendingActionId })).toMatchObject({ executed: true });
+    expect(await env.admin.query(api.social.get, { id: created.id })).toMatchObject({ status: "scheduled", scheduledFor: at });
     expect(await env.t.mutation(api.mcp.unschedulePost, { token: env.token, id: created.id })).toMatchObject({ status: "waiting" });
     const feed = await env.t.mutation(api.mcp.updatePost, { token: env.token, id: created.id, placement: "feed", media: [{ kind: "image", url: FEED_IMG }] });
     expect(feed.placement).toBe("feed");

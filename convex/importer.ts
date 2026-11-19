@@ -288,7 +288,7 @@ export const insertImported = internalMutation({
       .collect();
     const live = existing.find((l) => l.status !== "rejected");
     if (live) {
-      await deleteMedia(ctx, args.coverId);
+      await deleteMedia(ctx, args.coverId, "server");
       return { id: live._id, slug: live.slug, skipped: true };
     }
 

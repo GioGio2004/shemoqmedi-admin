@@ -19,8 +19,9 @@ export function Outreach() {
           <h1>Outreach.</h1>
           <p>
             Pre-created jury profiles and listings nobody has claimed yet. Each has a private claim link: send it to
-            the person, they sign in and it&apos;s theirs. A link works once. Claiming makes a listing&apos;s links
-            followed (dofollow).
+            the person, they sign in and it&apos;s theirs. A link is shown once when you make it, works once and
+            expires after 14 days. If the profile has an email, only an account with that email can claim it.
+            Claiming makes a listing&apos;s links followed (dofollow).
           </p>
         </div>
         <Link href="/jury" className="admin-button admin-button-secondary">
@@ -69,7 +70,7 @@ export function Outreach() {
                       )}
                     </div>
                     <div className="grid gap-3 md:grid-cols-2">
-                      <ClaimLink target={{ kind: "juror", id: j.id }} token={j.claimToken} />
+                      <ClaimLink target={{ kind: "juror", id: j.id }} status={j.claimLink} />
                       <EmailClaimLink jurorId={j.id} email={j.email} name={j.name} />
                     </div>
                   </li>
@@ -104,7 +105,7 @@ export function Outreach() {
                         {formatDate(l.createdAt)}.
                       </p>
                     </div>
-                    <ClaimLink target={{ kind: "listing", id: l.id }} token={l.claimToken} />
+                    <ClaimLink target={{ kind: "listing", id: l.id }} status={l.claimLink} />
                   </li>
                 ))}
               </ul>

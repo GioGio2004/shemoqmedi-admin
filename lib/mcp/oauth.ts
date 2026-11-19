@@ -70,25 +70,61 @@ export const METADATA_CORS_HEADERS = {
   "Cache-Control": "public, max-age=300",
 };
 
+type Env = Record<string, string | undefined>;
+
 /**
- * The Clerk user behind an OAuth access token, or null if the token isn't a valid one.
- * MCP_OAUTH_AUDIENCE (e.g. https://<admin domain>/api/mcp) also binds the
- * token to this resource server, so a token minted for another app on the same
- * Clerk instance is refused. Opt-in: confirm Clerk applies it to the tokens your
- * clients get before setting it, or every connector breaks at once.
+ * MCP_OAUTH_AUDIENCE (https://admin.shemoqmedi.space/api/mcp, the `resource`
+ * in protectedResourceMetadata) binds tokens to this resource server, so a
+ * token minted for another app on the same Clerk instance is refused. In
+ * production it is required: unset, every MCP request is refused (and logged)
+ * instead of accepting any token of the instance. Fails closed on purpose.
+ * Development and tests may leave it unset.
  */
+export function oauthAudience(env: Env = process.env): { ok: true; audience?: string } | { ok: false; reason: string } {
+  const audience = env.MCP_OAUTH_AUDIENCE?.trim();
+  if (audience) return { ok: true, audience };
+  if (env.NODE_ENV === "production") {
+    return { ok: false, reason: "MCP sign-in refused: MCP_OAUTH_AUDIENCE is not set on this deployment (expected https://admin.shemoqmedi.space/api/mcp)." };
+  }
+  return { ok: true };
+}
+
+/**
+ * MCP_OAUTH_CLIENT_IDS (optional, comma-separated): only these Clerk OAuth
+ * applications may call the connector, e.g. the one made for claude.ai. Clerk
+ * checks the audience only on JWT access tokens; this also holds for its
+ * default opaque ones. Unset: any client of the instance.
+ */
+export function clientAllowed(clientId: string | undefined, env: Env = process.env): boolean {
+  const list = (env.MCP_OAUTH_CLIENT_IDS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return list.length === 0 || (!!clientId && list.includes(clientId));
+}
+
+/** The Clerk user behind an OAuth access token, or null if the token isn't a valid one (or isn't for this server). */
 export async function verifyOAuthToken(req: Request): Promise<{ userId: string; scopes: string[]; clientId?: string } | null> {
+  const bound = oauthAudience();
+  if (!bound.ok) {
+    console.error(bound.reason);
+    return null;
+  }
   const client = await clerkClient();
-  const audience = process.env.MCP_OAUTH_AUDIENCE;
   const state = await client.authenticateRequest(req, {
     acceptsToken: "oauth_token",
-    ...(audience ? { audience } : {}),
+    ...(bound.audience ? { audience: bound.audience } : {}),
   });
   const auth = state.toAuth();
   if (!auth || !auth.isAuthenticated || auth.tokenType !== "oauth_token" || !auth.userId) {
     return null;
   }
-  return { userId: auth.userId, scopes: auth.scopes ?? [], clientId: auth.clientId ?? undefined };
+  const clientId = auth.clientId ?? undefined;
+  if (!clientAllowed(clientId)) {
+    console.warn(`MCP sign-in refused: OAuth client ${clientId ?? "(none)"} is not in MCP_OAUTH_CLIENT_IDS.`);
+    return null;
+  }
+  return { userId: auth.userId, scopes: auth.scopes ?? [], clientId };
 }
 
 function base64url(bytes: Uint8Array): string {

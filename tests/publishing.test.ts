@@ -209,8 +209,14 @@ async function newPost(env: Env, captions: Partial<typeof ALL>, media: Media[], 
 const getPost = (env: Env, id: Id<"socialPosts">) => env.t.run((ctx) => ctx.db.get(id));
 const drain = (env: Env) => env.t.finishAllScheduledFunctions(vi.runAllTimers);
 
+/** The admin's Approve button (Clerk session). MCP approve_post only asks for it (pendingActions, tests/mcpLockdown.test.ts). */
+async function approveNow(env: Env, id: Id<"socialPosts">) {
+  await env.admin.mutation(api.social.approve, { id });
+  return (await getPost(env, id))!;
+}
+
 async function publishNow(env: Env, id: Id<"socialPosts">) {
-  const approved = await env.t.mutation(api.mcp.approvePost, { token: env.token, id });
+  const approved = await approveNow(env, id);
   expect(approved.status).toBe("scheduled");
   await drain(env);
   return (await getPost(env, id))!;
@@ -466,7 +472,8 @@ describe("failure and retry", () => {
     });
     const before = counts();
     failIg = false;
-    const retried = await env.t.mutation(api.mcp.retryPost, { token: env.token, id });
+    await env.admin.mutation(api.social.retry, { id });
+    const retried = (await getPost(env, id))!;
     expect(retried.status).toBe("scheduled");
     await drain(env);
     const after = counts();
@@ -506,7 +513,7 @@ describe("failure and retry", () => {
     const at = Date.now() + 2 * 60 * 60 * 1000;
     const id = await newPost(env, { facebook: "Later" }, []);
     await env.t.mutation(api.mcp.updatePost, { token: env.token, id, scheduledFor: at });
-    await env.t.mutation(api.mcp.approvePost, { token: env.token, id });
+    await approveNow(env, id);
     const scheduled = (await getPost(env, id))!;
     expect(scheduled.status).toBe("scheduled");
     const job = await env.t.run((ctx) => ctx.db.system.get(scheduled.publishJobId!));
@@ -519,7 +526,7 @@ describe("failure and retry", () => {
     expect((await getPost(env, id))!.publishJobId).toBeUndefined();
 
     // Approve again, then reject: cancelled again; nothing is ever published.
-    await env.t.mutation(api.mcp.approvePost, { token: env.token, id });
+    await approveNow(env, id);
     const again = (await getPost(env, id))!;
     expect(again.publishJobId).not.toBe(scheduled.publishJobId);
     const rejected = await env.t.mutation(api.mcp.rejectPost, { token: env.token, id, note: "Not now" });
@@ -532,7 +539,7 @@ describe("failure and retry", () => {
     env.token = (await mintServiceCredential("admin"))!;
     const id2 = await newPost(env, { facebook: "Timed" }, []);
     await env.t.mutation(api.mcp.updatePost, { token: env.token, id: id2, scheduledFor: at });
-    await env.t.mutation(api.mcp.approvePost, { token: env.token, id: id2 });
+    await approveNow(env, id2);
     await drain(env);
     const sent = (await getPost(env, id2))!;
     expect(sent.status).toBe("sent");
@@ -543,7 +550,7 @@ describe("failure and retry", () => {
     fakeNetworks();
     const env = await setup();
     const id = await newPost(env, { facebook: "Busy" }, []);
-    await env.t.mutation(api.mcp.approvePost, { token: env.token, id });
+    await approveNow(env, id);
     await env.t.run((ctx) => ctx.db.patch(id, { publishingUntil: Date.now() + 60_000 }));
     await expect(env.t.mutation(api.mcp.updatePost, { token: env.token, id, note: "x" })).rejects.toThrow(/being published/);
     await expect(env.t.mutation(api.mcp.rejectPost, { token: env.token, id })).rejects.toThrow(/being published/);
@@ -561,7 +568,7 @@ describe("failure and retry", () => {
     const ok = await env.t.mutation(api.mcp.updatePost, { token: env.token, id, captions: { threads: "x".repeat(500) } });
     expect(ok.captions.threads).toHaveLength(500);
     // A Threads caption alone is enough to approve.
-    expect((await env.t.mutation(api.mcp.approvePost, { token: env.token, id })).status).toBe("scheduled");
+    expect((await approveNow(env, id)).status).toBe("scheduled");
   });
 });
 
@@ -784,7 +791,7 @@ describe("Instagram aspect ratio", () => {
     await expect(env.t.mutation(api.mcp.approvePost, { token: env.token, id })).rejects.toThrow(/Instagram takes images between 4:5 and 1\.91:1/);
     // Limited to the other networks, the same image is fine.
     await env.t.mutation(api.mcp.updatePost, { token: env.token, id, captions: { instagram: "" } });
-    expect((await env.t.mutation(api.mcp.approvePost, { token: env.token, id })).status).toBe("scheduled");
+    expect((await approveNow(env, id)).status).toBe("scheduled");
   });
 
   it("instagramImageUrl keeps images in range and of unknown size, chains after other transforms", () => {
@@ -837,14 +844,14 @@ describe("publish runs", () => {
     const fake = fakeNetworks();
     const env = await setup();
     const id = await newPost(env, { facebook: "Now" }, []);
-    await env.t.mutation(api.mcp.approvePost, { token: env.token, id });
+    await approveNow(env, id);
     const first = (await getPost(env, id))!;
     expect(first.publishRun).toBe(1);
 
     // Edited (run 1 is cancelled, but it may already be running) and approved again for tomorrow.
     const tomorrow = Date.now() + DAY;
     await env.t.mutation(api.mcp.updatePost, { token: env.token, id, captions: { facebook: "Tomorrow" }, scheduledFor: tomorrow });
-    await env.t.mutation(api.mcp.approvePost, { token: env.token, id });
+    await approveNow(env, id);
     expect((await getPost(env, id))!.publishRun).toBe(2);
 
     // Run 1 reaching begin now: refused. Run 2 before its time: refused.
@@ -865,7 +872,7 @@ describe("publish runs", () => {
     fakeNetworks();
     const env = await setup();
     const id = await newPost(env, { facebook: "Crash" }, []);
-    await env.t.mutation(api.mcp.approvePost, { token: env.token, id });
+    await approveNow(env, id);
     const lease = Date.now() + 9.5 * 60_000;
     // The run claimed the post, then died: the job is gone, the lease stays.
     await env.t.run(async (ctx) => {
@@ -978,7 +985,7 @@ describe("a new schedule after a run that died", () => {
     fakeNetworks();
     const env = await setup();
     const id = await newPost(env, { facebook: "Crash" }, []);
-    await env.t.mutation(api.mcp.approvePost, { token: env.token, id });
+    await approveNow(env, id);
     // The run claimed the post, then died: the job is gone, the lease stays and runs out.
     await env.t.run(async (ctx) => {
       const post = (await ctx.db.get(id))!;
@@ -994,7 +1001,7 @@ describe("a new schedule after a run that died", () => {
 
     // Schedule it for tomorrow: a normal schedule (unschedule, move time, edit), not a stalled run.
     const tomorrow = Date.now() + DAY;
-    await env.t.mutation(api.mcp.publishPost, { token, id, at: tomorrow });
+    await env.admin.mutation(api.social.publish, { id, at: tomorrow });
     const view = (await env.admin.query(api.social.queue, { status: "scheduled" })).find((p) => p.id === id)!;
     expect(view.publishingUntil).toBeNull();
     expect(publishState(view, Date.now())).toMatchObject({ publishing: false, stalled: false, canRetry: false });
@@ -1008,7 +1015,7 @@ describe("a new schedule after a run that died", () => {
     const id = await newPost(env, { facebook: "Old lease" }, []);
     // A row from before the fix: waiting, with a dead run's lease.
     await env.t.run((ctx) => ctx.db.patch(id, { publishingUntil: Date.now() - 60_000 }));
-    await env.t.mutation(api.mcp.publishPost, { token: env.token, id, at: Date.now() + DAY });
+    await env.admin.mutation(api.social.publish, { id, at: Date.now() + DAY });
     const post = (await getPost(env, id))!;
     expect(post.status).toBe("scheduled");
     expect(post.publishingUntil).toBeUndefined();

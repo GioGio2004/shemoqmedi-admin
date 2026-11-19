@@ -63,7 +63,7 @@ async function submitAndApprove(env: Awaited<ReturnType<typeof setup>>) {
   const { t, maker, admin } = env;
   const { slug } = await maker.mutation(api.listings.submit, input(await storeFile(t)));
   const [{ id }] = await maker.query(api.listings.myListings, {});
-  await admin.mutation(api.listings.approve, { id });
+  await admin.mutation(api.listings.approve, { id, grantOwnership: true });
   return { slug, id };
 }
 
@@ -75,7 +75,7 @@ async function giveBadge(env: Awaited<ReturnType<typeof setup>>, who: "voter1" |
     input(await storeFile(t), { title: `${who} site`, url: `https://${who}.example`, creditName: who }),
   );
   const [{ id }] = await env[who].query(api.listings.myListings, {});
-  await admin.mutation(api.listings.approve, { id });
+  await admin.mutation(api.listings.approve, { id, grantOwnership: true });
 }
 
 describe("submission", () => {
@@ -96,7 +96,7 @@ describe("submission", () => {
     ).rejects.toThrow(/Unauthenticated/);
   });
 
-  it("creates a pending listing and a claimed creator profile", async () => {
+  it("creates a pending listing and an unclaimed creator profile", async () => {
     const { t, maker } = await setup();
     const { slug } = await maker.mutation(api.listings.submit, input(await storeFile(t)));
     expect(slug).toBe("paper-weather");
@@ -105,7 +105,8 @@ describe("submission", () => {
     expect(await t.query(api.listings.listPublic, {})).toEqual([]);
     expect(await t.query(api.listings.getPublicBySlug, { slug })).toBeNull();
     const creator = await t.run((ctx) => ctx.db.query("creators").first());
-    expect(creator).toMatchObject({ slug: "fold-co", tier: "solo", region: "georgia", isClaimed: true });
+    expect(creator).toMatchObject({ slug: "fold-co", tier: "solo", region: "georgia", isClaimed: false });
+    expect(creator!.claimedBy).toBeUndefined();
   });
 
   it("rejects Express Fast-Track for now", async () => {
@@ -181,16 +182,23 @@ describe("review and voting window", () => {
     const env = await setup();
     const { slug, id } = await submitAndApprove(env);
     await env.admin.mutation(api.listings.setEditorialScores, { id, scores: p(8) });
-    expect((await env.t.query(api.listings.getPublicBySlug, { slug }))!.finalScore).toBe(8);
+    // Sealed in public while in voting (tests/scoreVisibility.test.ts); admins see the tally.
+    expect((await env.t.query(api.listings.getPublicBySlug, { slug }))!.finalScore).toBeNull();
+    expect((await env.admin.query(api.listings.reviewDetail, { id }))!.finalScore).toBe(8);
 
     await giveBadge(env, "voter1");
     await giveBadge(env, "voter2");
     await env.voter1.mutation(api.votes.cast, { slug, scores: p(9) });
     await env.voter2.mutation(api.votes.cast, { slug, scores: { design: 10, usability: 9, creativity: 9, content: 8 } });
-    const listing = await env.t.query(api.listings.getPublicBySlug, { slug });
-    expect(listing).toMatchObject({
+    expect(await env.admin.query(api.listings.reviewDetail, { id })).toMatchObject({
       editorialAverage: 8,
       communityAverage: 9.15, // 9.5*.4 + 9*.3 + 9*.2 + 8.5*.1
+      finalScore: 8,
+      communityVotesCount: 2,
+    });
+    // Revealed in public once judging closes.
+    await env.admin.mutation(api.admin.setLifecycle, { id, status: "archived" });
+    expect(await env.t.query(api.listings.getPublicBySlug, { slug })).toMatchObject({
       finalScore: 8,
       communityVotesCount: 2,
       communityScores: { design: 9.5, usability: 9, creativity: 9, content: 8.5 },
@@ -277,16 +285,16 @@ describe("review and voting window", () => {
     expect(await env.t.query(api.listings.getPublicBySlug, { slug })).toBeNull();
   });
 
-  it("only the owner can withdraw; files and votes are deleted", async () => {
+  it("only the owner can withdraw; a site that was public is archived with its votes", async () => {
     const env = await setup();
     const { slug, id } = await submitAndApprove(env);
     await giveBadge(env, "voter1");
     await env.voter1.mutation(api.votes.cast, { slug, scores: p(8) });
     await expect(env.voter1.mutation(api.listings.withdraw, { id })).rejects.toThrow(/not found/);
-    await env.maker.mutation(api.listings.withdraw, { id });
-    expect(await env.t.run((ctx) => ctx.db.query("votes").collect())).toEqual([]);
-    // Only voter1's own listing (their badge) is left.
-    expect((await env.t.run((ctx) => ctx.db.query("listings").collect())).map((l) => l.title)).toEqual(["voter1 site"]);
+    expect(await env.maker.mutation(api.listings.withdraw, { id })).toEqual({ result: "archived" });
+    expect(await env.t.query(api.listings.getPublicBySlug, { slug })).toBeNull();
+    expect(await env.t.run((ctx) => ctx.db.query("votes").collect())).toHaveLength(1);
+    expect(await env.t.run((ctx) => ctx.db.get(id))).toMatchObject({ status: "withdrawn", withdrawnFrom: "in_voting" });
   });
 });
 

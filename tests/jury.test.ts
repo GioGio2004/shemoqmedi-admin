@@ -71,20 +71,27 @@ async function juror(env: Env, name: string, extra: Record<string, unknown> = {}
   return { id, token: tokenOf(url) };
 }
 
+/** Claims a profile with no email on it, then an admin activates it (claimLinks.test.ts covers the email check). */
 async function joinJury(env: Env, name: string, user: Env["ana"]) {
   const { id, token } = await juror(env, name);
   await user.mutation(api.claimLinks.claim, { token });
+  await env.admin.mutation(api.claimLinks.activateJuror, { jurorId: id });
   return id;
 }
 
 describe("jury claim links", () => {
   it("an unclaimed jury profile is private until its link is claimed", async () => {
     const env = await setup();
-    const { id, token } = await juror(env, "Ana Beridze", { linkedinUrl: "linkedin.com/in/ana", website: "" });
+    const { id, token } = await juror(env, "Ana Beridze", {
+      linkedinUrl: "linkedin.com/in/ana",
+      website: "",
+      email: "ana@example.com",
+    });
     expect(token).toMatch(/^[a-f0-9]{64}$/);
-    // Same link on the second request: copying twice doesn't break the first DM.
+    // A second copy is a new link; the first one (already in a DM) keeps working until one is used.
     const again = await env.admin.action(api.claimLinks.link, { target: { kind: "juror", id } });
-    expect(tokenOf(again.url)).toBe(token);
+    expect(tokenOf(again.url)).not.toBe(token);
+    expect((await env.t.query(api.claimLinks.resolve, { token: tokenOf(again.url) })).state).toBe("open");
 
     expect(await env.t.query(api.jury.listPublic, {})).toEqual([]);
     const slug = (await env.admin.query(api.jury.adminOverview, {}))[0].slug;
@@ -102,7 +109,10 @@ describe("jury claim links", () => {
     expect(await env.ana.mutation(api.claimLinks.claim, { token })).toEqual({
       kind: "juror",
       redirect: "/jury/profile?claimed=1",
+      pending: false,
     });
+    // Claiming used one link and revoked the other.
+    expect((await env.t.query(api.claimLinks.resolve, { token: tokenOf(again.url) })).state).toBe("invalid");
     expect(await env.ana.query(api.jury.me, {})).toMatchObject({ name: "Ana Beridze", imageUrl: "https://img.clerk.com/ana.png" });
     expect(await env.t.query(api.jury.listPublic, {})).toHaveLength(1);
     expect(await env.t.query(api.jury.getBySlug, { slug })).not.toBeNull();
@@ -110,7 +120,7 @@ describe("jury claim links", () => {
     // Burned: the link now redirects, and nobody else can use it.
     expect(await env.t.query(api.claimLinks.resolve, { token })).toMatchObject({ state: "claimed", redirect: `/jury/${slug}` });
     await expect(env.stranger.mutation(api.claimLinks.claim, { token })).rejects.toThrow(/already been used/);
-    expect(await env.ana.mutation(api.claimLinks.claim, { token })).toEqual({ kind: "juror", redirect: "/jury/profile" });
+    expect(await env.ana.mutation(api.claimLinks.claim, { token })).toEqual({ kind: "juror", redirect: "/jury/profile", pending: false });
     await expect(env.admin.action(api.claimLinks.link, { target: { kind: "juror", id } })).rejects.toThrow(/already been claimed/);
   });
 
@@ -137,7 +147,7 @@ describe("jury claim links", () => {
 
   it("a bundle claims the juror and the listing pre-created for them; they can't score it", async () => {
     const env = await setup();
-    const { id, token } = await juror(env, "Beka");
+    const { id, token } = await juror(env, "Beka", { email: "beka@example.com" });
     const startup = await env.listing("Beka Labs", "https://bekalabs.example", { jurorId: id, isStartup: true });
     const before = await env.t.query(api.listings.getPublicBySlug, { slug: startup.slug });
     expect(before).toMatchObject({ isClaimed: false, isDoFollow: false, isStartup: true });
@@ -172,6 +182,7 @@ describe("jury claim links", () => {
     expect(await env.ana.mutation(api.claimLinks.claim, { token })).toEqual({
       kind: "listing",
       redirect: "/account?claimed=1",
+      pending: false,
     });
     expect(await env.t.query(api.listings.getPublicBySlug, { slug: env.site.slug })).toMatchObject({
       isClaimed: true,
@@ -185,7 +196,7 @@ describe("jury claim links", () => {
   it("the photo prepared with the invitation beats the account photo until the juror changes it", async () => {
     const env = await setup();
     const avatarId = await env.t.run((ctx) => ctx.storage.store(new Blob(["img"], { type: "image/webp" })));
-    const { token } = await juror(env, "Ana", { avatarId });
+    const { token } = await juror(env, "Ana", { avatarId, email: "ana@example.com" });
     const preset = (await env.t.query(api.claimLinks.resolve, { token })).juror!.imageUrl;
     expect(preset).toBeTruthy();
     // ana's account has its own photo (e.g. Google's): the preset still shows.
@@ -297,8 +308,14 @@ describe("jury evaluations", () => {
     await env.ana.mutation(api.jury.evaluate, { slug, scores: p(9), comment: COMMENT });
     await env.beka.mutation(api.jury.evaluate, { slug, scores: p(7), comment: COMMENT });
     await env.beka.mutation(api.jury.evaluate, { slug, scores: p(8), comment: COMMENT }); // update replaces
-    expect((await env.t.query(api.listings.getPublicBySlug, { slug }))!.editorialScores).toEqual(p(8.5));
+    // Sealed in public while voting is open; admins see the live average.
+    expect((await env.t.query(api.listings.getPublicBySlug, { slug }))!.editorialScores).toBeNull();
+    expect(await env.t.query(api.jury.reviewsForListing, { slug })).toEqual([]);
+    expect((await env.admin.query(api.listings.reviewDetail, { id: env.site.id }))!.editorialScores).toEqual(p(8.5));
+    expect((await env.admin.query(api.jury.evaluationsForListing, { listingId: env.site.id })).length).toBe(2);
 
+    await env.admin.mutation(api.admin.setLifecycle, { id: env.site.id, status: "archived" }); // judging closed
+    expect((await env.t.query(api.listings.getPublicBySlug, { slug }))!.editorialScores).toEqual(p(8.5));
     const reviews = await env.t.query(api.jury.reviewsForListing, { slug });
     expect(reviews.map((r) => [r.juror.name, r.average, r.juror.imageUrl])).toEqual([
       ["ana", 9, "https://img.clerk.com/ana.png"],

@@ -6,6 +6,7 @@ import { useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
 import { showError } from "./Alerts";
+import { PendingActions } from "./PendingActions";
 import { formatDate } from "@/lib/storefront";
 import { publishState } from "@/lib/socialPublishState";
 
@@ -223,8 +224,9 @@ export function SocialQueue({ status }: { status: SocialTab }) {
           <h1>Social.</h1>
           <p>
             Posts the site queues by itself (awards, new listings, weekly calls, the Sunday roundup). Claude writes the
-            captions and renders the graphics through the Shemoqmedi connector; you approve them here or in the chat,
-            and approval publishes to Facebook, Instagram, Threads and LinkedIn.
+            captions and renders the graphics through the Shemoqmedi connector; you approve them here or in the Studio
+            (what Claude asks to publish or email waits under Pending actions), and approval publishes to Facebook,
+            Instagram, Threads and LinkedIn.
           </p>
         </div>
         <nav className="admin-tabs" aria-label="Filter by status">
@@ -240,6 +242,8 @@ export function SocialQueue({ status }: { status: SocialTab }) {
           ))}
         </nav>
       </div>
+
+      <PendingActions />
 
       {rows === undefined ? (
         <p className="admin-eyebrow">Loading…</p>
