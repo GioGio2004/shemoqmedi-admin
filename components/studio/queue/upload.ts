@@ -6,10 +6,11 @@
 // folder with a signature from graphics.finalUploadAuth, then registered
 // with media.registerSocial (no recipe: it wasn't rendered here).
 
-import { UploadError, seoSlug } from "@/lib/imagekitUpload";
+import { UploadError, postSignedUpload, type UploadAuth } from "@/lib/imagekitUpload";
 import { UPLOAD_MAX_BYTES, fitSide, pickedFileProblem, uploadAsIs, type Picked } from "./mediaEdit";
 
-export type FinalAuth = { token: string; expire: number; signature: string; publicKey: string; urlEndpoint: string; folder: string };
+export type FinalAuth = UploadAuth;
+export type GetFinalAuth = (args: { name: string; contentType: "image/jpeg" | "image/png" }) => Promise<FinalAuth>;
 export type RegisterSocial = (args: { url: string; fileId: string; filePath: string; size: number; width: number; height: number; contentType: string }) => Promise<unknown>;
 
 async function readImage(file: File) {
@@ -46,33 +47,12 @@ async function prepare(file: File): Promise<{ blob: Blob; width: number; height:
 }
 
 /** Uploads one image from the device; returns it as a picked item (role "upload"). */
-export async function uploadDeviceImage(file: File, name: string, getAuth: () => Promise<FinalAuth>, register: RegisterSocial): Promise<Picked> {
+export async function uploadDeviceImage(file: File, name: string, getAuth: GetFinalAuth, register: RegisterSocial): Promise<Picked> {
   const problem = pickedFileProblem(file);
   if (problem) throw new UploadError(problem);
   const { blob, width, height, type } = await prepare(file);
-  const fileName = `shemoqmedi-upload-${seoSlug(name, "post")}.${type === "image/png" ? "png" : "jpg"}`;
-  const auth = await getAuth();
-  const form = new FormData();
-  form.append("file", blob, fileName);
-  form.append("fileName", fileName);
-  form.append("folder", auth.folder);
-  form.append("useUniqueFileName", "true");
-  form.append("tags", "social,upload");
-  form.append("publicKey", auth.publicKey);
-  form.append("signature", auth.signature);
-  form.append("expire", String(auth.expire));
-  form.append("token", auth.token);
-  const res = await fetch("https://upload.imagekit.io/api/v1/files/upload", { method: "POST", body: form });
-  if (!res.ok) {
-    let reason = "";
-    try {
-      reason = ((await res.json()) as { message?: string }).message ?? "";
-    } catch {
-      // not JSON
-    }
-    throw new UploadError(reason ? `Upload failed: ${reason}` : `Upload failed (HTTP ${res.status}). Please try again.`);
-  }
-  const out = (await res.json()) as { fileId: string; url: string; filePath: string; size?: number; width?: number; height?: number };
+  // The server names the file and pins the folder (/social/graphics) in the signed token.
+  const out = await postSignedUpload(blob, await getAuth({ name, contentType: type === "image/png" ? "image/png" : "image/jpeg" }));
   const w = out.width ?? width;
   const h = out.height ?? height;
   await register({ url: out.url, fileId: out.fileId, filePath: out.filePath, size: out.size ?? blob.size, width: w, height: h, contentType: type });

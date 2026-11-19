@@ -1,6 +1,8 @@
-import { v } from "convex/values";
-import { internalMutation, internalQuery, query, type QueryCtx } from "./_generated/server";
-import { requireAdmin } from "./authHelpers";
+import { ConvexError, v } from "convex/values";
+import { action, internalMutation, internalQuery, query, type QueryCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { requireAdmin, requireUser } from "./authHelpers";
+import { deleteAccountData } from "./lib/accountDeletion";
 
 const userDoc = v.object({
   _id: v.id("users"),
@@ -79,21 +81,67 @@ export const upsertFromClerk = internalMutation({
   },
 });
 
-/** Called by the Clerk webhook on user.deleted. */
+/** Called by the Clerk webhook on user.deleted: the same cleanup as deleteMe (lib/accountDeletion.ts). */
 export const deleteFromClerk = internalMutation({
   args: { clerkUserId: v.string() },
   returns: v.null(),
   handler: async (ctx, { clerkUserId }) => {
     const user = await getUserByExternalId(ctx, clerkUserId);
-    if (!user) return null;
-    // A deleted account leaves the jury; its evaluations stay on the listings.
-    const juror = await ctx.db
-      .query("jurors")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .unique();
-    if (juror) await ctx.db.patch(juror._id, { active: false, updatedAt: Date.now() });
-    await ctx.db.delete(user._id);
+    if (!user) return null; // already removed by deleteMe
+    await deleteAccountData(ctx, user);
     return null;
+  },
+});
+
+const deletionCounts = v.object({
+  listingsDeleted: v.number(),
+  listingsReleased: v.number(),
+  creators: v.number(),
+  votes: v.number(),
+  claims: v.number(),
+});
+
+/** deleteMyAccount's first step: our data, for the signed-in caller. Admins can't. */
+export const deleteMyData = internalMutation({
+  args: {},
+  returns: deletionCounts,
+  handler: async (ctx) => {
+    const user = await requireUser(ctx);
+    if (user.role === "admin" || user.role === "super_admin") {
+      throw new ConvexError("Admins can't delete their own account here. Ask another admin to remove your role first.");
+    }
+    return await deleteAccountData(ctx, user);
+  },
+});
+
+/**
+ * "Delete my account" on the site (audit J-02): removes the person's data
+ * here, then their Clerk login through Clerk's Backend API, so it works
+ * whatever the Clerk dashboard allows users to do themselves. (The
+ * user.deleted webhook then finds nothing left to clean.) Admins can't:
+ * their name is on awards and reviews; another admin removes the role first.
+ */
+export const deleteMyAccount = action({
+  args: { confirm: v.literal("DELETE") },
+  returns: v.object({ counts: deletionCounts, loginDeleted: v.boolean() }),
+  handler: async (ctx): Promise<{ counts: typeof deletionCounts.type; loginDeleted: boolean }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new ConvexError("Please log in first.");
+    const counts = await ctx.runMutation(internal.users.deleteMyData, {});
+    const key = process.env.CLERK_SECRET_KEY?.trim();
+    let loginDeleted = false;
+    if (key) {
+      try {
+        const res = await fetch(`https://api.clerk.com/v1/users/${encodeURIComponent(identity.subject)}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${key}` },
+        });
+        loginDeleted = res.ok || res.status === 404;
+      } catch {
+        loginDeleted = false;
+      }
+    }
+    return { counts, loginDeleted };
   },
 });
 

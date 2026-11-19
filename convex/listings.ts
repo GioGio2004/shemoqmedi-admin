@@ -1,5 +1,5 @@
 import { hasJuryEvaluations } from "./jury";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -36,13 +36,14 @@ import {
   publicListing,
   restorePatch,
   scoreFields,
-  slugify,
   toPublic,
   uniqueSlug,
+  listingSlugBase,
 } from "./lib/listingHelpers";
 import { awardPaths, listingPaths, scheduleIndexNow } from "./seo";
 import { pushAdmins } from "./push";
 import { adminUrl } from "../lib/hosts";
+import { rateLimit } from "./lib/rateLimit";
 
 const MAX_PUBLIC = 200;
 
@@ -151,6 +152,43 @@ async function listingsOf(ctx: QueryCtx, userId: Id<"users">) {
 }
 
 /**
+ * The checks `submit` makes that don't need the files, run before the form
+ * uploads anything (audit A-08): someone whose site is already listed hears
+ * it straight away instead of after the screenshots and video uploaded.
+ * `submit` still runs every check itself.
+ */
+export const precheckSubmission = query({
+  args: { url: v.string(), redesignOf: v.optional(v.string()) },
+  returns: v.union(v.object({ ok: v.literal(true) }), v.object({ ok: v.literal(false), reason: v.string() })),
+  handler: async (ctx, args) => {
+    const user = await requireUser(ctx);
+    let url: string;
+    try {
+      url = normalizeUrl(args.url);
+    } catch (err) {
+      return { ok: false as const, reason: err instanceof ConvexError ? String(err.data) : "Enter the site's address." };
+    }
+    const mine = await listingsOf(ctx, user._id);
+    if (mine.filter((l) => l.status === "pending").length >= LIMITS.pendingPerUser) {
+      return {
+        ok: false as const,
+        reason: `You already have ${LIMITS.pendingPerUser} sites waiting for review. Please wait for a decision first.`,
+      };
+    }
+    const previous = args.redesignOf
+      ? await ctx.db
+          .query("listings")
+          .withIndex("by_slug", (q) => q.eq("slug", args.redesignOf!))
+          .first()
+      : null;
+    if (args.redesignOf && !previous) return { ok: false as const, reason: "The earlier listing for this redesign was not found." };
+    const config = await getConfig(ctx);
+    const domain = await checkDomain(ctx, url, { redesignOf: previous?._id, resubmitMonths: config.resubmitMonths, now: Date.now() });
+    return domain.ok ? { ok: true as const } : { ok: false as const, reason: domain.reason };
+  },
+});
+
+/**
  * Submit a site for review. It is created pending with the user recorded as
  * its submitter only: no ownership, no claim, no followed link and no claimed
  * creator profile until an admin approves it and chooses to hand ownership to
@@ -180,6 +218,7 @@ export const submit = mutation({
   returns: v.object({ slug: v.string() }),
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
+    await rateLimit(ctx, "submitListing", user);
 
     if (args.submissionTier === "express") {
       fail("Express Fast-Track is coming soon. Please use the standard queue for now.");
@@ -238,7 +277,7 @@ export const submit = mutation({
     );
 
     const now = Date.now();
-    const slug = await uniqueSlug(ctx, "listings", slugify(title));
+    const slug = await uniqueSlug(ctx, "listings", listingSlugBase(title, url));
     const id = await ctx.db.insert("listings", {
       submittedBy: user._id,
       isStartup: args.isStartup || undefined,

@@ -5,6 +5,7 @@ import { award, creatorTier, listingStatus, pillars, region } from "../schema";
 import { deleteMediaMany, isAdminUser, mediaInfo, mediaStillUsed, mediaUrl, type MediaActor, type MediaId } from "./media";
 import { CATEGORIES, LIMITS, isCategory, isTechnology, type CategorySlug, type CreatorTier, type RegionSlug } from "./taxonomy";
 import { ZERO_PILLARS, readPillars, round2, summarize, type Pillars, type StoredPillars } from "./scoring";
+import { latinizeGeorgian } from "./georgian";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Validation
@@ -72,7 +73,7 @@ export function normalizeUrl(input: string, field = "Website URL"): string {
 
 export function slugify(value: string, fallback = "site") {
   return (
-    value
+    latinizeGeorgian(value)
       .toLowerCase()
       .normalize("NFKD")
       .replace(/[̀-ͯ]/g, "")
@@ -84,6 +85,17 @@ export function slugify(value: string, fallback = "site") {
 
 /** How many old slugs a listing keeps redirecting from. */
 export const MAX_PREVIOUS_SLUGS = 10;
+
+/** A listing's slug base: its title, or its domain when the title has no usable letters. */
+export function listingSlugBase(title: string, url: string) {
+  let host = "";
+  try {
+    host = new URL(url).host.replace(/^www\./, "");
+  } catch {
+    // not a URL: the plain fallback
+  }
+  return slugify(title, slugify(host, "site"));
+}
 
 /** How many listings the slug-history scans read (see retiredListingSlugs). */
 const SLUG_SCAN_LIMIT = 1000;

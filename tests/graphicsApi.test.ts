@@ -149,12 +149,14 @@ describe("graphics.renderForPost", () => {
 describe("the Studio's own upload", () => {
   it("signs uploads into /social/graphics for admins only", async () => {
     const { t, admin, maker } = await setup();
-    await expect(t.action(api.graphics.finalUploadAuth, {})).rejects.toThrow();
-    await expect(maker.action(api.graphics.finalUploadAuth, {})).rejects.toThrow(/admin/);
-    const auth = await admin.action(api.graphics.finalUploadAuth, {});
-    expect(auth.folder).toBe("/social/graphics");
-    expect(auth.publicKey).toBe("public_test");
-    expect(auth.signature).toMatch(/^[a-f0-9]{40}$/);
+    const req = { name: "Post ../../evil", contentType: "image/jpeg" as const };
+    await expect(t.action(api.graphics.finalUploadAuth, req)).rejects.toThrow();
+    await expect(maker.action(api.graphics.finalUploadAuth, req)).rejects.toThrow(/admin/);
+    const auth = await admin.action(api.graphics.finalUploadAuth, req);
+    expect(auth.params.folder).toBe("/social/graphics");
+    expect(auth.params.fileName).toBe("shemoqmedi-upload-post-evil.jpg");
+    expect(auth.params.overwriteFile).toBe("false");
+    expect(auth.token.split(".")).toHaveLength(3);
   });
 
   it("registers only JPEG/PNG files from the social graphics folder", async () => {

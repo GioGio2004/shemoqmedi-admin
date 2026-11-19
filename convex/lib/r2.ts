@@ -1,4 +1,4 @@
-import { AwsClient } from "aws4fetch";
+import { AwsClient, AwsV4Signer } from "aws4fetch";
 
 // Cloudflare R2 holds the preview videos (ImageKit keeps the screenshots).
 // R2 serves files exactly as uploaded: no re-encoding, so no processing
@@ -58,12 +58,30 @@ function objectUrl(key: string) {
   return `https://${env("R2_ACCOUNT_ID")}.r2.cloudflarestorage.com/${env("R2_BUCKET")}/${encodeKey(key)}`;
 }
 
-/** A presigned PUT URL for one direct upload to R2 (browser, or the render worker). */
-export async function presignPut(key: string, expiresInSeconds = 15 * 60) {
+/**
+ * A presigned PUT URL for one direct upload to R2 (browser, or the render
+ * worker). With `bind`, Content-Type and Content-Length are part of the
+ * signature, so the URL only accepts a file of exactly that type and size:
+ * a browser can't swap in HTML or SVG, or a bigger file (audit C-08).
+ */
+export async function presignPut(key: string, expiresInSeconds = 15 * 60, bind?: { contentType: string; size: number }) {
   const url = new URL(objectUrl(key));
   url.searchParams.set("X-Amz-Expires", String(expiresInSeconds));
-  const signed = await client().sign(new Request(url, { method: "PUT" }), { aws: { signQuery: true } });
-  return signed.url;
+  // A plain header object straight to the signer: a Request could drop
+  // Content-Length (a forbidden header in some runtimes) and silently unbind it.
+  const signer = new AwsV4Signer({
+    url: url.toString(),
+    method: "PUT",
+    headers: bind ? { "content-type": bind.contentType, "content-length": String(bind.size) } : {},
+    accessKeyId: env("R2_ACCESS_KEY_ID"),
+    secretAccessKey: env("R2_SECRET_ACCESS_KEY"),
+    service: "s3",
+    region: "auto",
+    signQuery: true,
+    allHeaders: !!bind,
+  });
+  const signed = await signer.sign();
+  return signed.url.toString();
 }
 
 /** Size and type of a stored object, or null if it does not exist. Throws on R2 errors. */

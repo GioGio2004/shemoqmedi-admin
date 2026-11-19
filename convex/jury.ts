@@ -392,6 +392,8 @@ export const reviewsForListing = query({
   returns: v.array(
     v.object({
       juror: jurorPublic,
+      // Whether /jury/<slug> exists: only link the name when it does (audit G-02).
+      profilePublic: v.boolean(),
       scores: pillars,
       average: v.number(),
       comment: v.string(),
@@ -414,6 +416,7 @@ export const reviewsForListing = query({
       const s = readPillars(e.scores);
       out.push({
         juror: await toJurorPublic(ctx, juror),
+        profilePublic: isPublicJuror(juror),
         scores: s,
         average: round2(weighted(s)),
         comment: e.comment,

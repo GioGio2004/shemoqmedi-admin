@@ -7,6 +7,7 @@ import { categoryName, listingCategories, slugify } from "./lib/listingHelpers";
 import { mediaRow, mediaUrl } from "./lib/media";
 import { readPillars } from "./lib/scoring";
 import { signUpload, vUploadAuth } from "./media";
+import { safeSegment } from "./lib/imagekitSign";
 import { FORMATS, STYLES, TEMPLATES, graphicsQuery, isFormat, isStyle, isTemplate } from "../lib/graphics/spec";
 import { PALETTE_IDS } from "../lib/palettes";
 import type { CarouselStory, GraphicDesign, MediaDesign } from "./lib/design";
@@ -425,10 +426,16 @@ export const renderForPost = action({
  * records it. The private key never leaves Convex.
  */
 export const finalUploadAuth = action({
-  args: {},
-  returns: v.object({ ...vUploadAuth.fields, folder: v.string() }),
-  handler: async (ctx) => {
+  args: { name: v.string(), contentType: v.union(v.literal("image/jpeg"), v.literal("image/png")) },
+  returns: vUploadAuth,
+  handler: async (ctx, { name, contentType }) => {
     await ctx.runQuery(internal.users.assertAdmin, {});
-    return { ...(await signUpload()), folder: FOLDER };
+    const ext = contentType === "image/png" ? "png" : "jpg";
+    return await signUpload({
+      fileName: `shemoqmedi-upload-${safeSegment(name, "post")}.${ext}`,
+      folder: FOLDER,
+      tags: "social,upload",
+      types: ["image/jpeg", "image/png"],
+    });
   },
 });

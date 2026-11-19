@@ -34,6 +34,8 @@ import { audit } from "./lib/awards";
 import { isClaimedJuror, isPublicJuror, jurorOf, jurorPhoto } from "./jury";
 import { listingPaths, scheduleIndexNow, siteUrl } from "./seo";
 import { claimLinkStatus, linkStatus, revokeClaimLinks, type Target } from "./lib/claimLinkRows";
+import { rateLimit } from "./lib/rateLimit";
+import { deliver, type Message } from "./emails";
 
 /** A claim token: exactly 64 lowercase hex characters (never a valid listing slug, which is at most 60). */
 export const CLAIM_TOKEN = /^[a-f0-9]{64}$/;
@@ -178,49 +180,24 @@ export const jurorContact = internalQuery({
   },
 });
 
-const escapeHtml = (s: string) =>
-  s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-
-/** Sends a claim link through Resend. Returns an error message, or null when sent. */
-async function sendClaimEmail(to: string, name: string, link: string, bundled: number) {
-  const key = process.env.RESEND_API_KEY?.trim();
-  if (!key) return "RESEND_API_KEY is not set on this Convex deployment. Copy the link and send it yourself.";
-  const from = process.env.RESEND_FROM?.trim() || "Shemoqmedi <jury@shemoqmedi.space>";
+/**
+ * The juror's claim email, sent through emails.deliver like every other
+ * email (audit J-05): unsubscribe link and header, opt-outs respected, and a
+ * row in the email log. The log keeps the subject only, never the link.
+ */
+function claimEmail(to: string, name: string, link: string, bundled: number): Message {
   const first = name.split(" ")[0];
   const extra = bundled > 0 ? ` Your ${bundled === 1 ? "website is" : "websites are"} already listed and will be claimed with it.` : "";
-  const text = [
-    `Hi ${first},`,
-    "",
-    "We'd like you on the founding jury of Shemoqmedi, the website awards platform. Jurors score sites in their voting week on design, usability, creativity and content, and leave a short comment that is shown on each site's page.",
-    "",
-    `Your jury profile is ready. Open this private link to claim it:${extra}`,
-    link,
-    "",
-    `Sign in with this address (${to}) to claim it. The link works once and expires in 14 days.`,
-    "",
-    "Shemoqmedi",
-  ].join("\n");
-  const html = `<div style="font-family:Inter,Arial,sans-serif;color:#000;max-width:520px;line-height:1.6">
-<p>Hi ${escapeHtml(first)},</p>
-<p>We'd like you on the founding jury of <strong>Shemoqmedi</strong>, the website awards platform. Jurors score sites in their voting week on design, usability, creativity and content, and leave a short comment that is shown on each site's page.</p>
-<p>Your jury profile is ready.${escapeHtml(extra)}</p>
-<p><a href="${escapeHtml(link)}" style="display:inline-block;background:#000;color:#fff;padding:12px 22px;border-radius:999px;text-decoration:none;font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase">Claim your jury spot</a></p>
-<p style="font-size:12px;color:#555">Sign in with this address (${escapeHtml(to)}) to claim it. This link is private, works once and expires in 14 days.</p>
-</div>`;
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to: [to], subject: "Your Shemoqmedi jury profile", text, html }),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      return `Resend refused the email (${res.status}). ${body.slice(0, 200)}`.trim();
-    }
-    return null;
-  } catch (err) {
-    return `Could not reach Resend: ${(err as Error).message}`;
-  }
+  return {
+    subject: "Your Shemoqmedi jury profile",
+    text: [
+      `Hi ${first},`,
+      "We'd like you on the founding jury of Shemoqmedi, the website awards platform. Jurors score sites in their voting week on design, usability, creativity and content, and leave a short comment that is shown on each site's page.",
+      `Your jury profile is ready. Open the private link below to claim it.${extra}`,
+      `Sign in with this address (${to}) to claim it. The link works once and expires in 14 days.`,
+    ].join("\n\n"),
+    button: { label: "Claim your jury spot", href: link },
+  };
 }
 
 /** Admin: email an unclaimed juror a new claim link (needs their email on the profile). */
@@ -233,8 +210,9 @@ export const emailJuror = action({
     const token = newToken();
     await ctx.runMutation(internal.claimLinks.storeToken, { target: { kind: "juror", id: jurorId }, token, rotate: false });
     const url = claimUrl(token);
-    const error = await sendClaimEmail(contact.email, contact.name, url, contact.bundled);
-    return { url, sent: error === null, error };
+    const delivery = await deliver(ctx, contact.email, claimEmail(contact.email, contact.name, url, contact.bundled), { kind: "outreach" });
+    const error = delivery.status === "sent" ? null : (delivery.error ?? "Not sent.");
+    return { url, sent: error === null, error: error && `${error} Copy the link and send it yourself.` };
   },
 });
 
@@ -548,6 +526,7 @@ export const claim = mutation({
   }),
   handler: async (ctx, { token }) => {
     const user = await requireUser(ctx);
+    await rateLimit(ctx, "claimLink", user);
     if (!CLAIM_TOKEN.test(token)) fail("This claim link is not valid.");
     const now = Date.now();
     const link = await findLink(ctx, token);

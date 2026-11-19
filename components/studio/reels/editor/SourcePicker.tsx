@@ -211,7 +211,7 @@ function Uploads({ order, toggle }: { order: string[]; toggle: (s: ClipSource) =
       const picked = await uploadDeviceImage(
         file,
         file.name.replace(/\.[^.]+$/, "") || "reel",
-        () => finalAuth({}),
+        finalAuth,
         async (a) => {
           mediaId = await registerSocial(a);
           return mediaId;

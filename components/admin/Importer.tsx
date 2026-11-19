@@ -58,6 +58,11 @@ function Results({
                       ? "Live in voting."
                       : "Waiting in the review queue."}
               </p>
+              {r.warnings?.map((w) => (
+                <p key={w} className="import-result-note">
+                  Check: {w}
+                </p>
+              ))}
             </div>
             {r.ok && r.id && (
               <Link href={`/review/${r.id}`} className="admin-text-link">

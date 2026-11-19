@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "../convex/schema";
 import { api, internal } from "../convex/_generated/api";
@@ -343,5 +343,45 @@ describe("jury evaluations", () => {
     expect(detail!.juror).toBeNull();
     const claimedId = await joinJury(env, "Ana", env.ana);
     await expect(env.admin.mutation(api.jury.deleteJuror, { jurorId: claimedId })).rejects.toThrow(/claimed/);
+  });
+});
+
+describe("juror claim email (audit J-05)", () => {
+  it("goes through deliver(): unsubscribe header, opt-outs and the email log, without the link", async () => {
+    const env = await setup();
+    const { id } = await juror(env, "Nino Kapanadze", { email: "nino@example.com" });
+    process.env.RESEND_API_KEY = "re_test";
+    process.env.EMAIL_UNSUBSCRIBE_SECRET = "unsub_test";
+    const site = process.env.CONVEX_SITE_URL;
+    process.env.CONVEX_SITE_URL = "https://test.convex.site";
+    const sent: { headers?: Record<string, string>; html: string; to: string[] }[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(String(init.body)));
+      return new Response("{}", { status: 200 });
+    });
+    try {
+      const out = await env.admin.action(api.claimLinks.emailJuror, { jurorId: id });
+      expect(out).toMatchObject({ sent: true, error: null });
+      expect(sent).toHaveLength(1);
+      expect(sent[0].to).toEqual(["nino@example.com"]);
+      expect(sent[0].headers?.["List-Unsubscribe"]).toMatch(/^</);
+      expect(sent[0].html).toContain(out.url);
+      const log = await env.t.run((ctx) => ctx.db.query("emailLog").collect());
+      expect(log).toHaveLength(1);
+      expect(log[0]).toMatchObject({ to: "nino@example.com", kind: "outreach", status: "sent" });
+      expect(JSON.stringify(log[0])).not.toContain(tokenOf(out.url));
+
+      // Someone who unsubscribed isn't emailed; the admin is told why.
+      await env.t.mutation(internal.emails.optOut, { email: "nino@example.com" });
+      const again = await env.admin.action(api.claimLinks.emailJuror, { jurorId: id });
+      expect(again.sent).toBe(false);
+      expect(again.error).toMatch(/Unsubscribed/);
+      expect(sent).toHaveLength(1);
+    } finally {
+      vi.unstubAllGlobals();
+      delete process.env.RESEND_API_KEY;
+      delete process.env.EMAIL_UNSUBSCRIBE_SECRET;
+      process.env.CONVEX_SITE_URL = site;
+    }
   });
 });

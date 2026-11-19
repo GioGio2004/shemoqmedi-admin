@@ -33,6 +33,7 @@ import {
   scoreFields,
   slugify,
   uniqueSlug,
+  listingSlugBase,
 } from "./lib/listingHelpers";
 import { hasJuryEvaluations } from "./jury";
 import { revokeClaimLinks } from "./lib/claimLinkRows";
@@ -155,7 +156,7 @@ export const createListing = mutation({
       publishedAt = votingEndsAt - VOTING_DAYS * DAY_MS;
     }
 
-    const slug = await uniqueSlug(ctx, "listings", slugify(title));
+    const slug = await uniqueSlug(ctx, "listings", listingSlugBase(title, url));
     const id = await ctx.db.insert("listings", {
       creatorId,
       source: "import",

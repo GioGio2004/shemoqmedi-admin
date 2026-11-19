@@ -9,9 +9,10 @@
 // Files land in /listings/<site-slug>/ as e.g.
 //   kencho-group-website-screenshot-2.webp
 // (ImageKit appends a short unique suffix so a replaced file never serves a
-// stale CDN copy). The upload is signed by Convex (media.uploadAuth) and the
-// result is registered with media.register, which returns the id that the
-// listing mutations accept.
+// stale CDN copy). Convex (media.uploadAuth) picks the folder and file name
+// and signs them into a v2 upload token, so the browser can't upload
+// elsewhere; the result is registered with media.register, which returns the
+// id that the listing mutations accept.
 
 export const MAX_IMAGE_WIDTH = 2560;
 const WEBP_QUALITY = 0.86;
@@ -25,13 +26,52 @@ export class UploadError extends Error {
   override name = "UploadError";
 }
 
+/** A v2 signed upload from Convex (media.uploadAuth, graphics.finalUploadAuth). */
 export type UploadAuth = {
   token: string;
-  expire: number;
-  signature: string;
-  publicKey: string;
-  urlEndpoint: string;
+  uploadUrl: string;
+  params: {
+    fileName: string;
+    folder: string;
+    useUniqueFileName: "true";
+    overwriteFile: "false";
+    tags: string;
+    checks: string;
+  };
 };
+
+/** What ImageKit answers for an upload. */
+export type UploadedFile = {
+  fileId: string;
+  url: string;
+  filePath: string;
+  size?: number;
+  width?: number;
+  height?: number;
+};
+
+/**
+ * POST one file to ImageKit with a signed v2 token. The form fields are
+ * exactly the signed ones: the server decided the folder and the name, and
+ * ImageKit refuses the upload if anything differs (audit C-02).
+ */
+export async function postSignedUpload(body: Blob, auth: UploadAuth): Promise<UploadedFile> {
+  const form = new FormData();
+  form.append("file", body, auth.params.fileName);
+  form.append("token", auth.token);
+  for (const [key, value] of Object.entries(auth.params)) form.append(key, value);
+  const res = await fetch(auth.uploadUrl, { method: "POST", body: form });
+  if (!res.ok) {
+    let reason = "";
+    try {
+      reason = ((await res.json()) as { message?: string }).message ?? "";
+    } catch {
+      // not JSON
+    }
+    throw new UploadError(reason ? `Upload failed: ${reason}` : `Upload failed (HTTP ${res.status}). Please try again.`);
+  }
+  return (await res.json()) as UploadedFile;
+}
 
 export type RegisterArgs = {
   fileId: string;
@@ -83,10 +123,6 @@ export async function toWebp(file: File): Promise<{ blob: Blob; width: number; h
   }
 }
 
-function extensionFor(type: string) {
-  return { "image/webp": "webp", "image/png": "png", "image/jpeg": "jpg", "video/mp4": "mp4", "video/webm": "webm" }[type] ?? "bin";
-}
-
 /**
  * Convert (images), name, and upload one file straight to ImageKit; returns
  * what media.register needs.
@@ -97,7 +133,7 @@ function extensionFor(type: string) {
 export async function uploadToImageKit(
   file: File,
   { site, label }: { site: string; label: string },
-  getAuth: () => Promise<UploadAuth>,
+  getAuth: (args: { site: string; label: string; contentType: string }) => Promise<UploadAuth>,
 ): Promise<RegisterArgs> {
   const kind = file.type.startsWith("video/") ? "video" : "image";
   let body: Blob = file;
@@ -109,46 +145,14 @@ export async function uploadToImageKit(
       throw new UploadError("This screenshot is still over 5 MB after compression. Use a smaller image.");
     }
   }
-
-  const slug = seoSlug(site);
-  const fileName = `${slug}-website-${seoSlug(label, "image")}.${extensionFor(body.type)}`;
-  const auth = await getAuth();
-
-  const form = new FormData();
-  form.append("file", body, fileName);
-  form.append("fileName", fileName);
-  form.append("folder", `/listings/${slug}`);
-  form.append("useUniqueFileName", "true");
-  form.append("tags", `listing,${slug},${kind}`);
-  form.append("publicKey", auth.publicKey);
-  form.append("signature", auth.signature);
-  form.append("expire", String(auth.expire));
-  form.append("token", auth.token);
-
-  const res = await fetch("https://upload.imagekit.io/api/v1/files/upload", { method: "POST", body: form });
-  if (!res.ok) {
-    let reason = "";
-    try {
-      reason = ((await res.json()) as { message?: string }).message ?? "";
-    } catch {
-      // not JSON
-    }
-    throw new UploadError(reason ? `Upload failed: ${reason}` : `Upload failed (HTTP ${res.status}). Please try again.`);
-  }
-  const out = (await res.json()) as {
-    fileId: string;
-    url: string;
-    filePath: string;
-    size: number;
-    width?: number;
-    height?: number;
-  };
+  const contentType = body.type || file.type;
+  const out = await postSignedUpload(body, await getAuth({ site, label, contentType }));
   return {
     fileId: out.fileId,
     url: out.url,
     filePath: out.filePath,
     kind,
-    contentType: body.type || file.type,
+    contentType,
     size: out.size ?? body.size,
     width: out.width ?? width,
     height: out.height ?? height,

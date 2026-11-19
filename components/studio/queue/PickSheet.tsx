@@ -85,7 +85,7 @@ export function PickSheet({ open, mode, post, title, resets, onClose, onPick }: 
     setError(null);
     let item: Picked;
     try {
-      item = await uploadDeviceImage(f, title, () => finalAuth({}), (args) => register(args));
+      item = await uploadDeviceImage(f, title, finalAuth, (args) => register(args));
     } catch (err) {
       setError(err);
       setBusy(null);

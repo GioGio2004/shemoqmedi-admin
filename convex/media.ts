@@ -9,6 +9,7 @@ import { assertMedia, fail, slugify } from "./lib/listingHelpers";
 import { cleanDuration, deleteMedia, isAdminUser, mediaUrl, vMediaId, type MediaActor, type MediaId } from "./lib/media";
 import { R2_LISTING_KEY, deleteObject, headObject, presignPut, r2Configured, r2PublicUrl } from "./lib/r2";
 import { mediaDesign, mediaDetail } from "./lib/design";
+import { UPLOAD_V2_URL, safeSegment, signUploadParams, uploadChecks } from "./lib/imagekitSign";
 import { designViewOf, mediaDetails, mediaEntryOf, mediaEntryWithDesign, roleOf } from "./lib/mediaEntry";
 
 // Media pipeline. Screenshots go to ImageKit, preview videos to Cloudflare R2.
@@ -33,7 +34,7 @@ import { designViewOf, mediaDetails, mediaEntryOf, mediaEntryWithDesign, roleOf 
 // Convex env (dev and prod): IMAGEKIT_PRIVATE_KEY, IMAGEKIT_PUBLIC_KEY,
 // IMAGEKIT_URL_ENDPOINT (e.g. https://ik.imagekit.io/shemoqmedi).
 
-const IMAGE_TYPES = ["image/webp", "image/png", "image/jpeg"];
+export const IMAGE_TYPES = ["image/webp", "image/png", "image/jpeg"];
 const VIDEO_TYPES = ["video/mp4", "video/webm"];
 
 function env(name: "IMAGEKIT_PRIVATE_KEY" | "IMAGEKIT_PUBLIC_KEY" | "IMAGEKIT_URL_ENDPOINT") {
@@ -46,18 +47,6 @@ function authHeader() {
   return `Basic ${btoa(`${env("IMAGEKIT_PRIVATE_KEY")}:`)}`;
 }
 
-async function hmacSha1Hex(key: string, message: string) {
-  const enc = new TextEncoder();
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(key),
-    { name: "HMAC", hash: "SHA-1" },
-    false,
-    ["sign"],
-  );
-  const sig = await crypto.subtle.sign("HMAC", cryptoKey, enc.encode(message));
-  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 /** The largest preview video a user may store: 1080p (40 MB) for admins, 720p (15 MB) for everyone else. */
 function videoCapFor(user: Pick<Doc<"users">, "role">) {
@@ -76,28 +65,49 @@ function checkLimits(kind: "image" | "video", contentType: string, size: number,
 
 export const vUploadAuth = v.object({
   token: v.string(),
-  expire: v.number(),
-  signature: v.string(),
-  publicKey: v.string(),
-  urlEndpoint: v.string(),
+  uploadUrl: v.string(),
+  params: v.object({
+    fileName: v.string(),
+    folder: v.string(),
+    useUniqueFileName: v.literal("true"),
+    overwriteFile: v.literal("false"),
+    tags: v.string(),
+    checks: v.string(),
+  }),
 });
 
-/** Signed parameters for one direct browser → ImageKit upload, valid 30 minutes (the private key stays here). */
-export async function signUpload() {
-  const token = crypto.randomUUID();
-  const expire = Math.floor(Date.now() / 1000) + 30 * 60;
-  const signature = await hmacSha1Hex(env("IMAGEKIT_PRIVATE_KEY"), `${token}${expire}`);
-  return { token, expire, signature, publicKey: env("IMAGEKIT_PUBLIC_KEY"), urlEndpoint: env("IMAGEKIT_URL_ENDPOINT") };
+const EXTENSIONS: Record<string, string> = { "image/webp": "webp", "image/png": "png", "image/jpeg": "jpg" };
+
+/**
+ * A v2 signed upload (lib/imagekitSign.ts): the folder, file name, no
+ * overwrite and the size/type checks are inside the signature, so the
+ * browser can only send the bytes (audit C-02).
+ */
+export async function signUpload(args: { fileName: string; folder: string; tags: string; types: readonly string[] }) {
+  const { token, params } = await signUploadParams(
+    { fileName: args.fileName, folder: args.folder, tags: args.tags, checks: uploadChecks(LIMITS.imageBytes, args.types) },
+    { privateKey: env("IMAGEKIT_PRIVATE_KEY"), publicKey: env("IMAGEKIT_PUBLIC_KEY") },
+  );
+  return { token, params, uploadUrl: UPLOAD_V2_URL };
 }
 
-/** Signed parameters for one direct browser → ImageKit upload (valid 30 minutes). */
+/** The file name and folder a listing screenshot gets: /listings/<site>/<site>-website-<label>.<ext>. */
+export function listingUploadTarget(site: string, label: string, contentType: string) {
+  const ext = EXTENSIONS[contentType];
+  if (!ext) throw new ConvexError("Screenshots must be WebP, PNG or JPEG images.");
+  const slug = safeSegment(site, "site");
+  return { fileName: `${slug}-website-${safeSegment(label, "image", 40)}.${ext}`, folder: `/listings/${slug}`, tags: `listing,${slug},image` };
+}
+
+/** Signed parameters for one direct browser → ImageKit screenshot upload (valid 10 minutes). */
 export const uploadAuth = action({
-  args: {},
+  args: { site: v.string(), label: v.string(), contentType: v.string() },
   returns: vUploadAuth,
-  handler: async (ctx) => {
+  handler: async (ctx, { site, label, contentType }) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new ConvexError("Please log in to upload.");
-    return await signUpload();
+    await ctx.runMutation(internal.rateLimits.hit, { name: "imageUpload" });
+    return await signUpload({ ...listingUploadTarget(site, label, contentType), types: IMAGE_TYPES });
   },
 });
 
@@ -250,13 +260,14 @@ export const videoUploadUrl = action({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new ConvexError("Please log in to upload.");
     if (!r2Configured()) throw new ConvexError("Video uploads are not configured yet. Please try again later.");
+    await ctx.runMutation(internal.rateLimits.hit, { name: "videoUpload" });
     checkLimits("video", contentType, size, await ctx.runQuery(internal.media.myVideoCap, {}));
     const slug = slugify(site);
     const ext = contentType === "video/webm" ? "webm" : "mp4";
     // Random suffix: a replaced video never reuses a cached URL, and keys cannot be guessed.
     const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 10);
     const key = `listings/${slug}/${slug}-website-${slugify(label, "preview")}-${suffix}.${ext}`;
-    return { uploadUrl: await presignPut(key), key };
+    return { uploadUrl: await presignPut(key, 15 * 60, { contentType, size }), key };
   },
 });
 

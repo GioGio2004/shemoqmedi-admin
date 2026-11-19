@@ -6,6 +6,7 @@ import { getUserByExternalId } from "./users";
 import { pillars } from "./schema";
 import { addPillars, normalizePillars, readPillars } from "./lib/scoring";
 import { fail, isPublicStatus, scoreFields } from "./lib/listingHelpers";
+import { rateLimit } from "./lib/rateLimit";
 
 /**
  * Community voting. One vote per signed-in user per listing, only while the
@@ -90,6 +91,7 @@ export const cast = mutation({
   returns: v.null(),
   handler: async (ctx, { slug, scores }) => {
     const user = await requireUser(ctx);
+    await rateLimit(ctx, "vote", user);
     const listing = await listingBySlug(ctx, slug);
     if (!listing) fail("Site not found.");
     const blocked = await voteBlock(ctx, listing, user._id);

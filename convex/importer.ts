@@ -1,6 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import { deleteMedia, vMediaId } from "./lib/media";
-import { action, internalMutation, type ActionCtx } from "./_generated/server";
+import { action, internalMutation, internalQuery, type ActionCtx, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { award, creatorTier, region } from "./schema";
@@ -12,10 +12,11 @@ import {
   scoreFields,
   slugify,
   uniqueSlug,
+  listingSlugBase,
 } from "./lib/listingHelpers";
 import { FLAGSHIP } from "./seed";
 import { grantAward } from "./lib/awards";
-import { domainKey } from "./lib/domains";
+import { domainKey, listingsOnDomain } from "./lib/domains";
 import { tbilisiDay, tbilisiMonth, tbilisiYear, weekOf } from "./lib/time";
 import { uploadToImageKitFromServer } from "./lib/imagekitServer";
 
@@ -160,6 +161,33 @@ const importResult = v.object({
   slug: v.optional(v.string()),
   skipped: v.optional(v.boolean()),
   error: v.optional(v.string()),
+  // What the import changed from the input (truncated text, unknown category, dropped technologies).
+  warnings: v.optional(v.array(v.string())),
+});
+
+/**
+ * Listings already on this website (same domain key as submissions use:
+ * www, scheme, trailing slash and case don't matter), ignoring rejected
+ * ones (audit A-10: the importer matched the exact URL only).
+ */
+async function liveOnDomain(ctx: QueryCtx, url: string) {
+  const key = domainKey(url);
+  const onDomain = await listingsOnDomain(ctx, key);
+  const exact = await ctx.db
+    .query("listings")
+    .withIndex("by_url", (q) => q.eq("url", url))
+    .collect();
+  return [...onDomain, ...exact].find((l) => l.status !== "rejected") ?? null;
+}
+
+/** For importOne: an existing listing on this website, checked before capturing anything. */
+export const existingOnDomain = internalQuery({
+  args: { url: v.string() },
+  returns: v.union(v.object({ id: v.id("listings"), slug: v.string() }), v.null()),
+  handler: async (ctx, { url }) => {
+    const live = await liveOnDomain(ctx, url);
+    return live ? { id: live._id, slug: live.slug } : null;
+  },
 });
 
 async function importOne(
@@ -169,6 +197,9 @@ async function importOne(
 ): Promise<typeof importResult.type> {
   try {
     const url = normalizeUrl(input.url);
+    // Before the screenshot and upload, so a duplicate costs nothing.
+    const already = await ctx.runQuery(internal.importer.existingOnDomain, { url });
+    if (already) return { url, ok: true, id: already.id, slug: already.slug, skipped: true };
     const scraped = await capture(url);
     // Straight to ImageKit (never Convex storage), SEO-named like browser uploads.
     const slug = slugify(input.title ?? scraped.title ?? new URL(url).host);
@@ -189,7 +220,7 @@ async function importOne(
       width: file.width,
       height: file.height,
     });
-    const out: { id: Id<"listings">; slug: string; skipped: boolean } = await ctx.runMutation(
+    const out: { id: Id<"listings">; slug: string; skipped: boolean; warnings: string[] } = await ctx.runMutation(
       internal.importer.insertImported,
       {
         ...input,
@@ -200,7 +231,14 @@ async function importOne(
         source,
       },
     );
-    return { url, ok: true, id: out.id, slug: out.slug, skipped: out.skipped };
+    return {
+      url,
+      ok: true,
+      id: out.id,
+      slug: out.slug,
+      skipped: out.skipped,
+      ...(out.warnings.length ? { warnings: out.warnings } : {}),
+    };
   } catch (err) {
     const message =
       err instanceof ConvexError ? String(err.data) : err instanceof Error ? err.message : String(err);
@@ -280,17 +318,14 @@ export const insertImported = internalMutation({
     coverId: vMediaId,
     source: v.union(v.literal("import"), v.literal("seed")),
   },
-  returns: v.object({ id: v.id("listings"), slug: v.string(), skipped: v.boolean() }),
+  returns: v.object({ id: v.id("listings"), slug: v.string(), skipped: v.boolean(), warnings: v.array(v.string()) }),
   handler: async (ctx, args) => {
-    const existing = await ctx.db
-      .query("listings")
-      .withIndex("by_url", (q) => q.eq("url", args.url))
-      .collect();
-    const live = existing.find((l) => l.status !== "rejected");
+    const live = await liveOnDomain(ctx, args.url);
     if (live) {
       await deleteMedia(ctx, args.coverId, "server");
-      return { id: live._id, slug: live.slug, skipped: true };
+      return { id: live._id, slug: live.slug, skipped: true, warnings: [] };
     }
+    const warnings: string[] = [];
 
     const creditUrl = args.creditUrl?.trim()
       ? normalizeUrl(args.creditUrl, "Creator website")
@@ -300,6 +335,12 @@ export const insertImported = internalMutation({
     const tagline = args.tagline.trim().replace(/\s+/g, " ").slice(0, LIMITS.tagline);
     const category = isCategory(args.category) ? args.category : "other";
     const technologies = [...new Set(args.technologies)].filter(isTechnology).slice(0, LIMITS.technologies);
+    if (!args.title.trim()) warnings.push(`No title found; used "${host}".`);
+    else if (args.title.trim().length > LIMITS.title) warnings.push(`Title cut to ${LIMITS.title} characters.`);
+    if (args.tagline.trim().replace(/\s+/g, " ").length > LIMITS.tagline) warnings.push(`Description cut to ${LIMITS.tagline} characters.`);
+    if (category !== args.category) warnings.push(`Unknown category "${args.category}"; filed under Other.`);
+    const dropped = [...new Set(args.technologies)].length - technologies.length;
+    if (dropped > 0) warnings.push(`${dropped} ${dropped === 1 ? "technology was" : "technologies were"} unknown or over the limit and left out.`);
 
     const creatorId: Id<"creators"> = await findOrCreateCreator(ctx, {
       name: args.creditName.trim().slice(0, LIMITS.creditName),
@@ -327,7 +368,7 @@ export const insertImported = internalMutation({
       score === undefined ? undefined : { design: score, usability: score, creativity: score, content: score };
     const picked = args.status === "awarded" ? [...new Set(args.awards ?? [])] : [];
 
-    const slug = await uniqueSlug(ctx, "listings", slugify(title));
+    const slug = await uniqueSlug(ctx, "listings", listingSlugBase(title, args.url));
     const id = await ctx.db.insert("listings", {
       creatorId,
       source: args.source,
@@ -369,6 +410,6 @@ export const insertImported = internalMutation({
         reason: `Imported with this award (${args.source}).`,
       });
     }
-    return { id, slug, skipped: false };
+    return { id, slug, skipped: false, warnings };
   },
 });

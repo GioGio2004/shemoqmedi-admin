@@ -256,7 +256,8 @@ export default defineSchema({
   })
     .index("by_fileId", ["fileId"])
     // Sizes (and video lengths) by URL, for Instagram's aspect-ratio rule and stories (social.withSizes).
-    .index("by_url", ["url"]),
+    .index("by_url", ["url"])
+    .index("by_uploadedBy", ["uploadedBy"]),
 
   // Created and kept in sync by the Clerk webhook (http.ts → users.upsertFromClerk).
   users: defineTable({
@@ -923,4 +924,11 @@ export default defineSchema({
   })
     .index("by_kind", ["kind", "createdAt"])
     .index("by_key", ["key"]),
+
+  // Per-account usage counters for lib/rateLimit.ts (key = "<action>:<userId>").
+  rateLimits: defineTable({
+    key: v.string(),
+    windowStart: v.number(),
+    count: v.number(),
+  }).index("by_key", ["key"]),
 });

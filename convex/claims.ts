@@ -18,6 +18,7 @@ import { awardPaths, listingPaths, scheduleIndexNow } from "./seo";
 import { pushAdmins } from "./push";
 import { revokeClaimLinks } from "./lib/claimLinkRows";
 import { adminUrl } from "../lib/hosts";
+import { rateLimit } from "./lib/rateLimit";
 
 const claimStatus = v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"));
 
@@ -38,6 +39,7 @@ export const submit = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
+    await rateLimit(ctx, "submitClaim", user);
     const message = cleanText(args.message, "Message", LIMITS.claimMessage);
     const intent: ClaimIntent = claimIntent({ intent: args.intent, message });
     if (intent === "remove" && args.targetType !== "listing") fail("Only a site can be taken down.");

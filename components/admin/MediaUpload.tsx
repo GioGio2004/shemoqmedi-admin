@@ -39,7 +39,7 @@ export function useMediaUpload() {
     if (file.type.startsWith("video/")) {
       return await registerVideo(await uploadVideoToR2(file, seo, (args) => getVideoUrl(args), onProgress, quality));
     }
-    const args = await uploadToImageKit(file, seo, () => getAuth({}));
+    const args = await uploadToImageKit(file, seo, getAuth);
     return await register(args);
   };
 }
