@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import sharp from "sharp";
+import type { OverlayOptions } from "sharp";
 import { STOREFRONT_URL } from "@/lib/storefront";
 import { alpha, type Palette } from "@/lib/palettes";
 import type { Gradient, PanelShape } from "./glass";
@@ -389,7 +390,7 @@ async function drawBackdrop(o: BackdropOptions): Promise<Backdrop> {
   //    shapes); light bases are laid over, which lifts everything towards paper.
   const sigma = (px: number) => Math.max(0.3, px / SCALE);
   const dark = luminanceHex(o.palette.base) < 0.5;
-  const veil = (strength: number): sharp.OverlayOptions[] =>
+  const veil = (strength: number): OverlayOptions[] =>
     dark
       ? [
           { input: solid(w, h, o.palette.base, Math.min(1, strength * 1.7)), blend: "multiply" },
@@ -532,7 +533,7 @@ export async function glassLayer(bd: Backdrop, rect: Window, panels: PanelShape[
     shadowLayer(panels, rect, width, height),
   ]);
   const frostInPanels = await sharp(frost, { raw }).ensureAlpha().composite([{ input: mask, blend: "dest-in" }]).png({ compressionLevel: 0 }).toBuffer();
-  const layers: sharp.OverlayOptions[] = [...(shadows ? [{ input: shadows }] : []), { input: frostInPanels }, { input: rims }];
+  const layers: OverlayOptions[] = [...(shadows ? [{ input: shadows }] : []), { input: frostInPanels }, { input: rims }];
   const data = await sharp(back, { raw }).composite(layers).removeAlpha().raw().toBuffer();
   return { data, ...raw };
 }
@@ -587,7 +588,7 @@ export type OutputType = "jpeg" | "png";
  * JPEG or PNG. Grain is applied in the same pipeline, not as its own pass.
  */
 export async function finish(png: Buffer, type: OutputType, { grain: withGrain = true, under }: { grain?: boolean; under?: Raster } = {}) {
-  const layers: sharp.OverlayOptions[] = [];
+  const layers: OverlayOptions[] = [];
   if (under) layers.push({ input: png });
   if (withGrain) layers.push({ input: await grain(), tile: true, blend: "soft-light" });
   const base = under ? sharp(under.data, { raw: { width: under.width, height: under.height, channels: under.channels } }) : sharp(png);
