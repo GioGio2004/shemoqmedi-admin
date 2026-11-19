@@ -20,7 +20,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { juryCategory } from "./schema";
 import { mediaUrl } from "./lib/media";
-import { claimedListingPatch, fail, isPublicStatus } from "./lib/listingHelpers";
+import { claimIntent, claimedListingPatch, fail, isPublicStatus } from "./lib/listingHelpers";
 import { isClaimedJuror, jurorOf, jurorPhoto } from "./jury";
 import { listingPaths, scheduleIndexNow, siteUrl } from "./seo";
 
@@ -368,14 +368,18 @@ export const resolve = query({
   },
 });
 
-/** Approving a claim (by link or by request) rejects other pending requests for that listing. */
+/**
+ * Approving a claim (by link or by request) rejects other pending ownership
+ * claims for that listing. Removal requests stay open: someone asking for
+ * the site to come down still deserves an answer once it has an owner.
+ */
 export async function rejectCompetingClaims(ctx: MutationCtx, listingId: Id<"listings">, now: number) {
   const pending = await ctx.db
     .query("claims")
     .withIndex("by_listing", (q) => q.eq("listingId", listingId))
     .collect();
   for (const c of pending) {
-    if (c.status === "pending") {
+    if (c.status === "pending" && claimIntent(c) === "claim") {
       await ctx.db.patch(c._id, { status: "rejected", reviewNote: "The site was claimed by its owner.", reviewedAt: now });
     }
   }

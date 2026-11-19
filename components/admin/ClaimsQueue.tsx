@@ -18,8 +18,11 @@ const TABS: { status: ClaimStatus; label: string }[] = [
 ];
 
 const EMPTY: Record<ClaimStatus, { title: string; body: string }> = {
-  pending: { title: "All caught up.", body: "No claims are waiting for a decision." },
-  approved: { title: "Nothing approved yet.", body: "Approved claims hand ownership to the claimant." },
+  pending: { title: "All caught up.", body: "No claims or removal requests are waiting for a decision." },
+  approved: {
+    title: "Nothing approved yet.",
+    body: "Approved claims hand ownership to the claimant. Approved removals take the site down.",
+  },
   rejected: { title: "Nothing rejected.", body: "Rejected claims land here with their reason." },
 };
 
@@ -50,6 +53,9 @@ function ClaimRow({ claim }: { claim: Claim }) {
   }
 
   const typeLabel = claim.targetType === "listing" ? "Site" : "Creator";
+  // A removal request never hands over ownership: label it so it can't be
+  // mistaken for a claim.
+  const removal = claim.intent === "remove";
   const href = claim.target
     ? claim.targetType === "listing"
       ? storefrontSiteUrl(claim.target.slug)
@@ -63,7 +69,7 @@ function ClaimRow({ claim }: { claim: Claim }) {
       <div className="claim-card-main">
         <div className="min-w-0">
           <p className="admin-eyebrow">
-            {typeLabel} claim · {formatDate(claim.createdAt)}
+            {removal ? "Removal request" : `${typeLabel} claim`} · {formatDate(claim.createdAt)}
           </p>
           <h2>
             {claim.target && href ? (
@@ -74,14 +80,22 @@ function ClaimRow({ claim }: { claim: Claim }) {
               "Deleted target"
             )}
           </h2>
-          {claim.target?.isClaimed && claim.status === "pending" && (
+          {!removal && claim.target?.isClaimed && claim.status === "pending" && (
             <p className="claim-meta">Already claimed by someone else.</p>
           )}
+          {removal && claim.target && !claim.target.isPublic && claim.status === "pending" && (
+            <p className="claim-meta">Already off the public site.</p>
+          )}
         </div>
-        <span className="admin-status" data-status={CLAIM_STATUS_BADGE[claim.status]}>
-          <span className="admin-status-dot" aria-hidden="true" />
-          {claim.status}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="admin-status" data-status={removal ? "awarded" : "archived"}>
+            {removal ? "Removal" : "Claim"}
+          </span>
+          <span className="admin-status" data-status={CLAIM_STATUS_BADGE[claim.status]}>
+            <span className="admin-status-dot" aria-hidden="true" />
+            {claim.status}
+          </span>
+        </div>
       </div>
 
       <dl className="request-fields">
@@ -138,16 +152,14 @@ function ClaimRow({ claim }: { claim: Claim }) {
               className="admin-button"
               disabled={busy || !claim.target}
               onClick={() => {
-                if (
-                  confirm(
-                    `Hand ${claim.target?.name ?? "this target"} to ${claim.claimant?.name ?? "this user"}? Competing claims will be rejected.`,
-                  )
-                ) {
-                  void run(() => approve({ id: claim.id }));
-                }
+                const target = claim.target?.name ?? "this site";
+                const question = removal
+                  ? `Take ${target} off the public site? It moves to Rejected and can be re-published later. Nobody gets ownership.`
+                  : `Hand ${target} to ${claim.claimant?.name ?? "this user"}? Competing claims will be rejected.`;
+                if (confirm(question)) void run(() => approve({ id: claim.id }));
               }}
             >
-              Approve claim
+              {removal ? "Take down" : "Give ownership"}
             </button>
             <div className="grid min-w-[240px] flex-1 gap-2">
               <label htmlFor={noteId} className="sr-only">
@@ -188,7 +200,8 @@ export function ClaimsQueue({ status }: { status: ClaimStatus }) {
           <p className="admin-eyebrow">03 / Claims</p>
           <h1>Claims.</h1>
           <p>
-            Owners claiming an imported site or creator profile. Approving makes them the owner.
+            Owners claiming an imported site or creator profile, and requests to take a site down.
+            Approving a claim makes them the owner; approving a removal takes the site down.
           </p>
         </div>
         <nav className="admin-tabs" aria-label="Filter by status">

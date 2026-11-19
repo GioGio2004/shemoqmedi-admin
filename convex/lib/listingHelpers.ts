@@ -421,6 +421,21 @@ export function claimedListingPatch(listing: Doc<"listings">, ownerId: Id<"users
   };
 }
 
+/**
+ * Removal requests used to be ordinary claims whose message started with
+ * this. Those rows have no `intent`, so the prefix is how we still tell them
+ * apart: approving one must never hand over ownership.
+ */
+export const LEGACY_REMOVAL_PREFIX = "Removal request: ";
+
+export type ClaimIntent = "claim" | "remove";
+
+/** What a claim row asks for. Rows from before `intent` existed default to "claim". */
+export function claimIntent(claim: Pick<Doc<"claims">, "intent" | "message">): ClaimIntent {
+  if (claim.intent) return claim.intent;
+  return claim.message.startsWith(LEGACY_REMOVAL_PREFIX) ? "remove" : "claim";
+}
+
 /** A listing's categories, primary first (older rows only have `category`). */
 export function listingCategories(listing: Pick<Doc<"listings">, "category" | "categories">) {
   return listing.categories?.length ? listing.categories : [listing.category];

@@ -17,6 +17,9 @@ export const listingStatus = v.union(
   v.literal("rejected"),
 );
 
+/** What a claim request asks for (convex/claims.ts). */
+export const claimIntentValue = v.union(v.literal("claim"), v.literal("remove"));
+
 /** What a social post is about (convex/social.ts). */
 export const socialPostKind = v.union(
   v.literal("award"),
@@ -686,7 +689,12 @@ export default defineSchema({
     message: v.string(),
     proofUrl: v.optional(v.string()),
     status: v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected")),
+    // "claim" asks for ownership, "remove" asks for the listing to be taken
+    // down. Older rows have no intent: read them with claimIntent()
+    // (lib/listingHelpers.ts), which spots the old "Removal request: " prefix.
+    intent: v.optional(claimIntentValue),
     reviewNote: v.optional(v.string()),
+    reviewedBy: v.optional(v.id("users")), // the admin who approved or rejected it
     reviewedAt: v.optional(v.number()),
     createdAt: v.number(),
   })
