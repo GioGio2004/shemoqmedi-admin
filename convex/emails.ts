@@ -83,8 +83,16 @@ export type Message = {
   eyebrow?: string;
   /** A wide image under the header (the site's screenshot). */
   image?: EmailImage;
-  /** Award badges (PNG from the site's /badge/<slug>/png), centred under the image. */
+  /** Award badges (PNG from the site's /badge/<slug>/png), centred under the headline. */
   badges?: { src: string; alt: string; href?: string; width: number }[];
+  /** Big headline at the top. */
+  headline?: string;
+  /** Full-width orange main button, with its link written out below. */
+  primary?: { label: string; href: string };
+  /** Titled blocks after the text (score card, reviews). */
+  sections?: { title: string; html: string }[];
+  /** Screenshot under the header (default) or after the sections. */
+  imageAt?: "top" | "bottom";
   /** Inbox preview text shown next to the subject. */
   preheader?: string;
   /** Why they get it, for the footer (defaults to the listed-work line). */
@@ -106,7 +114,11 @@ async function render(to: string, message: Message) {
   const html = emailHtml(message.paragraphs ?? textToParagraphs(message.text), message.button, message.extraHtml ?? "", {
     eyebrow: message.eyebrow,
     image: message.image,
+    imageAt: message.imageAt,
     badges: message.badges,
+    headline: message.headline,
+    primary: message.primary,
+    sections: message.sections,
     preheader: message.preheader,
     footerHtml: footer(unsubscribe, message.footerNote),
   });

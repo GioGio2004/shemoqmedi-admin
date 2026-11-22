@@ -19,7 +19,8 @@ import { internalAction, internalQuery, type QueryCtx } from "./_generated/serve
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { deliver } from "./emails";
-import { emailHtml, emailImageUrl, escapeHtml, sendEmail } from "./lib/email";
+import { emailHtml, emailImageUrl, escapeHtml, reviewCardsHtml, scoreCardHtml, sendEmail } from "./lib/email";
+import { PILLARS } from "./lib/taxonomy";
 import { mediaUrl } from "./lib/media";
 import { getConfig } from "./lib/config";
 import { conflictReason } from "./lib/conflicts";
@@ -79,6 +80,95 @@ export const cover = internalQuery({
   },
 });
 
+/** Validator for a listing's jury verdict, shared by the results and award emails. */
+export const vSummary = v.object({
+  final: v.union(v.number(), v.null()),
+  jurors: v.number(),
+  pillars: v.array(v.object({ name: v.string(), weight: v.number(), value: v.number() })),
+  reviews: v.array(v.object({ name: v.string(), title: v.string(), score: v.number(), comment: v.string() })),
+});
+
+/** The jury's verdict on a listing: final score, per-criterion averages, every review. */
+async function summaryOf(ctx: QueryCtx, listing: Doc<"listings">) {
+  const evaluations = await ctx.db
+    .query("juryEvaluations")
+    .withIndex("by_listing", (q) => q.eq("listingId", listing._id))
+    .collect();
+  const reviews = [];
+  for (const e of evaluations) {
+    const juror = await ctx.db.get(e.jurorId);
+    reviews.push({
+      name: juror?.name ?? "A juror",
+      title: juror?.title ?? "",
+      score: Math.round(weighted(readPillars(e.scores)) * 100) / 100,
+      comment: e.comment,
+    });
+  }
+  const p = listing.editorialScores ? readPillars(listing.editorialScores) : null;
+  return {
+    final: listing.finalScore ?? null,
+    jurors: evaluations.length,
+    pillars: p ? PILLARS.map((x) => ({ name: x.name, weight: x.weight, value: p[x.key] })) : [],
+    reviews,
+  };
+}
+
+/** For the award email (notify.ts): the listing's verdict, cover and whether it's claimed. */
+export const awardExtras = internalQuery({
+  args: { listingId: v.id("listings") },
+  returns: v.union(
+    v.null(),
+    v.object({ summary: vSummary, cover: v.union(v.string(), v.null()), claimed: v.boolean(), slug: v.string() }),
+  ),
+  handler: async (ctx, { listingId }) => {
+    const listing = await ctx.db.get(listingId);
+    if (!listing) return null;
+    return {
+      summary: await summaryOf(ctx, listing),
+      cover: await coverOf(ctx, listing),
+      claimed: Boolean(listing.isClaimed),
+      slug: listing.slug,
+    };
+  },
+});
+
+/** The verdict and reviews as email sections (empty parts left out). */
+export function verdictSections(summary: {
+  final: number | null;
+  jurors: number;
+  pillars: { name: string; weight: number; value: number }[];
+  reviews: { name: string; title: string; score: number; comment: string }[];
+}) {
+  const sections: { title: string; html: string }[] = [];
+  if (summary.final !== null && summary.pillars.length) {
+    sections.push({
+      title: "The jury's verdict",
+      html: scoreCardHtml({ final: summary.final, jurors: summary.jurors, pillars: summary.pillars }),
+    });
+  }
+  if (summary.reviews.length) sections.push({ title: "What the jury said", html: reviewCardsHtml(summary.reviews) });
+  return sections;
+}
+
+/** The verdict as plain text, for the text part of an email. */
+export function verdictText(summary: {
+  final: number | null;
+  pillars: { name: string; value: number }[];
+  reviews: { name: string; title: string; score: number; comment: string }[];
+}) {
+  const out: string[] = [];
+  if (summary.final !== null) {
+    out.push(
+      `Final score: ${summary.final.toFixed(2)} / 10` +
+        (summary.pillars.length ? ` (${summary.pillars.map((x) => `${x.name} ${x.value.toFixed(2)}`).join(", ")})` : ""),
+    );
+  }
+  for (const r of summary.reviews) {
+    out.push(`${r.name}${r.title ? `, ${r.title}` : ""} (${r.score.toFixed(2)})${r.comment.trim() ? `:\n${r.comment.trim()}` : ""}`);
+  }
+  return out;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Live in voting
 // ─────────────────────────────────────────────────────────────────────────────
@@ -134,9 +224,10 @@ export const live = internalAction({
         subject: `${d.title} is live in voting on Shemoqmedi`,
         text,
         eyebrow: "Live in voting",
+        headline: `${d.title} is live in voting`,
         preheader: `The jury scores it this week. Voting closes ${closesAt(d.votingEndsAt)}.`,
         image: d.cover ? { src: d.cover, alt: `${d.title} screenshot`, href: url } : undefined,
-        button: { label: "See your listing", href: url },
+        primary: { label: "See your listing", href: url },
       },
       { kind: "voting", listingId },
     );
@@ -157,15 +248,10 @@ export const resultsData = internalQuery({
       first: v.string(),
       title: v.string(),
       slug: v.string(),
-      finalScore: v.union(v.number(), v.null()),
-      pillars: v.union(
-        v.null(),
-        v.object({ design: v.number(), usability: v.number(), creativity: v.number(), content: v.number() }),
-      ),
+      claimed: v.boolean(),
       minVotes: v.number(),
-      awards: v.array(v.string()),
-      badges: v.array(v.object({ slug: v.string(), name: v.string() })),
-      reviews: v.array(v.object({ name: v.string(), title: v.string(), score: v.number(), comment: v.string() })),
+      awards: v.array(v.object({ slug: v.string(), name: v.string() })),
+      summary: vSummary,
       cover: v.union(v.string(), v.null()),
     }),
   ),
@@ -175,39 +261,22 @@ export const resultsData = internalQuery({
     const who = await contestant(ctx, listing);
     if (!who) return null;
     const config = await getConfig(ctx);
-    const evaluations = await ctx.db
-      .query("juryEvaluations")
-      .withIndex("by_listing", (q) => q.eq("listingId", listingId))
-      .collect();
-    const reviews = [];
-    for (const e of evaluations) {
-      const juror = await ctx.db.get(e.jurorId);
-      reviews.push({
-        name: juror?.name ?? "A juror",
-        title: juror?.title ?? "",
-        score: Math.round(weighted(readPillars(e.scores)) * 100) / 100,
-        comment: e.comment,
-      });
-    }
-    const active = (
+    const awards = (
       await ctx.db
         .query("awards")
         .withIndex("by_listing", (q) => q.eq("listingId", listingId))
         .collect()
-    ).filter((a) => a.status === "active");
-    const awards = active.map((a) => TIER_NAMES[a.tier]);
-    const badges = active.map((a) => ({ slug: a.slug, name: TIER_NAMES[a.tier] }));
-    const p = listing.editorialScores ? readPillars(listing.editorialScores) : null;
+    )
+      .filter((a) => a.status === "active")
+      .map((a) => ({ slug: a.slug, name: TIER_NAMES[a.tier] }));
     return {
       ...who,
       title: listing.title,
       slug: listing.slug,
-      finalScore: listing.finalScore ?? null,
-      pillars: p ? { design: p.design, usability: p.usability, creativity: p.creativity, content: p.content } : null,
+      claimed: Boolean(listing.isClaimed),
       minVotes: config.minVotes,
       awards,
-      badges,
-      reviews,
+      summary: await summaryOf(ctx, listing),
       cover: await coverOf(ctx, listing),
     };
   },
@@ -220,68 +289,81 @@ export const results = internalAction({
     if (await ctx.runQuery(internal.emails.alreadySent, { listingId, kind: "results" })) return null;
     const d = await ctx.runQuery(internal.votingEmails.resultsData, { listingId });
     if (!d) return null;
+    const base = siteUrl();
     const url = pageUrl(d.slug);
-    const f = (n: number) => n.toFixed(2);
-    const head: string[] = [`Hi ${d.first},`];
-    if (d.reviews.length === 0 && d.finalScore === null) {
-      head.push(
-        `Voting on ${d.title} has closed. Our jury didn't get to score it in this round, so it has no jury score. We're sorry: we're growing the jury so every site gets scored. Your listing stays on Shemoqmedi: ${url}`,
-      );
-    } else {
-      head.push(
-        `Voting on ${d.title} has closed, and the jury's scores are in.`,
-        `Final score: ${d.finalScore !== null ? f(d.finalScore) : "—"} out of 10${d.reviews.length ? `, from ${d.reviews.length} ${d.reviews.length === 1 ? "juror" : "jurors"}` : ""}.` +
-          (d.pillars
-            ? ` Design ${f(d.pillars.design)}, usability ${f(d.pillars.usability)}, creativity ${f(d.pillars.creativity)}, content ${f(d.pillars.content)}.`
-            : ""),
-      );
-      if (d.awards.length) {
-        head.push(`It won ${d.awards.join(" and ")}. You'll get a separate email with the badge.`);
-      } else if (d.reviews.length > 0 && d.reviews.length < d.minVotes) {
-        head.push(`An award needs at least ${d.minVotes} jury scores, so this round it wasn't eligible for one.`);
-      }
-    }
-    const reviewText = d.reviews
-      .filter((r) => r.comment.trim())
-      .map((r) => `${r.name}${r.title ? `, ${r.title}` : ""} (${f(r.score)}):\n${r.comment.trim()}`);
-    const tail = [
-      reviewText.length ? "What the jury wrote is on your listing page, with their names." : "",
-      "Thank you for submitting your work. Shemoqmedi",
-    ].filter(Boolean);
-    const text = [...head, ...reviewText, ...tail].join("\n\n");
+    const { summary } = d;
+    const scored = summary.final !== null;
+    const won = d.awards.map((a) => a.name);
 
-    // HTML: reviews as quoted blocks.
-    const para = (s: string) => escapeHtml(s).replace(/\n/g, "<br>");
-    const paragraphs = [
-      ...head.map(para),
-      ...d.reviews
-        .filter((r) => r.comment.trim())
-        .map(
-          (r) =>
-            `<span style="display:block;border-left:3px solid #FF4D00;padding:2px 0 2px 14px"><strong>${escapeHtml(r.name)}</strong>${r.title ? `<span>, ${escapeHtml(r.title)}</span>` : ""}<span style="float:right;font-weight:700">${f(r.score)}</span><br><span>${para(r.comment.trim())}</span></span>`,
-        ),
-      ...tail.map(para),
-    ];
+    const headline = won.length
+      ? `${d.title} won ${won.join(" and ")}`
+      : scored
+        ? `Your jury results for ${d.title}`
+        : `Voting has closed for ${d.title}`;
+    const intro: string[] = [`Hi ${d.first},`];
+    if (won.length) {
+      intro.push(
+        `Voting on ${d.title} has closed and the jury has spoken: it won ${won.join(" and ")}. Congratulations. Below are the final score, how it did on each criterion, and what every juror wrote.`,
+        "Collect your badge to show the award on your site. It links back to your award page on Shemoqmedi.",
+      );
+    } else if (scored) {
+      intro.push(
+        `Voting on ${d.title} has closed and the jury's scores are in. Below are the final score, how it did on each criterion, and what every juror wrote.`,
+      );
+      if (summary.jurors > 0 && summary.jurors < d.minVotes) {
+        intro.push(
+          `An award needs at least ${d.minVotes} jury scores and this round it got ${summary.jurors}, so it wasn't eligible for one. We're growing the jury so every site gets a full panel.`,
+        );
+      }
+    } else {
+      intro.push(
+        `Voting on ${d.title} has closed. Our jury didn't get to score it in this round, so it has no jury score. We're sorry: we're growing the jury so every site gets scored. Your listing stays on Shemoqmedi.`,
+      );
+    }
+
+    const badgesHref = d.claimed ? `${base}/account/badges` : url;
+    const primary = won.length
+      ? { label: d.claimed ? "Collect your badge" : "Claim your listing to collect your badge", href: badgesHref }
+      : { label: "See your full results", href: url };
+    const sections = verdictSections(summary);
+    sections.push({
+      title: "What happens next",
+      html: `<p style="margin:0 0 12px;font-family:Inter,Arial,sans-serif;font-size:15px;line-height:1.6;color:#0A0A0A">${
+        won.length
+          ? "Award winners are shared on our Instagram, Facebook and LinkedIn. When you post about it, tag Shemoqmedi and we'll reshare it."
+          : "Your listing stays on Shemoqmedi with the jury's scores and reviews, and it keeps collecting community votes."
+      }</p><p style="margin:0;font-family:Inter,Arial,sans-serif;font-size:15px;line-height:1.6;color:#0A0A0A">Working on something new? Submit it any time: every site gets its own week with the jury.</p>`,
+    });
+
+    const text = [
+      ...intro,
+      `${primary.label}: ${primary.href}`,
+      ...verdictText(summary),
+      `Your listing: ${url}`,
+      "Thank you for submitting your work. Shemoqmedi",
+    ].join("\n\n");
+
     await deliver(
       ctx,
       d.email,
       {
-        subject: d.reviews.length || d.finalScore !== null ? `Jury results for ${d.title}` : `Voting closed for ${d.title}`,
+        subject: won.length ? `${d.title} won ${won.join(" and ")} on Shemoqmedi` : scored ? `Jury results for ${d.title}` : `Voting closed for ${d.title}`,
         text,
-        paragraphs,
-        eyebrow: d.awards.length ? `Jury results · ${d.awards.join(" · ")}` : "Jury results",
-        preheader:
-          d.finalScore !== null && d.reviews.length
-            ? `Final score ${f(d.finalScore)} from ${d.reviews.length} ${d.reviews.length === 1 ? "juror" : "jurors"}.`
-            : "Voting has closed.",
-        image: d.cover ? { src: d.cover, alt: `${d.title} screenshot`, href: url } : undefined,
-        badges: d.badges.map((b) => ({
-          src: `${siteUrl()}/badge/${b.slug}/png`,
-          alt: `${b.name} badge`,
-          href: `${siteUrl()}/awards/${b.slug}`,
-          width: 320,
+        paragraphs: intro.map((x) => escapeHtml(x)),
+        eyebrow: won.length ? "Award" : "Jury results",
+        headline,
+        preheader: scored ? `Final score ${summary.final!.toFixed(2)} / 10.` : "Voting has closed.",
+        badges: d.awards.map((a) => ({
+          src: `${base}/badge/${a.slug}/png?shape=seal`,
+          alt: `${a.name} badge`,
+          href: `${base}/awards/${a.slug}`,
+          width: d.awards.length > 1 ? 160 : 220,
         })),
-        button: { label: "See your listing", href: url },
+        primary,
+        sections,
+        image: d.cover ? { src: d.cover, alt: `${d.title} screenshot`, href: url } : undefined,
+        imageAt: "bottom",
+        button: won.length ? { label: "See your listing", href: url } : undefined,
       },
       { kind: "results", listingId },
     );
@@ -386,7 +468,8 @@ export const remind = internalAction({
         {
           subject: n === 1 ? `Last day to score ${j.sites[0].title}` : `Last day to score ${n} sites on Shemoqmedi`,
           text,
-          button: { label: n === 1 ? "Score it now" : "Score the first one", href: pageUrl(j.sites[0].slug) },
+          primary: { label: n === 1 ? "Score it now" : "Score the first one", href: pageUrl(j.sites[0].slug) },
+          headline: n === 1 ? `Last day to score ${j.sites[0].title}` : `${n} sites close tomorrow`,
           footerNote: "You get this because you're on the Shemoqmedi jury.",
           eyebrow: "Last day to score",
           preheader: "Each site needs your score before voting closes.",

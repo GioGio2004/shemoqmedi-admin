@@ -18,7 +18,8 @@ import { mediaUrl } from "./lib/media";
 import { TIER_NAMES } from "./lib/awards";
 import { emailHtml, escapeHtml, sendEmail } from "./lib/email";
 import { siteUrl } from "./seo";
-import { deliver, type EmailImage, type Message } from "./emails";
+import { deliver, type Message } from "./emails";
+import { verdictSections, verdictText } from "./votingEmails";
 import { newClaimToken } from "./claimLinks";
 import { pushAdmins } from "./push";
 import { adminUrl, studioPostUrl } from "../lib/hosts";
@@ -121,60 +122,61 @@ export const awardAnnounced = internalAction({
       if (contact) {
         const first = contact.name.split(" ")[0] || "there";
         const subject = `${data.listing.title} ${verb} ${name} on Shemoqmedi`;
-        const intro = `${data.listing.title} ${verb} ${label} on Shemoqmedi. ${honorary ? "Thank you for being here early." : "Congratulations."}`;
-        const image: EmailImage | undefined =
-          ((await ctx.runQuery(internal.votingEmails.cover, { listingId: award.listingId })) as EmailImage | null) ?? undefined;
-        const eyebrow = honorary ? "First 100" : name;
-        // The award's round seal, as a PNG every mail app shows (the site renders it from the badge SVG).
-        const badges = [
-          { src: `${siteUrl()}/badge/${award.slug}/png?shape=seal`, alt: `${label} badge`, href: pageUrl, width: 180 },
-        ];
-        let message: Message;
-        if (contact.claimUrl) {
-          message = {
-            subject,
-            text: [
-              `Hi ${first},`,
-              intro,
-              `Its award page: ${pageUrl}`,
-              `Claim the listing (free, one minute) to get the award badge for your site and to turn the link to your site into a followed link: ${contact.claimUrl}`,
-              "Shemoqmedi",
-            ].join("\n\n"),
-            button: { label: "Claim your badge", href: contact.claimUrl },
-            eyebrow,
-            image,
-            badges,
+        const extras = (await ctx.runQuery(internal.votingEmails.awardExtras, { listingId: award.listingId })) as {
+          summary: {
+            final: number | null;
+            jurors: number;
+            pillars: { name: string; weight: number; value: number }[];
+            reviews: { name: string; title: string; score: number; comment: string }[];
           };
-        } else {
-          const tag = embedCode(award.slug, label, "tag");
-          const seal = embedCode(award.slug, label, "seal");
-          const badgesUrl = `${siteUrl()}/account/badges`;
-          message = {
-            subject,
-            text: [
+          cover: string | null;
+          claimed: boolean;
+          slug: string;
+        } | null;
+        const listingUrl = `${siteUrl()}/sites/${data.listing.slug}`;
+        const collect = contact.claimUrl
+          ? { label: "Collect your badge", href: contact.claimUrl }
+          : { label: "Collect your badge", href: `${siteUrl()}/account/badges` };
+        const intro = honorary
+          ? [
               `Hi ${first},`,
-              intro,
-              `Its award page: ${pageUrl}`,
-              `Add the badge to your site (the tag, for a footer):\n${tag}`,
-              `The round seal:\n${seal}`,
-              `Light and dark versions, sizes and a pinned-corner option: ${badgesUrl}`,
-              "Shemoqmedi",
-            ].join("\n\n"),
-            paragraphs: [
-              `Hi ${escapeHtml(first)},`,
-              `<strong>${escapeHtml(data.listing.title)}</strong> ${verb} <strong>${escapeHtml(label)}</strong> on Shemoqmedi. ${honorary ? "Thank you for being here early." : "Congratulations."}`,
-            ],
-            button: { label: "See the award", href: pageUrl },
-            eyebrow,
-            image,
-            badges,
-            extraHtml: `<p>Add the badge to your site. The tag, for a footer:</p>
-<pre style="white-space:pre-wrap;font-size:12px;background:#FFFFFF;border:1px solid #0A0A0A;padding:12px;border-radius:8px">${escapeHtml(tag)}</pre>
-<p>The round seal:</p>
-<pre style="white-space:pre-wrap;font-size:12px;background:#FFFFFF;border:1px solid #0A0A0A;padding:12px;border-radius:8px">${escapeHtml(seal)}</pre>
-<p style="font-size:12px;color:#0A0A0A">See both, pick light or dark, a size or a pinned corner, and copy the code any time: <a href="${badgesUrl}">${badgesUrl}</a></p>`,
-          };
-        }
+              `${data.listing.title} is one of the First 100: the first hundred sites listed on Shemoqmedi, marked with an honorary badge. Thank you for being here early.`,
+              contact.claimUrl
+                ? "Claim your listing (free, one minute) to collect the badge for your site. Claiming also turns the link to your site into a followed link."
+                : "Collect the badge for your site: it links back to your listing on Shemoqmedi.",
+            ]
+          : [
+              `Hi ${first},`,
+              `${data.listing.title} won ${label} on Shemoqmedi. Congratulations: the jury scored it among the best websites of its round.`,
+              contact.claimUrl
+                ? "Claim your listing (free, one minute) to collect your badge. Claiming also turns the link to your site into a followed link."
+                : "Collect your badge to show the award on your site. It links back to your award page, and you can pick the round seal or the strip, light or dark.",
+            ];
+        const sections = extras ? verdictSections(extras.summary) : [];
+        sections.push({
+          title: "Share the win",
+          html: `<p style="margin:0;font-family:Inter,Arial,sans-serif;font-size:15px;line-height:1.6;color:#0A0A0A">We share every award on our Instagram, Facebook and LinkedIn. When you post about it, tag Shemoqmedi and link your award page, and we'll reshare it: <a href="${pageUrl}" style="color:#FF4D00">${escapeHtml(pageUrl)}</a></p>`,
+        });
+        const message: Message = {
+          subject,
+          text: [
+            ...intro,
+            `${collect.label}: ${collect.href}`,
+            ...(extras ? verdictText(extras.summary) : []),
+            `Your award page: ${pageUrl}`,
+            "Shemoqmedi",
+          ].join("\n\n"),
+          paragraphs: intro.map((x) => escapeHtml(x)),
+          eyebrow: honorary ? "First 100" : name,
+          headline: honorary ? `${data.listing.title} is one of the First 100` : `${data.listing.title} won ${name}`,
+          preheader: honorary ? "Your honorary badge is ready." : "Congratulations. Your badge is ready to collect.",
+          badges: [{ src: `${siteUrl()}/badge/${award.slug}/png?shape=seal`, alt: `${label} badge`, href: pageUrl, width: 240 }],
+          primary: collect,
+          sections,
+          image: extras?.cover ? { src: extras.cover, alt: `${data.listing.title} screenshot`, href: listingUrl } : undefined,
+          imageAt: "bottom",
+          button: { label: "See your award page", href: pageUrl },
+        };
         const result = await deliver(ctx, contact.email, message, {
           kind: "award",
           listingId: award.listingId,
