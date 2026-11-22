@@ -164,6 +164,7 @@ export const resultsData = internalQuery({
       ),
       minVotes: v.number(),
       awards: v.array(v.string()),
+      badges: v.array(v.object({ slug: v.string(), name: v.string() })),
       reviews: v.array(v.object({ name: v.string(), title: v.string(), score: v.number(), comment: v.string() })),
       cover: v.union(v.string(), v.null()),
     }),
@@ -188,14 +189,14 @@ export const resultsData = internalQuery({
         comment: e.comment,
       });
     }
-    const awards = (
+    const active = (
       await ctx.db
         .query("awards")
         .withIndex("by_listing", (q) => q.eq("listingId", listingId))
         .collect()
-    )
-      .filter((a) => a.status === "active")
-      .map((a) => TIER_NAMES[a.tier]);
+    ).filter((a) => a.status === "active");
+    const awards = active.map((a) => TIER_NAMES[a.tier]);
+    const badges = active.map((a) => ({ slug: a.slug, name: TIER_NAMES[a.tier] }));
     const p = listing.editorialScores ? readPillars(listing.editorialScores) : null;
     return {
       ...who,
@@ -205,6 +206,7 @@ export const resultsData = internalQuery({
       pillars: p ? { design: p.design, usability: p.usability, creativity: p.creativity, content: p.content } : null,
       minVotes: config.minVotes,
       awards,
+      badges,
       reviews,
       cover: await coverOf(ctx, listing),
     };
@@ -256,7 +258,7 @@ export const results = internalAction({
         .filter((r) => r.comment.trim())
         .map(
           (r) =>
-            `<span style="display:block;border-left:3px solid #FF4D00;padding:2px 0 2px 14px"><strong>${escapeHtml(r.name)}</strong>${r.title ? `<span style="color:#6B665E">, ${escapeHtml(r.title)}</span>` : ""}<span style="float:right;font-weight:700">${f(r.score)}</span><br><span style="color:#333">${para(r.comment.trim())}</span></span>`,
+            `<span style="display:block;border-left:3px solid #FF4D00;padding:2px 0 2px 14px"><strong>${escapeHtml(r.name)}</strong>${r.title ? `<span>, ${escapeHtml(r.title)}</span>` : ""}<span style="float:right;font-weight:700">${f(r.score)}</span><br><span>${para(r.comment.trim())}</span></span>`,
         ),
       ...tail.map(para),
     ];
@@ -273,6 +275,12 @@ export const results = internalAction({
             ? `Final score ${f(d.finalScore)} from ${d.reviews.length} ${d.reviews.length === 1 ? "juror" : "jurors"}.`
             : "Voting has closed.",
         image: d.cover ? { src: d.cover, alt: `${d.title} screenshot`, href: url } : undefined,
+        badges: d.badges.map((b) => ({
+          src: `${siteUrl()}/badge/${b.slug}/png`,
+          alt: `${b.name} badge`,
+          href: `${siteUrl()}/awards/${b.slug}`,
+          width: 320,
+        })),
         button: { label: "See your listing", href: url },
       },
       { kind: "results", listingId },

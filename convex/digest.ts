@@ -133,13 +133,13 @@ export const send = internalAction({
         { label: "Open the jury queue", href: `${base}/collections/nominees` },
         `${mine.length ? `<p><strong>In your categories</strong></p>${list(mine)}` : ""}${
           general.length
-            ? `<p><strong>General queue</strong> <span style="color:#555">(no juror follows these categories yet)</span></p>${list(general)}`
+            ? `<p><strong>General queue</strong> <span>(no juror follows these categories yet)</span></p>${list(general)}`
             : ""
         }`,
         {
           eyebrow: "New sites to score",
           preheader: `${total} new ${total === 1 ? "site" : "sites"} in your jury queue.`,
-          footerHtml: `You get this because you're on the Shemoqmedi jury. Choose your categories on <a href="${base}/jury/profile" style="color:#8A857C">your jury profile</a>.`,
+          footerHtml: `You get this because you're on the Shemoqmedi jury. Choose your categories on <a href="${base}/jury/profile" style="color:#0A0A0A;text-decoration:underline">your jury profile</a>.`,
         },
       ),
     });

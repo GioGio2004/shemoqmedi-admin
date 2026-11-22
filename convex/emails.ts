@@ -64,7 +64,7 @@ export async function unsubscribeUrl(email: string): Promise<string | null> {
 /** The footer's last line: why they get this, and how to stop it. */
 function footer(unsubscribe: string | null, note = "You get this because your work is listed on Shemoqmedi.") {
   return unsubscribe
-    ? `${escapeHtml(note)} <a href="${escapeHtml(unsubscribe)}" style="color:#8A857C;text-decoration:underline">Unsubscribe</a>.`
+    ? `${escapeHtml(note)} <a href="${escapeHtml(unsubscribe)}" style="color:#0A0A0A;text-decoration:underline">Unsubscribe</a>.`
     : escapeHtml(note);
 }
 
@@ -83,6 +83,8 @@ export type Message = {
   eyebrow?: string;
   /** A wide image under the header (the site's screenshot). */
   image?: EmailImage;
+  /** Award badges (PNG from the site's /badge/<slug>/png), centred under the image. */
+  badges?: { src: string; alt: string; href?: string; width: number }[];
   /** Inbox preview text shown next to the subject. */
   preheader?: string;
   /** Why they get it, for the footer (defaults to the listed-work line). */
@@ -104,6 +106,7 @@ async function render(to: string, message: Message) {
   const html = emailHtml(message.paragraphs ?? textToParagraphs(message.text), message.button, message.extraHtml ?? "", {
     eyebrow: message.eyebrow,
     image: message.image,
+    badges: message.badges,
     preheader: message.preheader,
     footerHtml: footer(unsubscribe, message.footerNote),
   });

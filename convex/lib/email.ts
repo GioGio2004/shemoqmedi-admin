@@ -37,9 +37,7 @@ const DEFAULT_SITE = "https://www.shemoqmedi.space";
 const site = () => (process.env.SITE_URL?.trim() || DEFAULT_SITE).replace(/\/+$/, "");
 
 const INK = "#0A0A0A";
-const PAPER = "#F4F1EA";
 const ORANGE = "#FF4D00";
-const MUTED = "#6B665E";
 const FONT = "Inter,'Helvetica Neue',Helvetica,Arial,sans-serif";
 
 /**
@@ -63,6 +61,8 @@ export type EmailOptions = {
   eyebrow?: string;
   /** A wide image under the header (a site's screenshot), optionally linked. */
   image?: { src: string; alt: string; href?: string };
+  /** Award badges (PNG), centred above the text, each shown `width` px wide. */
+  badges?: { src: string; alt: string; href?: string; width: number }[];
   /** Shown by inbox previews next to the subject; hidden in the email itself. */
   preheader?: string;
   /** Extra footer line(s), already HTML (why they get it, unsubscribe). */
@@ -95,22 +95,29 @@ export function emailHtml(
     ? `<p style="margin:0 0 14px;font-family:${FONT};font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:${ORANGE}">${escapeHtml(opts.eyebrow)}</p>`
     : "";
   const imgTag = opts.image
-    ? `<img src="${escapeHtml(opts.image.src)}" alt="${escapeHtml(opts.image.alt)}" width="536" style="display:block;width:100%;max-width:536px;height:auto;border:0;border-radius:12px;background:${PAPER}">`
+    ? `<img src="${escapeHtml(opts.image.src)}" alt="${escapeHtml(opts.image.alt)}" width="536" style="display:block;width:100%;max-width:536px;height:auto;border:0;border-radius:12px;border:1px solid ${INK}">`
     : "";
   const image = opts.image
     ? `<tr><td style="padding:0 32px 28px">${opts.image.href ? `<a href="${escapeHtml(opts.image.href)}" style="text-decoration:none">${imgTag}</a>` : imgTag}</td></tr>`
+    : "";
+  const badgeImg = (b: NonNullable<EmailOptions["badges"]>[number]) => {
+    const img = `<img src="${escapeHtml(b.src)}" alt="${escapeHtml(b.alt)}" width="${b.width}" style="display:inline-block;width:${b.width}px;max-width:100%;height:auto;border:0">`;
+    return b.href ? `<a href="${escapeHtml(b.href)}" style="text-decoration:none">${img}</a>` : img;
+  };
+  const badges = opts.badges?.length
+    ? `<tr><td align="center" style="padding:4px 32px 28px">${opts.badges.map((b) => `<div style="margin:0 0 12px">${badgeImg(b)}</div>`).join("")}</td></tr>`
     : "";
   const preheader = opts.preheader
     ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${escapeHtml(opts.preheader)}&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>`
     : "";
   const link = (href: string, label: string) =>
-    `<a href="${base}${href}" style="color:${INK};text-decoration:none;font-weight:600">${label}</a>`;
+    `<a href="${base}${href}" style="color:${ORANGE};text-decoration:none;font-weight:700">${label}</a>`;
 
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"></head>
-<body style="margin:0;padding:0;background:${PAPER}">
+<body style="margin:0;padding:0;background:${INK}">
 ${preheader}
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${PAPER}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${INK}">
 <tr><td align="center" style="padding:32px 12px">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#FFFFFF;border-radius:20px;overflow:hidden">
 <tr><td style="height:4px;background:${ORANGE};line-height:4px;font-size:0">&nbsp;</td></tr>
@@ -126,22 +133,23 @@ ${preheader}
   </a>
 </td></tr>
 ${image}
+${badges}
 <tr><td style="padding:0 32px 12px">
 ${eyebrow}
 ${body}
 ${cta}
 ${extra}
 </td></tr>
-<tr><td style="padding:24px 32px 30px;border-top:1px solid #EDEAE3">
+<tr><td style="padding:24px 32px 30px;border-top:2px solid ${ORANGE}">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
     <td style="vertical-align:top;width:52px"><img src="${logo}" alt="Shemoqmedi" width="36" height="27" style="display:block;border:0"></td>
-    <td style="vertical-align:top;font-family:${FONT};font-size:13px;line-height:1.55;color:${MUTED}">
+    <td style="vertical-align:top;font-family:${FONT};font-size:13px;line-height:1.55;color:${INK}">
       <div style="color:${INK};font-weight:700">Shemoqmedi</div>
       <div>Website awards, scored by an independent jury.</div>
       <div style="margin-top:10px">${link("/", "Websites")}&nbsp;&nbsp;·&nbsp;&nbsp;${link("/jury", "The jury")}&nbsp;&nbsp;·&nbsp;&nbsp;${link("/how-we-score", "How we score")}&nbsp;&nbsp;·&nbsp;&nbsp;${link("/submit", "Submit a site")}</div>
     </td>
   </tr></table>
-  ${opts.footerHtml ? `<div style="margin-top:18px;font-family:${FONT};font-size:11px;line-height:1.5;color:#8A857C">${opts.footerHtml}</div>` : ""}
+  ${opts.footerHtml ? `<div style="margin-top:18px;font-family:${FONT};font-size:11px;line-height:1.5;color:${INK}">${opts.footerHtml}</div>` : ""}
 </td></tr>
 </table>
 </td></tr>

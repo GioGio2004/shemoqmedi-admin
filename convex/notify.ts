@@ -125,6 +125,10 @@ export const awardAnnounced = internalAction({
         const image: EmailImage | undefined =
           ((await ctx.runQuery(internal.votingEmails.cover, { listingId: award.listingId })) as EmailImage | null) ?? undefined;
         const eyebrow = honorary ? "First 100" : name;
+        // The award's round seal, as a PNG every mail app shows (the site renders it from the badge SVG).
+        const badges = [
+          { src: `${siteUrl()}/badge/${award.slug}/png?shape=seal`, alt: `${label} badge`, href: pageUrl, width: 180 },
+        ];
         let message: Message;
         if (contact.claimUrl) {
           message = {
@@ -139,6 +143,7 @@ export const awardAnnounced = internalAction({
             button: { label: "Claim your badge", href: contact.claimUrl },
             eyebrow,
             image,
+            badges,
           };
         } else {
           const tag = embedCode(award.slug, label, "tag");
@@ -162,11 +167,12 @@ export const awardAnnounced = internalAction({
             button: { label: "See the award", href: pageUrl },
             eyebrow,
             image,
+            badges,
             extraHtml: `<p>Add the badge to your site. The tag, for a footer:</p>
-<pre style="white-space:pre-wrap;font-size:12px;background:#f4f4f4;padding:12px;border-radius:8px">${escapeHtml(tag)}</pre>
+<pre style="white-space:pre-wrap;font-size:12px;background:#FFFFFF;border:1px solid #0A0A0A;padding:12px;border-radius:8px">${escapeHtml(tag)}</pre>
 <p>The round seal:</p>
-<pre style="white-space:pre-wrap;font-size:12px;background:#f4f4f4;padding:12px;border-radius:8px">${escapeHtml(seal)}</pre>
-<p style="font-size:12px;color:#555">See both, pick light or dark, a size or a pinned corner, and copy the code any time: <a href="${badgesUrl}">${badgesUrl}</a></p>`,
+<pre style="white-space:pre-wrap;font-size:12px;background:#FFFFFF;border:1px solid #0A0A0A;padding:12px;border-radius:8px">${escapeHtml(seal)}</pre>
+<p style="font-size:12px;color:#0A0A0A">See both, pick light or dark, a size or a pinned corner, and copy the code any time: <a href="${badgesUrl}">${badgesUrl}</a></p>`,
           };
         }
         const result = await deliver(ctx, contact.email, message, {
