@@ -15,6 +15,7 @@ import { MediaPanel } from "./MediaPanel";
 import { AgentPanel } from "./AgentDesk";
 import { LifecyclePanel } from "./LifecyclePanel";
 import { IntegrityPanel } from "./IntegrityPanel";
+import { AuditPanel } from "./AuditPanel";
 import { BadgeKit } from "./BadgeKit";
 import { ClaimLink, UnclaimButton } from "./ClaimLink";
 import { SOURCE_LABEL, safeHref, storefrontCreatorUrl } from "./format";
@@ -119,6 +120,8 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
           />
 
           <IntegrityPanel listingId={listing.id} byTeam={listing.byTeam} title={listing.title} />
+
+          <AuditPanel listingId={listing.id} url={listing.url} />
 
           <ScoreEditor
             key={listing.id}

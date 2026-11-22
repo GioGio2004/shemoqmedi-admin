@@ -231,6 +231,54 @@ export const briefStatus = v.union(
   v.literal("cancelled"),
 );
 
+const nullableNumber = v.union(v.number(), v.null());
+
+/** One Lighthouse run (mobile or desktop), trimmed to what the jury reads. */
+export const auditReport = v.object({
+  // Category scores 0-100 (null when Lighthouse could not score one).
+  scores: v.object({
+    performance: nullableNumber,
+    accessibility: nullableNumber,
+    bestPractices: nullableNumber,
+    seo: nullableNumber,
+  }),
+  // Lab metrics from this run: ms, except cls (unitless).
+  lab: v.object({
+    fcp: nullableNumber,
+    lcp: nullableNumber,
+    tbt: nullableNumber,
+    cls: nullableNumber,
+    speedIndex: nullableNumber,
+    ttfb: nullableNumber,
+  }),
+  // Real-user data (Chrome UX Report), 75th percentile; null for sites without enough traffic.
+  field: v.union(
+    v.null(),
+    v.object({
+      category: v.string(), // FAST | AVERAGE | SLOW
+      lcp: nullableNumber,
+      cls: nullableNumber,
+      inp: nullableNumber,
+      fcp: nullableNumber,
+      ttfb: nullableNumber,
+    }),
+  ),
+  pageBytes: nullableNumber,
+  requests: nullableNumber,
+  // Biggest load-time savings Lighthouse suggests.
+  opportunities: v.array(v.object({ title: v.string(), savingsMs: v.number() })),
+  // Failed checks, grouped by category.
+  issues: v.array(
+    v.object({
+      category: v.union(v.literal("accessibility"), v.literal("best-practices"), v.literal("seo")),
+      title: v.string(),
+    }),
+  ),
+  // How the page looked at the end of the load (JPEG data URL), if Lighthouse sent one.
+  screenshot: v.optional(v.string()),
+  lighthouseVersion: v.string(),
+});
+
 export default defineSchema({
   // Files uploaded to ImageKit (convex/media.ts). WebP screenshots and
   // MP4/WebM previews under /listings/<slug>/ with SEO-friendly names.
@@ -931,4 +979,19 @@ export default defineSchema({
     windowStart: v.number(),
     count: v.number(),
   }).index("by_key", ["key"]),
+
+  // Technical audit of a listing's site (Google PageSpeed Insights, which runs
+  // Lighthouse): one row per listing, the latest run, replaced on each new
+  // run. Admins start it from the review page; jurors read it in the Evaluate
+  // tool (convex/audits.ts). Information for the jury, never part of a score.
+  siteAudits: defineTable({
+    listingId: v.id("listings"),
+    url: v.string(),
+    status: v.union(v.literal("running"), v.literal("done"), v.literal("error")),
+    error: v.optional(v.string()),
+    requestedAt: v.number(),
+    finishedAt: v.optional(v.number()),
+    mobile: v.optional(auditReport),
+    desktop: v.optional(auditReport),
+  }).index("by_listing", ["listingId"]),
 });

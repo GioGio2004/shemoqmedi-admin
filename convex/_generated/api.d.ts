@@ -9,6 +9,7 @@
  */
 
 import type * as admin from "../admin.js";
+import type * as audits from "../audits.js";
 import type * as authHelpers from "../authHelpers.js";
 import type * as awards from "../awards.js";
 import type * as channels from "../channels.js";
@@ -83,6 +84,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
+  audits: typeof audits;
   authHelpers: typeof authHelpers;
   awards: typeof awards;
   channels: typeof channels;
