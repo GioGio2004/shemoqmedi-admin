@@ -180,7 +180,7 @@ export const LIMITS = {
   juryComment: 1000,
   /** Juror profile fields. */
   juryTitle: 80,
-  juryBio: 400,
+  juryBio: 1500,
   /** Days a jury invitation link stays valid. */
   juryInviteDays: 14,
   /** Profile links on a creator page (Dribbble, LinkedIn, ...). */
