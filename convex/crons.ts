@@ -10,6 +10,8 @@ crons.interval("awards tick", { minutes: 15 }, internal.awards.tick, {});
 
 // Jurors' digest of new submissions in their interest categories.
 crons.interval("jury digest", { minutes: 30 }, internal.digest.run, {});
+// Jurors: sites closing within 24 h they haven't scored. Admins: sites closing short of jury votes.
+crons.interval("voting reminders", { hours: 1 }, internal.votingEmails.remind, {});
 
 // The social desk (social.ts). Times are UTC; Tbilisi is UTC+4.
 // Sites that just went public get a "new listing" post (idempotent).

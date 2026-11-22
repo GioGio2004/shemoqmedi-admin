@@ -197,6 +197,9 @@ function claimEmail(to: string, name: string, link: string, bundled: number): Me
       `Sign in with this address (${to}) to claim it. The link works once and expires in 14 days.`,
     ].join("\n\n"),
     button: { label: "Claim your jury spot", href: link },
+    eyebrow: "Founding jury invitation",
+    preheader: "Your jury profile is ready to claim.",
+    footerNote: "You get this because we invited you to the Shemoqmedi jury.",
   };
 }
 

@@ -3,6 +3,7 @@ import { ConvexError, v } from "convex/values";
 import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { award, creatorTier, listingStatus, pillars, region, withdrawableStatus } from "./schema";
 import { claimLinkStatus, linkStatus } from "./lib/claimLinkRows";
@@ -745,6 +746,8 @@ export const approve = mutation({
       sotdQueuedAt: undefined,
       updatedAt: now,
     });
+    // "Your site is live in voting" to its owner or submitter.
+    await ctx.scheduler.runAfter(0, internal.votingEmails.live, { listingId: id });
     await scheduleIndexNow(ctx, [...(await listingPaths(ctx, listing)), "/"]);
     return null;
   },

@@ -130,12 +130,17 @@ export const send = internalAction({
       ].join("\n"),
       html: emailHtml(
         [`Hi ${escapeHtml(first)},`, `${total} new ${total === 1 ? "site is" : "sites are"} waiting for your score.`],
-        undefined,
+        { label: "Open the jury queue", href: `${base}/collections/nominees` },
         `${mine.length ? `<p><strong>In your categories</strong></p>${list(mine)}` : ""}${
           general.length
             ? `<p><strong>General queue</strong> <span style="color:#555">(no juror follows these categories yet)</span></p>${list(general)}`
             : ""
-        }<p style="font-size:12px;color:#555">Choose your categories on your jury profile: ${base}/jury/profile</p>`,
+        }`,
+        {
+          eyebrow: "New sites to score",
+          preheader: `${total} new ${total === 1 ? "site" : "sites"} in your jury queue.`,
+          footerHtml: `You get this because you're on the Shemoqmedi jury. Choose your categories on <a href="${base}/jury/profile" style="color:#8A857C">your jury profile</a>.`,
+        },
       ),
     });
     if (error) console.warn(`Jury digest to ${to} not sent: ${error}`);

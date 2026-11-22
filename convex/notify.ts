@@ -18,7 +18,7 @@ import { mediaUrl } from "./lib/media";
 import { TIER_NAMES } from "./lib/awards";
 import { emailHtml, escapeHtml, sendEmail } from "./lib/email";
 import { siteUrl } from "./seo";
-import { deliver, type Message } from "./emails";
+import { deliver, type EmailImage, type Message } from "./emails";
 import { newClaimToken } from "./claimLinks";
 import { pushAdmins } from "./push";
 import { adminUrl, studioPostUrl } from "../lib/hosts";
@@ -122,6 +122,9 @@ export const awardAnnounced = internalAction({
         const first = contact.name.split(" ")[0] || "there";
         const subject = `${data.listing.title} ${verb} ${name} on Shemoqmedi`;
         const intro = `${data.listing.title} ${verb} ${label} on Shemoqmedi. ${honorary ? "Thank you for being here early." : "Congratulations."}`;
+        const image: EmailImage | undefined =
+          ((await ctx.runQuery(internal.votingEmails.cover, { listingId: award.listingId })) as EmailImage | null) ?? undefined;
+        const eyebrow = honorary ? "First 100" : name;
         let message: Message;
         if (contact.claimUrl) {
           message = {
@@ -134,6 +137,8 @@ export const awardAnnounced = internalAction({
               "Shemoqmedi",
             ].join("\n\n"),
             button: { label: "Claim your badge", href: contact.claimUrl },
+            eyebrow,
+            image,
           };
         } else {
           const tag = embedCode(award.slug, label, "tag");
@@ -155,6 +160,8 @@ export const awardAnnounced = internalAction({
               `<strong>${escapeHtml(data.listing.title)}</strong> ${verb} <strong>${escapeHtml(label)}</strong> on Shemoqmedi. ${honorary ? "Thank you for being here early." : "Congratulations."}`,
             ],
             button: { label: "See the award", href: pageUrl },
+            eyebrow,
+            image,
             extraHtml: `<p>Add the badge to your site. The tag, for a footer:</p>
 <pre style="white-space:pre-wrap;font-size:12px;background:#f4f4f4;padding:12px;border-radius:8px">${escapeHtml(tag)}</pre>
 <p>The round seal:</p>

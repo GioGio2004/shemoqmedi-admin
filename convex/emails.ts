@@ -17,7 +17,16 @@ import { isEmail } from "./lib/contacts";
 import { unsubscribeToken } from "./lib/tokens";
 import { newClaimToken } from "./claimLinks";
 
-export type EmailKind = "award" | "featured" | "outreach" | "broadcast" | "custom";
+export type EmailKind =
+  | "award"
+  | "featured"
+  | "outreach"
+  | "broadcast"
+  | "custom"
+  | "voting"
+  | "results"
+  | "juryReminder"
+  | "lowVotes";
 
 /** Resend's batch endpoint takes at most this many emails per request. */
 export const BATCH_SIZE = 100;
@@ -52,12 +61,14 @@ export async function unsubscribeUrl(email: string): Promise<string | null> {
   return `${base.replace(/\/$/, "")}/unsubscribe?e=${encodeURIComponent(email)}&t=${token}`;
 }
 
-function footer(unsubscribe: string | null) {
-  const line = unsubscribe
-    ? `You get this because your work is listed on Shemoqmedi. <a href="${escapeHtml(unsubscribe)}" style="color:#777">Unsubscribe</a>.`
-    : "You get this because your work is listed on Shemoqmedi.";
-  return `<p style="margin-top:32px;font-size:11px;color:#777">${line}</p>`;
+/** The footer's last line: why they get this, and how to stop it. */
+function footer(unsubscribe: string | null, note = "You get this because your work is listed on Shemoqmedi.") {
+  return unsubscribe
+    ? `${escapeHtml(note)} <a href="${escapeHtml(unsubscribe)}" style="color:#8A857C;text-decoration:underline">Unsubscribe</a>.`
+    : escapeHtml(note);
 }
+
+export type EmailImage = { src: string; alt: string; href?: string };
 
 export type Message = {
   subject: string;
@@ -68,6 +79,14 @@ export type Message = {
   button?: { label: string; href: string };
   /** Extra HTML after the button (badge embed code, ...). */
   extraHtml?: string;
+  /** Small orange label above the text ("Jury results"). */
+  eyebrow?: string;
+  /** A wide image under the header (the site's screenshot). */
+  image?: EmailImage;
+  /** Inbox preview text shown next to the subject. */
+  preheader?: string;
+  /** Why they get it, for the footer (defaults to the listed-work line). */
+  footerNote?: string;
 };
 
 export type DeliverMeta = {
@@ -82,11 +101,12 @@ export type Delivery = { to: string; status: "sent" | "failed" | "skipped"; erro
 
 async function render(to: string, message: Message) {
   const unsubscribe = await unsubscribeUrl(to);
-  const html = emailHtml(
-    message.paragraphs ?? textToParagraphs(message.text),
-    message.button,
-    (message.extraHtml ?? "") + footer(unsubscribe),
-  );
+  const html = emailHtml(message.paragraphs ?? textToParagraphs(message.text), message.button, message.extraHtml ?? "", {
+    eyebrow: message.eyebrow,
+    image: message.image,
+    preheader: message.preheader,
+    footerHtml: footer(unsubscribe, message.footerNote),
+  });
   const text = `${message.text}${message.button ? `\n\n${message.button.label}: ${message.button.href}` : ""}${
     unsubscribe ? `\n\n—\nUnsubscribe: ${unsubscribe}` : ""
   }`;
@@ -298,6 +318,8 @@ export const featured = internalAction({
     const contact = await ctx.runMutation(internal.social.studioContact, { listingId, freshToken: newClaimToken() });
     // Unpublished since the post was queued: there is nothing to feature.
     if (!contact || !contact.isPublic) return null;
+    // Nothing new for someone who already got "live in voting" and has nothing to claim.
+    if (!contact.claimUrl && (await ctx.runQuery(internal.emails.alreadySent, { listingId, kind: "voting" }))) return null;
     const first = contact.name.split(" ")[0] || "there";
     const lines = [
       `Hi ${first},`,
@@ -313,6 +335,8 @@ export const featured = internalAction({
       {
         subject: `${contact.title} is featured on Shemoqmedi`,
         text: lines.join("\n\n"),
+        eyebrow: "Featured",
+        image: ((await ctx.runQuery(internal.votingEmails.cover, { listingId })) as EmailImage | null) ?? undefined,
         button: contact.claimUrl ? { label: "Claim your listing", href: contact.claimUrl } : { label: "See the listing", href: contact.pageUrl },
       },
       { kind: "featured", listingId, creatorId: contact.creatorId ?? undefined, postId },

@@ -282,6 +282,8 @@ export async function closeVoting(ctx: MutationCtx, listing: Doc<"listings">, co
     status: "archived",
     updatedAt: now,
   });
+  // Jury scores and reviews to the contestant; runs after this mutation, so it sees the awards given below.
+  await ctx.scheduler.runAfter(0, internal.votingEmails.results, { listingId: listing._id });
   const closed = (await ctx.db.get(listing._id))!;
   const blocked = ineligibility(closed, config);
   const period = closed.batchWeek ?? weekOf(closed.publishedAt ?? closed.createdAt);

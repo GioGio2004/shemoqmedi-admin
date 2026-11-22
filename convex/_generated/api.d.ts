@@ -75,6 +75,7 @@ import type * as social from "../social.js";
 import type * as users from "../users.js";
 import type * as voiceover from "../voiceover.js";
 import type * as votes from "../votes.js";
+import type * as votingEmails from "../votingEmails.js";
 
 import type {
   ApiFromModules,
@@ -150,6 +151,7 @@ declare const fullApi: ApiFromModules<{
   users: typeof users;
   voiceover: typeof voiceover;
   votes: typeof votes;
+  votingEmails: typeof votingEmails;
 }>;
 
 /**

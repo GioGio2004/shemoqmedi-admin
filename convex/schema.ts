@@ -105,6 +105,10 @@ export const emailKind = v.union(
   v.literal("outreach"),
   v.literal("broadcast"),
   v.literal("custom"),
+  v.literal("voting"), // contestant: the site is live in voting (votingEmails.ts)
+  v.literal("results"), // contestant: jury scores and reviews at close
+  v.literal("juryReminder"), // juror: sites closing within 24 h they haven't scored
+  v.literal("lowVotes"), // admins: sites closing short of jury votes
 );
 
 /**
