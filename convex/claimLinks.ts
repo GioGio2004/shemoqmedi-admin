@@ -26,7 +26,7 @@ import { action, internalMutation, internalQuery, mutation, query, type Mutation
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
-import { juryCategory } from "./schema";
+import { juryCategory, juryExperience, juryWork } from "./schema";
 import { mediaUrl } from "./lib/media";
 import { claimIntent, claimedListingPatch, fail, isPublicStatus } from "./lib/listingHelpers";
 import { DAY_MS } from "./lib/time";
@@ -408,6 +408,9 @@ const jurorPreview = v.object({
   linkedinUrl: v.union(v.string(), v.null()),
   isFounding: v.boolean(),
   imageUrl: v.union(v.string(), v.null()),
+  // The full profile as it will look on /jury/<slug>, shown before claiming.
+  experience: v.array(juryExperience),
+  work: v.array(juryWork),
 });
 
 const listingPreview = v.object({
@@ -430,6 +433,8 @@ async function previewJuror(ctx: QueryCtx, j: Doc<"jurors">) {
     bio: j.bio ?? null,
     website: j.website ?? null,
     linkedinUrl: j.linkedinUrl ?? null,
+    experience: j.experience ?? [],
+    work: j.work ?? [],
     isFounding: j.isFounding ?? false,
     imageUrl: await jurorPhoto(ctx, j),
   };
