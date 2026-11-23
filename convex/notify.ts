@@ -153,6 +153,16 @@ export const awardAnnounced = internalAction({
                 : "Collect your badge to show the award on your site. It links back to your award page, and you can pick the round seal or the strip, light or dark.",
             ];
         const sections = extras ? verdictSections(extras.summary) : [];
+        // The award's A4 certificate, made by the site (/certificate/<award>):
+        // a preview that opens it, and a link that downloads the PNG.
+        const certificateUrl = `${siteUrl()}/certificate/${award.slug}`;
+        const certificateDownload = `${certificateUrl}?download=1`;
+        sections.push({
+          title: "Your certificate",
+          html:
+            `<a href="${certificateUrl}" style="display:block;width:200px;margin:0 0 16px"><img src="${certificateUrl}" alt="${escapeHtml(`${label} certificate for ${data.listing.title}`)}" width="200" style="display:block;width:200px;height:auto;border:1px solid #E4E0D8"></a>` +
+            `<p style="margin:0;font-family:Inter,Arial,sans-serif;font-size:15px;line-height:1.6;color:#0A0A0A">An A4 certificate for ${escapeHtml(data.listing.title)}, ready to print or post. <a href="${certificateDownload}" style="color:#FF4D00">Download it (PNG)</a></p>`,
+        });
         sections.push({
           title: "Share the win",
           html: `<p style="margin:0;font-family:Inter,Arial,sans-serif;font-size:15px;line-height:1.6;color:#0A0A0A">We share every award on our Instagram, Facebook and LinkedIn. When you post about it, tag Shemoqmedi and link your award page, and we'll reshare it: <a href="${pageUrl}" style="color:#FF4D00">${escapeHtml(pageUrl)}</a></p>`,
@@ -163,6 +173,7 @@ export const awardAnnounced = internalAction({
             ...intro,
             `${collect.label}: ${collect.href}`,
             ...(extras ? verdictText(extras.summary) : []),
+            `Your certificate (A4, PNG): ${certificateDownload}`,
             `Your award page: ${pageUrl}`,
             "Shemoqmedi",
           ].join("\n\n"),
