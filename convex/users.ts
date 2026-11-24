@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { action, internalMutation, internalQuery, query, type QueryCtx } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { deleteAccountData } from "./lib/accountDeletion";
@@ -12,10 +12,22 @@ const userDoc = v.object({
   email: v.string(),
   profilePicture: v.optional(v.string()),
   hasImage: v.optional(v.boolean()),
+  avatar: v.optional(v.string()),
   role: v.optional(v.union(v.literal("admin"), v.literal("super_admin"))),
   createdAt: v.number(),
   updatedAt: v.number(),
 });
+
+/** How many Shemoqmedi avatars the site has (public/avatars/avatar-01.svg … avatar-24.svg). */
+export const AVATAR_COUNT = 24;
+
+/** "photo", or a Shemoqmedi avatar number "01"…"24". */
+export function isAvatarChoice(value: string) {
+  if (value === "photo") return true;
+  if (!/^\d{2}$/.test(value)) return false;
+  const n = Number(value);
+  return n >= 1 && n <= AVATAR_COUNT;
+}
 
 export async function getUserByExternalId(ctx: QueryCtx, externalId: string) {
   return await ctx.db
@@ -153,6 +165,26 @@ export const getCurrentUser = query({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
     return await getUserByExternalId(ctx, identity.subject);
+  },
+});
+
+/**
+ * The signed-in user picks the picture the site shows for them: "photo" (their
+ * sign-in photo), "01"…"24" (a Shemoqmedi avatar), or "auto" (back to the
+ * avatar picked for them).
+ */
+export const setMyAvatar = mutation({
+  args: { avatar: v.string() },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, { avatar }) => {
+    const user = await requireUser(ctx);
+    if (avatar === "auto") {
+      await ctx.db.patch(user._id, { avatar: undefined, updatedAt: Date.now() });
+      return null;
+    }
+    if (!isAvatarChoice(avatar)) throw new ConvexError("That picture isn't available.");
+    await ctx.db.patch(user._id, { avatar, updatedAt: Date.now() });
+    return avatar;
   },
 });
 

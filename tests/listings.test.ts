@@ -392,4 +392,45 @@ describe("imports, creators and claims", () => {
     const profile = await env.t.query(api.creators.getBySlug, { slug: "burocratik" });
     expect(profile!.creator.isClaimed).toBe(true);
   });
+
+  it("a creator shows a Shemoqmedi avatar until the owner chooses their photo", async () => {
+    const env = await setup();
+    await importSeed(env);
+    await env.voter1.mutation(api.claims.submit, { targetType: "creator", slug: "burocratik", message: "Our studio." });
+    const [claim] = await env.admin.query(api.claims.queue, { status: "pending" });
+    await env.admin.mutation(api.claims.approve, { id: claim.id });
+    // The owner signed in with Google: a real sign-in photo.
+    await env.t.run(async (ctx) => {
+      const u = await ctx.db
+        .query("users")
+        .withIndex("byExternalId", (q) => q.eq("externalId", "voter1"))
+        .unique();
+      await ctx.db.patch(u!._id, { profilePicture: "https://img.example/google.jpg", hasImage: true });
+    });
+    const picture = async () => {
+      const { creator } = (await env.t.query(api.creators.getBySlug, { slug: "burocratik" }))!;
+      const [summary] = await env.t.query(api.creators.listPublic, {});
+      const [own] = await env.voter1.query(api.creators.mine, {});
+      expect(summary).toMatchObject({ photoUrl: creator.photoUrl, avatar: creator.avatar });
+      expect(own).toMatchObject({ photoUrl: creator.photoUrl, avatar: creator.avatar });
+      return { photoUrl: creator.photoUrl, avatar: creator.avatar };
+    };
+
+    // Default: no sign-in photo shown, the site picks an avatar from the slug.
+    expect(await picture()).toEqual({ photoUrl: null, avatar: null });
+    // They pick one of the 24.
+    await env.voter1.mutation(api.users.setMyAvatar, { avatar: "07" });
+    expect(await picture()).toEqual({ photoUrl: null, avatar: "07" });
+    // They choose their own photo.
+    await env.voter1.mutation(api.users.setMyAvatar, { avatar: "photo" });
+    expect(await picture()).toEqual({ photoUrl: "https://img.example/google.jpg", avatar: null });
+    // Back to the automatic one.
+    await env.voter1.mutation(api.users.setMyAvatar, { avatar: "auto" });
+    expect(await picture()).toEqual({ photoUrl: null, avatar: null });
+
+    for (const bad of ["00", "25", "7", "photos", "../x"]) {
+      await expect(env.voter1.mutation(api.users.setMyAvatar, { avatar: bad })).rejects.toThrow(/isn't available/);
+    }
+    await expect(env.t.mutation(api.users.setMyAvatar, { avatar: "07" })).rejects.toThrow(/Unauthenticated/);
+  });
 });

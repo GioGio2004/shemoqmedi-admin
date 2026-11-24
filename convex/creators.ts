@@ -30,18 +30,30 @@ const publicCreator = v.object({
   bio: v.union(v.string(), v.null()),
   /** Shown only when set: the address visitors may write to. */
   email: v.union(v.string(), v.null()),
-  /** The owner's sign-in photo; null shows initials. */
+  /** The owner's sign-in photo, only when they chose to show it; null shows a Shemoqmedi avatar. */
   photoUrl: v.union(v.string(), v.null()),
+  /** The Shemoqmedi avatar the owner picked ("01"…"24"); null = the one picked from the slug. */
+  avatar: v.union(v.string(), v.null()),
   isClaimed: v.boolean(),
   awards: v.object({ SOTY: v.number(), SOTM: v.number(), SOTD: v.number(), BSC: v.number(), HM: v.number(), F100: v.number() }),
   nominations: v.number(),
 });
 
-/** The claiming owner's sign-in photo, if it's a real one (not Clerk's generated default). */
-async function photoOf(ctx: QueryCtx, creator: Doc<"creators">) {
-  if (!creator.claimedBy) return null;
+/**
+ * The picture for a creator, from the claiming owner's choice (users.avatar).
+ * Their sign-in photo only when they chose "photo" and it's a real one (not
+ * Clerk's generated default); otherwise a Shemoqmedi avatar: the one they
+ * picked, or (null) the one the site picks from the creator's slug.
+ */
+async function pictureOf(ctx: QueryCtx, creator: Doc<"creators">) {
+  if (!creator.claimedBy) return { photoUrl: null, avatar: null };
   const user = await ctx.db.get(creator.claimedBy);
-  return user?.profilePicture && user.hasImage !== false ? user.profilePicture : null;
+  const choice = user?.avatar;
+  if (choice === "photo") {
+    const photo = user?.profilePicture && user.hasImage !== false ? user.profilePicture : null;
+    return { photoUrl: photo, avatar: null };
+  }
+  return { photoUrl: null, avatar: choice ?? null };
 }
 
 /** A creator profile with their public listings and every active award, newest first. */
@@ -94,7 +106,7 @@ export const getBySlug = query({
         links: creator.links ?? [],
         bio: creator.bio ?? null,
         email: creator.publicEmail ?? null,
-        photoUrl: await photoOf(ctx, creator),
+        ...(await pictureOf(ctx, creator)),
         isClaimed: creator.isClaimed,
         awards: counts,
         nominations: listings.length,
@@ -116,6 +128,7 @@ export const listPublic = query({
       region,
       location: v.union(v.string(), v.null()),
       photoUrl: v.union(v.string(), v.null()),
+      avatar: v.union(v.string(), v.null()),
       isClaimed: v.boolean(),
       nominations: v.number(),
       awards: v.number(),
@@ -138,7 +151,7 @@ export const listPublic = query({
         tier: creator.tier,
         region: creator.region,
         location: creator.location ?? null,
-        photoUrl: await photoOf(ctx, creator),
+        ...(await pictureOf(ctx, creator)),
         isClaimed: creator.isClaimed,
         nominations: live.length,
         awards: live.reduce((n, r) => n + r.awards.length, 0),
@@ -164,6 +177,7 @@ const ownProfile = v.object({
   bio: v.string(),
   email: v.string(),
   photoUrl: v.union(v.string(), v.null()),
+  avatar: v.union(v.string(), v.null()),
   /** false until one of its sites is public: the profile page shows nothing before. */
   isPublic: v.boolean(),
 });
@@ -199,7 +213,7 @@ export const mine = query({
         links: c.links ?? [],
         bio: c.bio ?? "",
         email: c.publicEmail ?? "",
-        photoUrl: await photoOf(ctx, c),
+        ...(await pictureOf(ctx, c)),
         isPublic: rows.some((r) => isPublicStatus(r.status)),
       });
     }

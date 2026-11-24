@@ -320,6 +320,12 @@ export default defineSchema({
     // Clerk's has_image: false while profilePicture is Clerk's generated
     // default avatar. Jurors without a real photo get a grey placeholder.
     hasImage: v.optional(v.boolean()),
+    // The picture the site shows for them (creator cards, profile, account),
+    // chosen by them (users.setMyAvatar): "photo" = their sign-in photo,
+    // "01"…"24" = that Shemoqmedi avatar. Unset = a Shemoqmedi avatar picked
+    // from their profile address, so sign-in photos (often poor) aren't shown
+    // until they opt in. Jury photos are separate and unaffected.
+    avatar: v.optional(v.string()),
     // Platform role, managed in Convex (never overwritten by Clerk data).
     role: v.optional(v.union(v.literal("admin"), v.literal("super_admin"))),
     createdAt: v.number(),
