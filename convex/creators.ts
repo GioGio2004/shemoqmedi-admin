@@ -30,7 +30,7 @@ const publicCreator = v.object({
   bio: v.union(v.string(), v.null()),
   /** Shown only when set: the address visitors may write to. */
   email: v.union(v.string(), v.null()),
-  /** The owner's sign-in photo, only when they chose to show it; null shows a Shemoqmedi avatar. */
+  /** The owner's own photo, unless they picked an avatar instead; null shows a Shemoqmedi avatar. */
   photoUrl: v.union(v.string(), v.null()),
   /** The Shemoqmedi avatar the owner picked ("01"…"24"); null = the one picked from the slug. */
   avatar: v.union(v.string(), v.null()),
@@ -40,20 +40,18 @@ const publicCreator = v.object({
 });
 
 /**
- * The picture for a creator, from the claiming owner's choice (users.avatar).
- * Their sign-in photo only when they chose "photo" and it's a real one (not
- * Clerk's generated default); otherwise a Shemoqmedi avatar: the one they
+ * The picture for a creator. The claiming owner's own photo (a real one, not
+ * Clerk's generated default) always shows, unless they picked a Shemoqmedi
+ * avatar instead (users.avatar "01"…"24"). Without a photo: the avatar they
  * picked, or (null) the one the site picks from the creator's slug.
  */
 async function pictureOf(ctx: QueryCtx, creator: Doc<"creators">) {
   if (!creator.claimedBy) return { photoUrl: null, avatar: null };
   const user = await ctx.db.get(creator.claimedBy);
   const choice = user?.avatar;
-  if (choice === "photo") {
-    const photo = user?.profilePicture && user.hasImage !== false ? user.profilePicture : null;
-    return { photoUrl: photo, avatar: null };
-  }
-  return { photoUrl: null, avatar: choice ?? null };
+  if (choice && choice !== "photo") return { photoUrl: null, avatar: choice };
+  const photo = user?.profilePicture && user.hasImage !== false ? user.profilePicture : null;
+  return { photoUrl: photo, avatar: null };
 }
 
 /** A creator profile with their public listings and every active award, newest first. */
