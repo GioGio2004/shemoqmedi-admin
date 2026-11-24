@@ -49,7 +49,8 @@ import {
   viewPost,
 } from "./social";
 import { channelView, type ChannelView } from "./channels";
-import { audience } from "./emails";
+import { audience, deliver, type Delivery } from "./emails";
+import { getSent, listSent, resendEmail as resendEmailValidator, resendPage, type ResendEmail, type ResendPage } from "./lib/resendApi";
 import { ensureListingClaimUrl, newClaimToken } from "./claimLinks";
 import { linkStatus } from "./lib/claimLinkRows";
 import { siteUrl } from "./seo";
@@ -887,8 +888,10 @@ const emailPreview = v.object({
  * One email Claude wrote, to a listing's studio (owner or contact email; its
  * claim link available as {claimLink} in the body), a creator, or any address
  * (outreach to a studio that isn't listed yet). Without `confirm` it only
- * returns the preview; with it, the exact email waits in pendingActions for
- * an admin to approve. It is never sent from here.
+ * returns the preview; with it (only after Giorgi said yes to that preview in
+ * chat), it is sent at once through emails.deliver (unsubscribe footer,
+ * opt-outs, logged) and recorded in pendingActions as approved in chat,
+ * under the daily email cap.
  */
 export const sendEmail = action({
   args: {
@@ -939,21 +942,42 @@ export const sendEmail = action({
     const text: string = args.body.replaceAll("{claimLink}", claimLink ?? "").trim();
     if (!args.confirm) return { sent: false, to, subject, text };
     const payload: EmailPayload = { to, subject, text, meta };
-    const pending: { pendingActionId: Id<"pendingActions">; message: string } = await ctx.runMutation(internal.pendingActions.request, {
-      kind: "send_email",
+    const pendingActionId: Id<"pendingActions"> = await ctx.runMutation(internal.pendingActions.sentFromChat, {
       payload,
       summary: `Email "${subject}" to ${to}`,
       requestedBy,
     });
+    const delivery: Delivery = await deliver(ctx, to, { subject, text }, meta);
+    await ctx.runMutation(internal.pendingActions.recordResult, { id: pendingActionId, result: { ...delivery, approvedIn: "chat" } });
     return {
-      sent: false,
+      sent: delivery.status === "sent",
       to,
       subject,
       text,
-      status: "waiting for approval in Studio",
-      pendingActionId: pending.pendingActionId,
-      message: pending.message,
+      status: delivery.status,
+      ...(delivery.error ? { error: delivery.error } : {}),
+      pendingActionId,
     };
+  },
+});
+
+/** Resend's own log of sent emails, newest first (any code path, incl. Gmail send-as). */
+export const resendLog = action({
+  args: { token, limit: v.optional(v.number()), after: v.optional(v.string()) },
+  returns: resendPage,
+  handler: async (ctx, { token, limit, after }): Promise<ResendPage> => {
+    await ctx.runQuery(internal.mcp.checkToken, { token });
+    return await listSent({ limit: limit ?? 30, after });
+  },
+});
+
+/** One email from Resend's log, with its body. */
+export const resendEmail = action({
+  args: { token, id: v.string() },
+  returns: v.object({ email: v.union(resendEmailValidator, v.null()), error: v.union(v.string(), v.null()) }),
+  handler: async (ctx, { token, id }): Promise<{ email: ResendEmail | null; error: string | null }> => {
+    await ctx.runQuery(internal.mcp.checkToken, { token });
+    return await getSent(id);
   },
 });
 

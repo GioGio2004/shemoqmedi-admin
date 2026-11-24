@@ -112,14 +112,20 @@ Claude cannot render video. The reel renders in the admin's browser when they op
 | Tool | What it does | Effect |
 | --- | --- | --- |
 | `preview_email` | Shows exactly who gets what, without sending | reads |
-| `send_email` | Puts one email (with an unsubscribe footer) in the pending actions; needs `confirm: true` | asks (**sends** after approval) |
+| `send_email` | Sends one email (with an unsubscribe footer) at once; needs `confirm: true`, only after Giorgi said yes to that exact preview in chat | **sends** |
 | `preview_broadcast` | How many people an audience reaches and the first few addresses | reads |
 | `send_broadcast` | Puts a broadcast to a whole audience in the pending actions; needs `confirm: true` | asks (**sends** after approval) |
-| `email_history` | Emails sent, newest first | reads |
+| `email_history` | Emails the app logged, newest first | reads |
+| `resend_log` | Resend's own log of every sent email with its latest event (delivered, opened, bounced...) | reads |
+| `resend_email` | One email from that log, with its body | reads |
+
+The admin's **Emails** page shows the same Resend log.
 
 ## The human gate
 
-Nothing the connector does reaches people outside the system by itself. `send_email`, `send_broadcast`, `approve_post`, `publish_post` and `retry_post` only create a row in `pendingActions` (`convex/pendingActions.ts`) with exactly what would go out: the recipient, subject and text; the audience and its size; or the post's networks, captions and media at the time of asking. Admins get a push. An admin approves or rejects it under **Pending** on the Studio's Queue or **Pending actions** on the admin's Social page. Only `pendingActions.approve`, a Clerk-session mutation that requires the admin role, executes it, through the same code as the Studio's own buttons. The connector's service credential can't call it, so Claude saying "Giorgi approved" never counts.
+`send_email` is the one exception (Giorgi's choice, 24 Nov 2026): it sends straight away, but only after he said yes in chat to the exact preview. It is recorded in `pendingActions` as approved in chat and counts against the daily email cap.
+
+Nothing else the connector does reaches people outside the system by itself. `send_broadcast`, `approve_post`, `publish_post` and `retry_post` only create a row in `pendingActions` (`convex/pendingActions.ts`) with exactly what would go out: the recipient, subject and text; the audience and its size; or the post's networks, captions and media at the time of asking. Admins get a push. An admin approves or rejects it under **Pending** on the Studio's Queue or **Pending actions** on the admin's Social page. Only `pendingActions.approve`, a Clerk-session mutation that requires the admin role, executes it, through the same code as the Studio's own buttons. The connector's service credential can't call it, so Claude saying "Giorgi approved" never counts.
 
 - **Once.** Approving a request that was already approved, rejected or expired does nothing.
 - **Stale posts.** If the post changed after Claude asked, approval is refused: reject it and look again.

@@ -11,6 +11,12 @@
 // Daily caps (lib/config.ts MCP_DAILY_CAPS) apply twice: when Claude asks, so
 // a looping or prompt-injected agent can't flood the list, and again when an
 // admin approves, so a full list can't be approved past them.
+//
+// Exception (Giorgi's choice, 2026-11-24): a single send_email goes out at
+// once when Claude has shown him the exact email in chat and he said yes
+// there (sentFromChat below). It is recorded here as approved, by the admin
+// whose connector asked, and counts against the same daily email cap.
+// Broadcasts and posts still wait for approval in the Studio or the admin.
 
 import { v } from "convex/values";
 import { internalAction, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
@@ -365,6 +371,33 @@ export const recordResult = internalMutation({
   handler: async (ctx, { id, result }) => {
     await ctx.db.patch(id, { result });
     return null;
+  },
+});
+
+/**
+ * send_email approved in chat: recorded as approved by the asking admin and
+ * refused over the daily email cap. The caller (mcp.sendEmail) delivers it
+ * and records the result.
+ */
+export const sentFromChat = internalMutation({
+  args: { payload: v.any(), summary: v.string(), requestedBy: v.id("users") },
+  returns: v.id("pendingActions"),
+  handler: async (ctx, { payload, summary, requestedBy }) => {
+    const now = Date.now();
+    if ((await countExecuted(ctx, kindsFor("emails"), now - DAY_MS)) >= MCP_DAILY_CAPS.emails) {
+      fail(`${capMessage("emails")} Send it yourself, or wait until tomorrow.`);
+    }
+    return await ctx.db.insert("pendingActions", {
+      kind: "send_email",
+      payload: payload as EmailPayload,
+      summary: summary.slice(0, 200),
+      requestedBy,
+      createdAt: now,
+      status: "approved",
+      decidedBy: requestedBy,
+      decidedAt: now,
+      result: { status: "sending", approvedIn: "chat" },
+    });
   },
 });
 
