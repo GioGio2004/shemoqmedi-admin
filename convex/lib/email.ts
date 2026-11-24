@@ -43,13 +43,17 @@ const FONT = "Inter,'Helvetica Neue',Helvetica,Arial,sans-serif";
 /**
  * An image URL email clients can show: ImageKit images are asked for as a
  * JPEG at email width (Outlook and older Gmail apps don't show WebP or SVG).
+ * A full-page screenshot is cut to its top 4:3, the line the home slider
+ * uses to scroll one: resize to width, then extract the top. Images already
+ * 4:3 or wider come through whole (the extract never pads them).
  * Anything else is returned as it is.
  */
 export function emailImageUrl(url: string, width = 1120) {
   try {
     const u = new URL(url);
     if (u.hostname !== "ik.imagekit.io") return url;
-    u.searchParams.set("tr", `w-${width},f-jpg,q-80`);
+    const top = Math.round(width * 0.75);
+    u.searchParams.set("tr", `w-${width}:cm-extract,w-${width},h-${top},fo-top,f-jpg,q-80`);
     return u.toString();
   } catch {
     return url;
