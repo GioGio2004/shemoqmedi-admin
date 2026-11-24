@@ -61,7 +61,8 @@ export async function deleteAccountData(ctx: MutationCtx, user: Doc<"users">) {
     .query("creators")
     .withIndex("by_claimedBy", (q) => q.eq("claimedBy", user._id))
     .collect()) {
-    await ctx.db.patch(creator._id, { claimedBy: undefined, isClaimed: false, updatedAt: now });
+    // The public email was the owner's own: it leaves with their account.
+    await ctx.db.patch(creator._id, { claimedBy: undefined, isClaimed: false, publicEmail: undefined, updatedAt: now });
     counts.creators += 1;
   }
 

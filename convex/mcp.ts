@@ -947,7 +947,13 @@ export const sendEmail = action({
       summary: `Email "${subject}" to ${to}`,
       requestedBy,
     });
-    const delivery: Delivery = await deliver(ctx, to, { subject, text }, meta);
+    let delivery: Delivery;
+    try {
+      delivery = await deliver(ctx, to, { subject, text }, meta);
+    } catch (e) {
+      // Record the failure, so the row doesn't sit at "sending".
+      delivery = { to, status: "failed", error: e instanceof Error ? e.message : String(e) };
+    }
     await ctx.runMutation(internal.pendingActions.recordResult, { id: pendingActionId, result: { ...delivery, approvedIn: "chat" } });
     return {
       sent: delivery.status === "sent",

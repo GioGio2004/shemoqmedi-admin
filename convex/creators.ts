@@ -220,7 +220,8 @@ export const updateMine = mutation({
     bio: v.string(),
     email: v.string(),
   },
-  returns: v.null(),
+  // The fields as saved (URLs normalised, whitespace cleaned), for the form.
+  returns: v.object({ location: v.string(), website: v.string(), links: v.array(v.string()), bio: v.string(), email: v.string() }),
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
     const creator = await ctx.db.get(args.id);
@@ -233,12 +234,19 @@ export const updateMine = mutation({
     const email = args.email.trim();
     if (email && !isEmail(email)) fail("That email address doesn't look right.");
 
+    const saved = {
+      location: cleanText(args.location, "Location", 80, false),
+      website: args.website.trim() ? normalizeUrl(args.website, "Website") : "",
+      links,
+      bio: cleanParagraphs(args.bio, "Bio", CREATOR_BIO_MAX, false),
+      email: email ? normalizeEmail(email) : "",
+    };
     await ctx.db.patch(creator._id, {
-      location: cleanText(args.location, "Location", 80, false) || undefined,
-      website: args.website.trim() ? normalizeUrl(args.website, "Website") : undefined,
-      links: links.length ? links : undefined,
-      bio: cleanParagraphs(args.bio, "Bio", CREATOR_BIO_MAX, false) || undefined,
-      publicEmail: email ? normalizeEmail(email) : undefined,
+      location: saved.location || undefined,
+      website: saved.website || undefined,
+      links: saved.links.length ? saved.links : undefined,
+      bio: saved.bio || undefined,
+      publicEmail: saved.email || undefined,
       updatedAt: Date.now(),
     });
 
@@ -247,6 +255,6 @@ export const updateMine = mutation({
       .withIndex("by_creator", (q) => q.eq("creatorId", creator._id))
       .take(200);
     if (rows.some((r) => isPublicStatus(r.status))) await scheduleIndexNow(ctx, [creatorPath(creator.slug)]);
-    return null;
+    return saved;
   },
 });
