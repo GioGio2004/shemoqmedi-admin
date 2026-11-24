@@ -153,15 +153,16 @@ export const awardAnnounced = internalAction({
                 : "Collect your badge to show the award on your site. It links back to your award page, and you can pick the round seal or the strip, light or dark.",
             ];
         const sections = extras ? verdictSections(extras.summary) : [];
-        // The award's A4 certificate, made by the site (/certificate/<award>):
-        // a preview that opens it, and a link that downloads the PNG.
-        const certificateUrl = `${siteUrl()}/certificate/${award.slug}`;
-        const certificateDownload = `${certificateUrl}?download=1`;
+        // The award's A4 certificate is private to the site's owner: it opens
+        // only on their Achievements page on the site (/account/badges), never
+        // from a link in an email. Its number stays checkable on /verify.
+        const achievementsUrl = `${siteUrl()}/account/badges`;
+        const certificateLine = contact.claimUrl
+          ? `Your A4 certificate, ready to print or post, is waiting too: once you've claimed the listing, sign in and download it from your achievements.`
+          : `Your A4 certificate, ready to print or post, is on your achievements page. Sign in to download it.`;
         sections.push({
           title: "Your certificate",
-          html:
-            `<a href="${certificateUrl}" style="display:block;width:200px;margin:0 0 16px"><img src="${certificateUrl}" alt="${escapeHtml(`${label} certificate for ${data.listing.title}`)}" width="200" style="display:block;width:200px;height:auto;border:1px solid #E4E0D8"></a>` +
-            `<p style="margin:0;font-family:Inter,Arial,sans-serif;font-size:15px;line-height:1.6;color:#0A0A0A">An A4 certificate for ${escapeHtml(data.listing.title)}, ready to print or post. <a href="${certificateDownload}" style="color:#FF4D00">Download it (PNG)</a></p>`,
+          html: `<p style="margin:0;font-family:Inter,Arial,sans-serif;font-size:15px;line-height:1.6;color:#0A0A0A">${escapeHtml(certificateLine)} <a href="${achievementsUrl}" style="color:#FF4D00">Your achievements</a></p>`,
         });
         sections.push({
           title: "Share the win",
@@ -173,7 +174,7 @@ export const awardAnnounced = internalAction({
             ...intro,
             `${collect.label}: ${collect.href}`,
             ...(extras ? verdictText(extras.summary) : []),
-            `Your certificate (A4, PNG): ${certificateDownload}`,
+            `${certificateLine} ${achievementsUrl}`,
             `Your award page: ${pageUrl}`,
             "Shemoqmedi",
           ].join("\n\n"),
