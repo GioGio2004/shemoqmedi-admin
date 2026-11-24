@@ -339,6 +339,9 @@ export default defineSchema({
     // Profile links (Dribbble, Behance, LinkedIn, X, ...), up to LIMITS.creatorLinks.
     links: v.optional(v.array(v.string())),
     bio: v.optional(v.string()),
+    // Public "get in touch" address, shown on the profile only when the owner
+    // (or an admin) sets one. Not the private contactEmail below.
+    publicEmail: v.optional(v.string()),
     isClaimed: v.boolean(),
     claimedBy: v.optional(v.id("users")),
     // Private, admin-only: where award and "you're featured" emails go while

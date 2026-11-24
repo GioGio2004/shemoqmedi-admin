@@ -348,7 +348,7 @@ export const tick = internalMutation({
 // Public
 // ─────────────────────────────────────────────────────────────────────────────
 
-const publicAward = v.object({
+export const publicAward = v.object({
   slug: v.string(),
   tier: vTier,
   name: v.string(),
@@ -365,7 +365,7 @@ const publicAward = v.object({
   }),
 });
 
-async function toPublicAward(ctx: QueryCtx, award: Doc<"awards">) {
+export async function toPublicAward(ctx: QueryCtx, award: Doc<"awards">) {
   const listing = await ctx.db.get(award.listingId);
   if (!listing || !isPublicStatus(listing.status) || award.status !== "active") return null;
   const creator = listing.creatorId ? await ctx.db.get(listing.creatorId) : null;

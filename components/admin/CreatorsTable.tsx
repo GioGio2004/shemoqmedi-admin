@@ -24,7 +24,7 @@ import {
 type Creator = FunctionReturnType<typeof api.admin.listCreators>[number];
 type CreatorPatch = Omit<FunctionArgs<typeof api.admin.updateCreator>, "id">;
 
-const BIO_MAX = 600;
+const BIO_MAX = 800; // convex/creators.ts CREATOR_BIO_MAX
 const LOCATION_MAX = 80;
 
 /** Same rule as the backend (convex/lib/listingHelpers.ts slugify), so the form shows the address that will be saved. */
@@ -48,6 +48,7 @@ function CreatorForm({ creator, onDone }: { creator: Creator; onDone: () => void
   const [location, setLocation] = useState(creator.location ?? "");
   const [website, setWebsite] = useState(creator.website ?? "");
   const [bio, setBio] = useState(creator.bio ?? "");
+  const [publicEmail, setPublicEmail] = useState(creator.publicEmail ?? "");
   const [links, setLinks] = useState(creator.links.join("\n"));
   const [isClaimed, setIsClaimed] = useState(creator.isClaimed);
   const [contactEmail, setContactEmail] = useState(creator.contactEmail ?? "");
@@ -64,7 +65,10 @@ function CreatorForm({ creator, onDone }: { creator: Creator; onDone: () => void
   const linksInvalid = Boolean(badLink) || linkList.length > LIMITS.creatorLinks;
   const slugValue = toSlug(slug);
   const slugInvalid = slugValue === "";
-  const emailInvalid = contactEmail.trim() !== "" && !/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(contactEmail.trim());
+  const looksLikeEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(e);
+  const emailInvalid =
+    (contactEmail.trim() !== "" && !looksLikeEmail(contactEmail.trim())) ||
+    (publicEmail.trim() !== "" && !looksLikeEmail(publicEmail.trim()));
 
   /** Only the fields that differ from what is stored. */
   function changes(): CreatorPatch {
@@ -76,6 +80,7 @@ function CreatorForm({ creator, onDone }: { creator: Creator; onDone: () => void
     if (location.trim() !== (creator.location ?? "")) patch.location = location.trim();
     if (website.trim() !== (creator.website ?? "")) patch.website = website.trim();
     if (bio.trim() !== (creator.bio ?? "")) patch.bio = bio.trim();
+    if (publicEmail.trim().toLowerCase() !== (creator.publicEmail ?? "")) patch.publicEmail = publicEmail.trim();
     if (linkList.join(" ") !== creator.links.join(" ")) patch.links = linkList;
     if (isClaimed !== creator.isClaimed) patch.isClaimed = isClaimed;
     if (contactEmail.trim().toLowerCase() !== (creator.contactEmail ?? "")) patch.contactEmail = contactEmail.trim();
@@ -250,6 +255,19 @@ function CreatorForm({ creator, onDone }: { creator: Creator; onDone: () => void
             onChange={(e) => setBio(e.target.value)}
             className="admin-input resize-y"
           />
+        </label>
+
+        <label className="grid gap-2">
+          <span className="admin-eyebrow">Public email (optional)</span>
+          <input
+            type="email"
+            value={publicEmail}
+            onChange={(e) => setPublicEmail(e.target.value)}
+            className="admin-input"
+          />
+          <span className="text-xs text-black/55">
+            Shown on the profile as “Get in touch”. The owner can set it from their account too.
+          </span>
         </label>
 
         <fieldset className="grid gap-4">

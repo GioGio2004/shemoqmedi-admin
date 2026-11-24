@@ -37,7 +37,8 @@ import {
 } from "./lib/listingHelpers";
 import { hasJuryEvaluations } from "./jury";
 import { revokeClaimLinks } from "./lib/claimLinkRows";
-import { mergeSocials, normalizeEmail } from "./lib/contacts";
+import { isEmail, mergeSocials, normalizeEmail } from "./lib/contacts";
+import { CREATOR_BIO_MAX } from "./creators";
 import { awardPaths, creatorPath, listingPaths, scheduleIndexNow, sitePath } from "./seo";
 import { copyOf, recordRevision } from "./lib/revisions";
 
@@ -534,6 +535,7 @@ const adminCreator = v.object({
   website: v.union(v.string(), v.null()),
   links: v.array(v.string()),
   bio: v.union(v.string(), v.null()),
+  publicEmail: v.union(v.string(), v.null()),
   isClaimed: v.boolean(),
   claimedBy: v.union(v.object({ name: v.string(), email: v.string() }), v.null()),
   contactEmail: v.union(v.string(), v.null()),
@@ -569,6 +571,7 @@ export const listCreators = query({
           website: c.website ?? null,
           links: c.links ?? [],
           bio: c.bio ?? null,
+          publicEmail: c.publicEmail ?? null,
           isClaimed: c.isClaimed,
           claimedBy: owner ? { name: owner.name, email: owner.email } : null,
           contactEmail: c.contactEmail ?? null,
@@ -597,6 +600,7 @@ export const updateCreator = mutation({
     website: v.optional(v.string()), // "" clears
     links: v.optional(v.array(v.string())), // [] clears
     bio: v.optional(v.string()), // "" clears
+    publicEmail: v.optional(v.string()), // "" clears; shown on the profile
     isClaimed: v.optional(v.boolean()),
     // Private (never public): the social desk's contact email and tag handles.
     contactEmail: v.optional(v.string()), // "" clears
@@ -641,7 +645,12 @@ export const updateCreator = mutation({
     if (args.region !== undefined) patch.region = args.region;
     if (args.location !== undefined) patch.location = cleanText(args.location, "Location", 80, false) || undefined;
     if (args.website !== undefined) patch.website = args.website.trim() ? normalizeUrl(args.website, "Website") : undefined;
-    if (args.bio !== undefined) patch.bio = cleanText(args.bio, "Bio", 600, false) || undefined;
+    if (args.bio !== undefined) patch.bio = cleanParagraphs(args.bio, "Bio", CREATOR_BIO_MAX, false) || undefined;
+    if (args.publicEmail !== undefined) {
+      const email = args.publicEmail.trim();
+      if (email && !isEmail(email)) fail("That public email doesn't look right.");
+      patch.publicEmail = email ? normalizeEmail(email) : undefined;
+    }
     if (args.links !== undefined) {
       const links = [
         ...new Set(args.links.map((l) => l.trim()).filter(Boolean).map((l) => normalizeUrl(l, "Profile link"))),
