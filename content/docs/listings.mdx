@@ -21,7 +21,7 @@ There is also `importer.ts` → `seedFlagship`, which loads a fixed set of flags
 - `archived`: created closed with no awards.
 - `pending`: waits in the review queue like a submission.
 
-Admin-created listings have no owner (`ownerId` is empty). The admin sets `isClaimed` by hand. Unclaimed listings can get a secret claim link later (see "Claims" below).
+Admin-created listings have no owner (`ownerId` is empty) unless the admin picks one: the Owner field on the create form, or the Owner panel on the listing page, gives the site to any signed-up account at once (`claimLinks.setListingOwner`, see "Claims" below). Otherwise the admin sets `isClaimed` by hand, and unclaimed listings can get a secret claim link later.
 
 A listing can be linked to a juror with `jurorId`. Claiming that juror's link then claims the listing too (the "bundle"). It can also be linked to an agent-desk brief with `briefId`.
 
@@ -210,7 +210,9 @@ Prefer `rejected` (unpublish) over delete when you might want the site back.
 
 ## Claims
 
-An unclaimed listing can be taken over by its real owner in two ways.
+An admin can set the owner directly when the person already has an account: the listing page's Owner panel searches accounts by name or email (`claimLinks.ownerCandidates`) and "Make owner" calls `claimLinks.setListingOwner`. The result is the same as a claim: `ownerId` set, `isClaimed: true`, links followed, open claim links revoked and pending claim requests rejected. It can replace the current owner, and "Remove owner" (`userId: null`) unclaims it like `claimLinks.unclaim`. Both are written to the audit log (`owner_assigned`, `unclaimed`). The create form takes the same owner (`admin.createListing` `ownerId`).
+
+Otherwise an unclaimed listing can be taken over by its real owner in two ways.
 
 ### Claim link
 

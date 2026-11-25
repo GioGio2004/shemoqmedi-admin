@@ -12,14 +12,18 @@ import { formatDate, STOREFRONT_URL } from "@/lib/storefront";
 import { ClaimLink, CopyUrl, EmailClaimLink, UnclaimButton } from "./ClaimLink";
 import { MediaPicker, useMediaUpload } from "./MediaUpload";
 import {
+  cleanEducation,
   cleanExperience,
   cleanWork,
+  EducationEditor,
+  educationDrafts,
   ExperienceEditor,
   experienceDrafts,
   listsProblem,
   sameRows,
   WorkEditor,
   workDrafts,
+  type EducationDraft,
   type ExperienceDraft,
   type WorkDraft,
 } from "./ProfileListEditor";
@@ -253,18 +257,23 @@ function ProfileFields({
 
 function ProfileLists({
   experience,
+  education,
   work,
   onExperience,
+  onEducation,
   onWork,
 }: {
   experience: ExperienceDraft[];
+  education: EducationDraft[];
   work: WorkDraft[];
   onExperience: (rows: ExperienceDraft[]) => void;
+  onEducation: (rows: EducationDraft[]) => void;
   onWork: (rows: WorkDraft[]) => void;
 }) {
   return (
     <>
       <ExperienceEditor rows={experience} onChange={onExperience} />
+      <EducationEditor rows={education} onChange={onEducation} />
       <WorkEditor rows={work} onChange={onWork} />
     </>
   );
@@ -299,6 +308,7 @@ function CreateJurorForm() {
   const uploadAvatar = useAvatarUpload();
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [experience, setExperience] = useState<ExperienceDraft[]>([]);
+  const [education, setEducation] = useState<EducationDraft[]>([]);
   const [work, setWork] = useState<WorkDraft[]>([]);
   const [avatar, setAvatar] = useState<Avatar>(NO_AVATAR);
   const [busy, setBusy] = useState(false);
@@ -314,7 +324,7 @@ function CreateJurorForm() {
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (busy || submitting.current) return;
-    const problem = draftProblem(draft) ?? listsProblem(experience, work) ?? avatar.error;
+    const problem = draftProblem(draft) ?? listsProblem(experience, work, education) ?? avatar.error;
     if (problem) {
       setError(problem);
       return;
@@ -326,6 +336,7 @@ function CreateJurorForm() {
       // Profile first, photo second: a profile the server rejects never leaves
       // an uploaded photo behind.
       const experienceRows = cleanExperience(experience);
+      const educationRows = cleanEducation(education);
       const workRows = cleanWork(work);
       const { id } = await create({
         name: draft.name.trim(),
@@ -338,6 +349,7 @@ function CreateJurorForm() {
         email: draft.email.trim() || undefined,
         isFounding: draft.isFounding,
         experience: experienceRows.length ? experienceRows : undefined,
+        education: educationRows.length ? educationRows : undefined,
         work: workRows.length ? workRows : undefined,
       });
       if (avatar.file) {
@@ -357,6 +369,7 @@ function CreateJurorForm() {
       setCreated({ id, name: draft.name.trim(), url });
       setDraft(EMPTY_DRAFT);
       setExperience([]);
+      setEducation([]);
       setWork([]);
       setAvatar(NO_AVATAR);
     } catch (err) {
@@ -379,10 +392,15 @@ function CreateJurorForm() {
             <ProfileFields draft={draft} set={set} idPrefix="new-juror" />
             <ProfileLists
               experience={experience}
+              education={education}
               work={work}
               onExperience={(rows) => {
                 setError(null);
                 setExperience(rows);
+              }}
+              onEducation={(rows) => {
+                setError(null);
+                setEducation(rows);
               }}
               onWork={(rows) => {
                 setError(null);
@@ -446,6 +464,7 @@ function EditJurorForm({ juror, onDone }: { juror: Juror; onDone: () => void }) 
   const [edits, setEdits] = useState<Partial<Draft>>({});
   // null = untouched: the saved rows show (and stay current) until edited.
   const [experienceEdit, setExperienceEdit] = useState<ExperienceDraft[] | null>(null);
+  const [educationEdit, setEducationEdit] = useState<EducationDraft[] | null>(null);
   const [workEdit, setWorkEdit] = useState<WorkDraft[] | null>(null);
   const [avatar, setAvatar] = useState<Avatar>(NO_AVATAR);
   const [removeAvatar, setRemoveAvatar] = useState(false);
@@ -459,10 +478,13 @@ function EditJurorForm({ juror, onDone }: { juror: Juror; onDone: () => void }) 
     return typeof a === "string" && typeof b === "string" ? a.trim() !== b.trim() : a !== b;
   });
   const savedExperience = experienceDrafts(juror.experience);
+  const savedEducation = educationDrafts(juror.education);
   const savedWork = workDrafts(juror.work);
   const experience = experienceEdit ?? savedExperience;
+  const education = educationEdit ?? savedEducation;
   const work = workEdit ?? savedWork;
   const experienceChanged = !sameRows(cleanExperience(experience), cleanExperience(savedExperience));
+  const educationChanged = !sameRows(cleanEducation(education), cleanEducation(savedEducation));
   const workChanged = !sameRows(cleanWork(work), cleanWork(savedWork));
   const avatarChanged = avatar.file !== null || removeAvatar;
   // Until claimed, the photo shown is the admin avatar (if any).
@@ -476,12 +498,12 @@ function EditJurorForm({ juror, onDone }: { juror: Juror; onDone: () => void }) 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
-    const problem = draftProblem(draft) ?? listsProblem(experience, work) ?? avatar.error;
+    const problem = draftProblem(draft) ?? listsProblem(experience, work, education) ?? avatar.error;
     if (problem) {
       setError(problem);
       return;
     }
-    if (changed.length === 0 && !experienceChanged && !workChanged && !avatarChanged) {
+    if (changed.length === 0 && !experienceChanged && !educationChanged && !workChanged && !avatarChanged) {
       onDone();
       return;
     }
@@ -494,6 +516,7 @@ function EditJurorForm({ juror, onDone }: { juror: Juror; onDone: () => void }) 
         (args as Record<string, unknown>)[k] = typeof v === "string" ? v.trim() : v;
       }
       if (experienceChanged) args.experience = cleanExperience(experience); // [] clears
+      if (educationChanged) args.education = cleanEducation(education); // [] clears
       if (workChanged) args.work = cleanWork(work);
       if (avatar.file) args.avatarId = await uploadAvatar(avatar.file, draft.name);
       else if (removeAvatar) args.avatarId = null;
@@ -514,10 +537,15 @@ function EditJurorForm({ juror, onDone }: { juror: Juror; onDone: () => void }) 
           <ProfileFields draft={draft} set={set} idPrefix={`juror-${juror.id}`} />
           <ProfileLists
             experience={experience}
+            education={education}
             work={work}
             onExperience={(rows) => {
               setError(null);
               setExperienceEdit(rows);
+            }}
+            onEducation={(rows) => {
+              setError(null);
+              setEducationEdit(rows);
             }}
             onWork={(rows) => {
               setError(null);
@@ -591,7 +619,7 @@ function StatusChip({ juror }: { juror: Juror }) {
   );
 }
 
-/** First entries of Experience and Work, for the row summary. */
+/** First entries of Experience, Education and Work, for the row summary. */
 function ProfileListSummary({ juror }: { juror: Juror }) {
   const more = (n: number) => (n > 2 ? ` +${n - 2} more` : "");
   return (
@@ -604,6 +632,16 @@ function ProfileListSummary({ juror }: { juror: Juror }) {
             .map((r) => `${r.title}, ${r.organization}`)
             .join("; ")}
           {more(juror.experience.length)}
+        </p>
+      )}
+      {juror.education.length > 0 && (
+        <p className="text-xs text-black/55">
+          Education:{" "}
+          {juror.education
+            .slice(0, 2)
+            .map((r) => [r.degree, r.school].filter(Boolean).join(", "))
+            .join("; ")}
+          {more(juror.education.length)}
         </p>
       )}
       {juror.work.length > 0 && (

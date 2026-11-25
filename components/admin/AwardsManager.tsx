@@ -484,6 +484,7 @@ const KIND_LABEL: Record<string, string> = {
   queue_removed: "Left the queue",
   settings: "Settings changed",
   unclaimed: "Claim taken back",
+  owner_assigned: "Owner assigned",
   juror_activated: "Juror activated",
   listing_deleted: "Listing deleted",
 };

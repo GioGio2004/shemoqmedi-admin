@@ -17,7 +17,8 @@ import { LifecyclePanel } from "./LifecyclePanel";
 import { IntegrityPanel } from "./IntegrityPanel";
 import { AuditPanel } from "./AuditPanel";
 import { BadgeKit } from "./BadgeKit";
-import { ClaimLink, UnclaimButton } from "./ClaimLink";
+import { ClaimLink } from "./ClaimLink";
+import { ListingOwnerPanel } from "./OwnerPicker";
 import { SOURCE_LABEL, safeHref, storefrontCreatorUrl } from "./format";
 
 /** Full control panel for one listing: details, media, lifecycle, scores. */
@@ -134,14 +135,17 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
             awards={listing.awards}
           />
 
+          <ListingOwnerPanel listingId={listing.id} owner={listing.owner} isClaimed={listing.isClaimed} />
+
           {!listing.isClaimed && (
             <section className="admin-panel grid gap-4" aria-labelledby="claim-link-heading">
               <p id="claim-link-heading" className="admin-eyebrow">
                 Claim link
               </p>
               <p className="text-xs leading-relaxed text-black/55">
-                Send this private link to the site&apos;s owner. Signing in through it claims the listing and makes its
-                links followed. It is shown once when made, works once and expires after 14 days.
+                For an owner without an account yet (with one, pick them under Owner instead). Send this private link to
+                the site&apos;s owner. Signing in through it claims the listing and makes its links followed. It is shown
+                once when made, works once and expires after 14 days.
               </p>
               <ClaimLink target={{ kind: "listing", id: listing.id }} status={listing.claimLink} rotatable />
               {listing.juror && (
@@ -155,21 +159,6 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
                     : ": their juror link claims this listing too."}
                 </p>
               )}
-            </section>
-          )}
-
-          {listing.isClaimed && (
-            <section className="admin-panel grid gap-4" aria-labelledby="claimed-heading">
-              <p id="claimed-heading" className="admin-eyebrow">
-                Claimed
-              </p>
-              <p className="text-xs leading-relaxed text-black/55">
-                Claimed by the wrong account, or changing hands? Take it back: the owner is cleared and the listing is
-                unclaimed again, ready for a new claim link. It is written to the audit log.
-              </p>
-              <div>
-                <UnclaimButton target={{ kind: "listing", id: listing.id }} />
-              </div>
             </section>
           )}
 

@@ -126,7 +126,12 @@ export const PILLARS = [
 /** Jury panels. Keep in sync with schema.ts juryCategory. */
 export const JURY_CATEGORIES = [
   { slug: "design", name: "Design & UI" },
+  { slug: "product", name: "Product & UX Research" },
+  { slug: "brand", name: "Brand & Creative Direction" },
+  { slug: "motion", name: "Motion, 3D & Creative Development" },
   { slug: "engineering", name: "Engineering & Performance" },
+  { slug: "accessibility", name: "Accessibility & Inclusive Design" },
+  { slug: "growth", name: "Marketing & Growth" },
   { slug: "venture", name: "Venture & Startups" },
   { slug: "academic", name: "Academic, SEO & Content" },
 ] as const;
@@ -173,9 +178,14 @@ export const LIMITS = {
   categories: 3,
   /** Legacy fallback for the admin's jury target; the real minimum is config.minVotes (lib/config.ts). */
   juryMinEvaluations: 3,
-  /** Entries in a juror's Experience and Work sections. */
-  juryExperience: 8,
+  /** Entries in a juror's Experience, Education and Work sections. */
+  juryExperience: 15,
+  juryEducation: 5,
   juryWork: 8,
+  /** A position's short description on a juror's profile. */
+  juryExperienceDescription: 600,
+  /** Earliest year a position or school may start in. */
+  juryEarliestYear: 1950,
   /** Jury evaluation comment (optional), shown on the listing page. */
   juryComment: 1000,
   /** Juror profile fields. */

@@ -180,6 +180,7 @@ export const auditKind = v.union(
   v.literal("queue_removed"), // an admin took a site out of the SOTD queue
   v.literal("settings"), // award settings changed
   v.literal("unclaimed"), // an admin took a listing or jury profile away from its owner (claimLinks.unclaim)
+  v.literal("owner_assigned"), // an admin made an account a listing's owner (claimLinks.setListingOwner)
   v.literal("juror_activated"), // an admin made a juror claimed without an email match public (claimLinks.activateJuror)
   v.literal("listing_deleted"), // an admin deleted a listing; its earlier audit rows lose their link
 );
@@ -187,11 +188,33 @@ export const auditKind = v.union(
 /** A screenshot or video: Convex storage file or ImageKit `media` row (see lib/media.ts). */
 const mediaId = v.union(v.id("_storage"), v.id("media"));
 
-/** A juror's past role, shown on their jury page. */
+/**
+ * A position on a juror's profile, LinkedIn style. Dates are a start month/year
+ * and an end month/year, or `current` for a role they still hold; the month is
+ * optional (year-only). `period` is the older free-text date ("2019 – present"),
+ * kept for entries saved before dates existed and dropped once a start year is set.
+ */
 export const juryExperience = v.object({
   title: v.string(), // "Art director"
   organization: v.string(), // "Studio X"
-  period: v.optional(v.string()), // "2019 – present"
+  organizationUrl: v.optional(v.string()),
+  location: v.optional(v.string()),
+  startYear: v.optional(v.number()),
+  startMonth: v.optional(v.number()), // 1–12
+  endYear: v.optional(v.number()),
+  endMonth: v.optional(v.number()), // 1–12
+  current: v.optional(v.boolean()), // still in this role: no end date
+  description: v.optional(v.string()), // LIMITS.juryExperienceDescription
+  period: v.optional(v.string()), // legacy "2019 – present"
+});
+
+/** A school on a juror's profile. */
+export const juryEducation = v.object({
+  school: v.string(),
+  degree: v.optional(v.string()), // "MA"
+  field: v.optional(v.string()), // "Interaction design"
+  startYear: v.optional(v.number()),
+  endYear: v.optional(v.number()), // or expected
 });
 
 /** A notable piece of a juror's work, shown on their jury page. */
@@ -205,7 +228,12 @@ export const juryWork = v.object({
 /** Jury panels (lib/taxonomy.ts JURY_CATEGORIES has the display names). */
 export const juryCategory = v.union(
   v.literal("design"),
+  v.literal("product"),
+  v.literal("brand"),
+  v.literal("motion"),
   v.literal("engineering"),
+  v.literal("accessibility"),
+  v.literal("growth"),
   v.literal("venture"),
   v.literal("academic"),
 );
@@ -520,6 +548,7 @@ export default defineSchema({
     linkedinUrl: v.optional(v.string()),
     bio: v.optional(v.string()),
     experience: v.optional(v.array(juryExperience)), // newest first, up to LIMITS.juryExperience
+    education: v.optional(v.array(juryEducation)), // newest first, up to LIMITS.juryEducation
     work: v.optional(v.array(juryWork)), // up to LIMITS.juryWork
     avatarId: v.optional(mediaId), // admin-uploaded (ImageKit)
     email: v.optional(v.string()), // private: for emailing the claim link

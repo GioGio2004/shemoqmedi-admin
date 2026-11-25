@@ -36,9 +36,11 @@ From `convex/schema.ts` → `jurors`.
 | --- | --- | --- |
 | `slug` | Yes | Page address, `/jury/<slug>`. Kept when the name changes |
 | `name`, `title` | Yes | Name and role, for example "Creative director at Studio X" |
-| `category` | Yes | Panel: `design`, `engineering`, `venture` or `academic` |
+| `category` | Yes | Panel: `design`, `product`, `brand`, `motion`, `engineering`, `accessibility`, `growth`, `venture` or `academic` (names in `convex/lib/taxonomy.ts`) |
 | `location`, `website`, `linkedinUrl`, `bio` | Yes | Profile details. Bio up to 400 characters |
-| `experience`, `work` | Yes | Up to 8 entries each |
+| `experience` | Yes | Up to 15 positions: role, company, optional company website, location, start and end month/year or current, description. Checked and sorted newest first by `convex/lib/juryProfile.ts` |
+| `education` | Yes | Up to 5 schools: school, degree, field, start and end year |
+| `work` | Yes | Up to 8 entries |
 | `avatarId` | Yes | Photo uploaded by an admin |
 | `isFounding` | Yes | "Founding Jury" badge |
 | `email` | **No** | Private; used only to email the claim link |
@@ -114,7 +116,7 @@ It is one email per juror, never one per site. A juror's first digest covers the
 
 ### Own profile
 
-Jurors edit their own name, role, location, links, bio, experience, work and interests on `/jury/profile` (`jury.updateProfile`). The admin sets the panel, the avatar and the founding badge.
+Jurors edit their own name, role, location, links, bio, experience, education, work and interests on `/jury/profile` (`jury.updateProfile`). The admin sets the panel, the avatar and the founding badge.
 
 ## Conflicts of interest
 

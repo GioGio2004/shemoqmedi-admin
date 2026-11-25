@@ -14,9 +14,10 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { getUserByExternalId } from "./users";
-import { juryCategory, juryExperience, juryWork, pillars } from "./schema";
+import { juryCategory, juryEducation, juryExperience, juryWork, pillars } from "./schema";
 import { claimLinkStatus, linkStatus } from "./lib/claimLinkRows";
 import { LIMITS, isCategory } from "./lib/taxonomy";
+import { cleanEducation, cleanExperience } from "./lib/juryProfile";
 import { averagePillars, finalScore, normalizePillars, readPillars, round2, weighted, type Pillars } from "./lib/scoring";
 import { conflictReason } from "./lib/conflicts";
 import { getConfig } from "./lib/config";
@@ -132,21 +133,8 @@ function cleanEmail(raw: string | undefined) {
 }
 
 type ExperienceRows = NonNullable<Doc<"jurors">["experience"]>;
+type EducationRows = NonNullable<Doc<"jurors">["education"]>;
 type WorkRows = NonNullable<Doc<"jurors">["work"]>;
-
-/** Tidies the Experience list: trims, drops empty rows, caps the count. [] clears it. */
-function cleanExperience(rows: ExperienceRows): ExperienceRows | undefined {
-  const out = rows
-    .map((r) => ({
-      title: cleanText(r.title, "Experience role", 80, false),
-      organization: cleanText(r.organization, "Experience organisation", 80, false),
-      period: cleanText(r.period ?? "", "Experience period", 40, false) || undefined,
-    }))
-    .filter((r) => r.title || r.organization);
-  if (out.some((r) => !r.title || !r.organization)) fail("Each experience entry needs a role and an organisation.");
-  if (out.length > LIMITS.juryExperience) fail(`Add up to ${LIMITS.juryExperience} experience entries.`);
-  return out.length ? out : undefined;
-}
 
 /** Tidies the Work list: trims, normalises links, drops empty rows, caps the count. [] clears it. */
 function cleanWork(rows: WorkRows): WorkRows | undefined {
@@ -172,6 +160,7 @@ const selfProfileArgs = {
   linkedinUrl: v.optional(v.string()), // "" clears
   bio: v.optional(v.string()),
   experience: v.optional(v.array(juryExperience)), // [] clears; absent keeps
+  education: v.optional(v.array(juryEducation)), // [] clears; absent keeps
   work: v.optional(v.array(juryWork)), // [] clears; absent keeps
   interests: v.optional(v.array(v.string())), // CATEGORIES slugs for the digest; [] clears; absent keeps
 };
@@ -184,6 +173,7 @@ function cleanSelfProfile(args: {
   linkedinUrl?: string;
   bio?: string;
   experience?: ExperienceRows;
+  education?: EducationRows;
   work?: WorkRows;
   interests?: string[];
 }) {
@@ -191,6 +181,7 @@ function cleanSelfProfile(args: {
   return {
     ...(args.interests !== undefined ? { interests: [...new Set(args.interests)].slice(0, 40) } : {}),
     ...(args.experience !== undefined ? { experience: cleanExperience(args.experience) } : {}),
+    ...(args.education !== undefined ? { education: cleanEducation(args.education) } : {}),
     ...(args.work !== undefined ? { work: cleanWork(args.work) } : {}),
     name: cleanText(args.name, "Name", LIMITS.creditName),
     title: cleanText(args.title, "Role", LIMITS.juryTitle),
@@ -256,7 +247,8 @@ export const jurorPublic = v.object({
   website: v.union(v.string(), v.null()),
   linkedinUrl: v.union(v.string(), v.null()),
   bio: v.union(v.string(), v.null()),
-  experience: v.array(juryExperience),
+  experience: v.array(juryExperience), // newest first
+  education: v.array(juryEducation), // newest first
   work: v.array(juryWork),
   isFounding: v.boolean(),
   imageUrl: v.union(v.string(), v.null()), // null: show the grey placeholder
@@ -273,6 +265,7 @@ export async function toJurorPublic(ctx: QueryCtx, juror: Doc<"jurors">) {
     linkedinUrl: juror.linkedinUrl ?? null,
     bio: juror.bio ?? null,
     experience: juror.experience ?? [],
+    education: juror.education ?? [],
     work: juror.work ?? [],
     isFounding: juror.isFounding ?? false,
     imageUrl: await jurorPhoto(ctx, juror),
@@ -570,6 +563,7 @@ const adminProfileArgs = {
   avatarId: v.optional(vMediaId),
   isFounding: v.optional(v.boolean()),
   experience: v.optional(v.array(juryExperience)),
+  education: v.optional(v.array(juryEducation)),
   work: v.optional(v.array(juryWork)),
 };
 
@@ -597,6 +591,7 @@ export const createJuror = mutation({
       avatarId: args.avatarId,
       isFounding: args.isFounding ?? true,
       experience: args.experience ? cleanExperience(args.experience) : undefined,
+      education: args.education ? cleanEducation(args.education) : undefined,
       work: args.work ? cleanWork(args.work) : undefined,
       active: true,
       joinedAt: now,
@@ -621,6 +616,7 @@ export const updateJuror = mutation({
     avatarId: v.optional(v.union(vMediaId, v.null())),
     isFounding: v.optional(v.boolean()),
     experience: v.optional(v.array(juryExperience)), // [] clears
+    education: v.optional(v.array(juryEducation)), // [] clears
     work: v.optional(v.array(juryWork)), // [] clears
   },
   returns: v.object({ slug: v.string() }),
@@ -645,6 +641,7 @@ export const updateJuror = mutation({
     if (args.email !== undefined) patch.email = cleanEmail(args.email);
     if (args.isFounding !== undefined) patch.isFounding = args.isFounding;
     if (args.experience !== undefined) patch.experience = cleanExperience(args.experience);
+    if (args.education !== undefined) patch.education = cleanEducation(args.education);
     if (args.work !== undefined) patch.work = cleanWork(args.work);
     if (args.avatarId !== undefined) {
       if (args.avatarId) await assertMedia(ctx, args.avatarId, "Photo", "image", admin);

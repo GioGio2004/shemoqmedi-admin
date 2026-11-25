@@ -517,7 +517,7 @@ const reviewListing = v.object({
   /** Who sent the submission in (older submissions: their owner). */
   submitter: v.union(v.object({ name: v.string(), email: v.string() }), v.null()),
   /** The verified owner, if any. */
-  owner: v.union(v.object({ name: v.string(), email: v.string() }), v.null()),
+  owner: v.union(v.object({ id: v.id("users"), name: v.string(), email: v.string() }), v.null()),
   /** Approve can hand ownership to the submitter: a submission nobody owns yet. */
   canGrantOwnership: v.boolean(),
 });
@@ -584,7 +584,7 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
       (listing.galleryIds ?? []).map(async (id) => ({ id, url: await mediaUrl(ctx, id) })),
     ),
     submitter: submitter ? { name: submitter.name, email: submitter.email } : null,
-    owner: owner ? { name: owner.name, email: owner.email } : null,
+    owner: owner ? { id: owner._id, name: owner.name, email: owner.email } : null,
     canGrantOwnership: listing.submittedBy !== undefined && listing.ownerId === undefined,
   };
 }

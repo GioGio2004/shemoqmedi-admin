@@ -26,6 +26,7 @@ import {
 } from "@/convex/lib/taxonomy";
 import { MediaPicker, MultiImagePicker, VideoQualityPicker, useMediaUpload, useVideoQuality } from "./MediaUpload";
 import { score } from "./format";
+import { OwnerSearch, type OwnerRef } from "./OwnerPicker";
 import { Select } from "./Select";
 
 type CreateStatus = "pending" | "in_voting" | "awarded" | "archived";
@@ -90,6 +91,8 @@ export function ListingCreateForm() {
   const [tier, setTier] = useState<CreatorTier>("solo");
   const [region, setRegion] = useState<RegionSlug>("georgia");
   const [isClaimed, setIsClaimed] = useState(false);
+  // The account that owns the site, if they already have one: claimed from the start.
+  const [owner, setOwner] = useState<OwnerRef | null>(null);
   const [isStartup, setIsStartup] = useState(false);
   // /listings/new?juror=<id> (from the Jury page) pre-picks the juror to bundle with.
   const [jurorId, setJurorId] = useState(() => searchParams.get("juror") ?? "");
@@ -235,7 +238,8 @@ export function ListingCreateForm() {
         editorialScores,
         awards: status === "awarded" ? awards : undefined,
         awardReason: status === "awarded" ? awardReason.trim() : undefined,
-        isClaimed,
+        isClaimed: isClaimed || owner !== null,
+        ownerId: owner?.id,
         isStartup,
         jurorId: jurorId ? (jurorId as Id<"jurors">) : undefined,
         briefId: fromBrief?.id,
@@ -481,16 +485,40 @@ export function ListingCreateForm() {
                 </span>
               </label>
 
-              <label className="admin-check">
-                <input type="checkbox" checked={isClaimed} onChange={(e) => setIsClaimed(e.target.checked)} />
-                <span>
-                  Owner has claimed this site
-                  <small>
-                    Leave off for sites you list on someone&apos;s behalf. Unclaimed listings get a claim link, and
-                    their links stay nofollow until claimed.
-                  </small>
+              <div className="grid gap-3 md:max-w-xl">
+                <span className="admin-eyebrow">Owner (optional)</span>
+                {owner ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/10 px-3 py-2">
+                    <span className="min-w-0 text-sm">
+                      <span className="font-medium">{owner.name}</span>{" "}
+                      <span className="text-black/55 [overflow-wrap:anywhere]">{owner.email}</span>
+                    </span>
+                    <button type="button" className="admin-button admin-button-secondary" onClick={() => setOwner(null)}>
+                      Clear
+                    </button>
+                  </div>
+                ) : (
+                  <OwnerSearch onPick={setOwner} pickLabel="Pick" />
+                )}
+                <span className="text-xs text-black/55">
+                  {owner
+                    ? "The site is created claimed and owned by this account: no claim link, links followed."
+                    : "If the owner already has an account, pick it: no claim link needed. Leave empty to send a claim link later."}
                 </span>
-              </label>
+              </div>
+
+              {!owner && (
+                <label className="admin-check">
+                  <input type="checkbox" checked={isClaimed} onChange={(e) => setIsClaimed(e.target.checked)} />
+                  <span>
+                    Owner has claimed this site
+                    <small>
+                      Leave off for sites you list on someone&apos;s behalf. Unclaimed listings get a claim link, and
+                      their links stay nofollow until claimed.
+                    </small>
+                  </span>
+                </label>
+              )}
 
               <div className="grid gap-2 md:max-w-md">
                 <span id="bundle-juror" className="admin-eyebrow">

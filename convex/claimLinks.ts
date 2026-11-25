@@ -26,7 +26,7 @@ import { action, internalMutation, internalQuery, mutation, query, type Mutation
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
-import { juryCategory, juryExperience, juryWork } from "./schema";
+import { juryCategory, juryEducation, juryExperience, juryWork } from "./schema";
 import { mediaUrl } from "./lib/media";
 import { claimIntent, claimedListingPatch, fail, isPublicStatus } from "./lib/listingHelpers";
 import { DAY_MS } from "./lib/time";
@@ -410,6 +410,7 @@ const jurorPreview = v.object({
   imageUrl: v.union(v.string(), v.null()),
   // The full profile as it will look on /jury/<slug>, shown before claiming.
   experience: v.array(juryExperience),
+  education: v.array(juryEducation),
   work: v.array(juryWork),
 });
 
@@ -434,6 +435,7 @@ async function previewJuror(ctx: QueryCtx, j: Doc<"jurors">) {
     website: j.website ?? null,
     linkedinUrl: j.linkedinUrl ?? null,
     experience: j.experience ?? [],
+    education: j.education ?? [],
     work: j.work ?? [],
     isFounding: j.isFounding ?? false,
     imageUrl: await jurorPhoto(ctx, j),
@@ -628,6 +630,112 @@ export const activateJuror = mutation({
   },
 });
 
+/** Takes a listing from its owner: unowned, unclaimed, nofollow again, open links killed, logged. */
+async function unclaimListing(
+  ctx: MutationCtx,
+  listing: Doc<"listings">,
+  adminId: Id<"users">,
+  now: number,
+  reason?: string,
+) {
+  await ctx.db.patch(listing._id, {
+    ownerId: undefined,
+    isClaimed: false,
+    // Back to automatic: nofollow while unclaimed.
+    isDoFollow: undefined,
+    claimToken: undefined,
+    updatedAt: now,
+  });
+  await revokeClaimLinks(ctx, { kind: "listing", id: listing._id }, now);
+  await audit(ctx, {
+    kind: "unclaimed",
+    listingId: listing._id,
+    actorId: adminId,
+    reason,
+    details: { target: "listing", previousOwner: listing.ownerId ?? null },
+  });
+  if (isPublicStatus(listing.status)) await scheduleIndexNow(ctx, await listingPaths(ctx, listing));
+}
+
+/**
+ * Admin: make an account a listing's owner directly, with no claim link: the
+ * same result as the person claiming it (owned, claimed, followed links, open
+ * claim links and competing claim requests closed). Replaces a current owner.
+ * `userId: null` takes the listing from its owner (as `unclaim`). Logged to
+ * the audit log either way.
+ */
+export const setListingOwner = mutation({
+  args: { listingId: v.id("listings"), userId: v.union(v.id("users"), v.null()), reason: v.optional(v.string()) },
+  returns: v.object({ owner: v.union(v.object({ id: v.id("users"), name: v.string(), email: v.string() }), v.null()) }),
+  handler: async (ctx, { listingId, userId, reason }) => {
+    const admin = await requireAdmin(ctx);
+    const now = Date.now();
+    const why = reason?.trim().slice(0, 500) || undefined;
+    const listing = await ctx.db.get(listingId);
+    if (!listing) fail("Listing not found.");
+    if (userId === null) {
+      if (listing.isClaimed || listing.ownerId) await unclaimListing(ctx, listing, admin._id, now, why);
+      return { owner: null };
+    }
+    const user = await ctx.db.get(userId);
+    if (!user) fail("That account no longer exists.");
+    const owner = { id: user._id, name: user.name, email: user.email };
+    if (listing.ownerId === userId && listing.isClaimed) return { owner };
+    await claimListing(ctx, listing, userId, now);
+    await audit(ctx, {
+      kind: "owner_assigned",
+      listingId,
+      actorId: admin._id,
+      reason: why,
+      details: { previousOwner: listing.ownerId ?? null, owner: userId },
+    });
+    if (isPublicStatus(listing.status)) await scheduleIndexNow(ctx, await listingPaths(ctx, listing));
+    return { owner };
+  },
+});
+
+/**
+ * Admin: accounts to pick a listing's owner from, matched on name or email
+ * (two characters or more), with how many listings each already owns.
+ */
+export const ownerCandidates = query({
+  args: { search: v.string() },
+  returns: v.array(v.object({ id: v.id("users"), name: v.string(), email: v.string(), listings: v.number() })),
+  handler: async (ctx, { search }) => {
+    await requireAdmin(ctx);
+    const q = search.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const exact = q.includes("@")
+      ? await ctx.db
+          .query("users")
+          .withIndex("byEmail", (i) => i.eq("email", q))
+          .take(1)
+      : [];
+    const recent = await ctx.db.query("users").order("desc").take(2000);
+    const seen = new Set<string>();
+    const hits: Doc<"users">[] = [];
+    for (const u of [...exact, ...recent]) {
+      if (seen.has(u._id)) continue;
+      seen.add(u._id);
+      if (u.email.toLowerCase().includes(q) || u.name.toLowerCase().includes(q)) hits.push(u);
+      if (hits.length >= 8) break;
+    }
+    return await Promise.all(
+      hits.map(async (u) => ({
+        id: u._id,
+        name: u.name,
+        email: u.email,
+        listings: (
+          await ctx.db
+            .query("listings")
+            .withIndex("by_owner", (i) => i.eq("ownerId", u._id))
+            .take(100)
+        ).length,
+      })),
+    );
+  },
+});
+
 /**
  * Admin: take a listing or jury profile back from whoever claimed it (a
  * wrong account, or to transfer it). Clears the owner, not just the claimed
@@ -646,23 +754,7 @@ export const unclaim = mutation({
       const listing = await ctx.db.get(target.id);
       if (!listing) fail("Listing not found.");
       if (!listing.isClaimed && !listing.ownerId) fail("This listing isn't claimed.");
-      await ctx.db.patch(listing._id, {
-        ownerId: undefined,
-        isClaimed: false,
-        // Back to automatic: nofollow while unclaimed.
-        isDoFollow: undefined,
-        claimToken: undefined,
-        updatedAt: now,
-      });
-      await revokeClaimLinks(ctx, target, now);
-      await audit(ctx, {
-        kind: "unclaimed",
-        listingId: listing._id,
-        actorId: admin._id,
-        reason: why,
-        details: { target: "listing", previousOwner: listing.ownerId ?? null },
-      });
-      if (isPublicStatus(listing.status)) await scheduleIndexNow(ctx, await listingPaths(ctx, listing));
+      await unclaimListing(ctx, listing, admin._id, now, why);
       return null;
     }
 

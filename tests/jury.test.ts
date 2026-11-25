@@ -276,7 +276,7 @@ describe("jury claim links", () => {
     expect(me!.work).toEqual([{ title: "Floema", url: "https://floema.com", year: "2024" }]);
     await expect(
       env.ana.mutation(api.jury.updateProfile, { name: "Ana", title: "Designer", experience: [{ title: "Lead", organization: "" }] }),
-    ).rejects.toThrow(/role and an organisation/);
+    ).rejects.toThrow(/role and a company/);
     // Absent keeps, [] clears.
     await env.ana.mutation(api.jury.updateProfile, { name: "Ana", title: "Designer", work: [] });
     const after = await env.ana.query(api.jury.me, {});

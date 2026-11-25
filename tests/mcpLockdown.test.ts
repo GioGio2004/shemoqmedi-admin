@@ -1,8 +1,10 @@
 /// <reference types="vite/client" />
-// The MCP connector's human gate (audit C-04, B-15): send_email,
-// send_broadcast, approve_post, publish_post and retry_post only create a
-// pending action, and nothing reaches Resend or a social network until an
-// admin approves it with a Clerk session (once). Daily caps hold when Claude
+// The MCP connector's human gate (audit C-04, B-15): send_broadcast,
+// approve_post, publish_post and retry_post only create a pending action, and
+// nothing reaches Resend or a social network until an admin approves it with
+// a Clerk session (once). send_email is the exception (Giorgi's choice, 24 Nov
+// 2026): with confirm it sends at once, after his yes to the exact preview in
+// chat, and is recorded as a pending action approved in chat. Daily caps hold when Claude
 // asks and when an admin approves. Every tool call is logged in mcpAudit with
 // emails and tokens redacted. Award posts need a valid award of a site that
 // isn't the team's. MCP_OAUTH_AUDIENCE fails closed in production.
@@ -115,44 +117,39 @@ async function award(env: Env, listingId: Id<"listings">, slug: string, status: 
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("MCP send and publish only ask", () => {
-  it("send_email creates a pending action and calls nobody; the admin's approval sends it once", async () => {
+  it("send_email previews without confirm; with confirm it sends once and is logged as approved in chat", async () => {
     const env = await setup();
     const s = await site(env);
-    const asked = await env.t.action(api.mcp.sendEmail, {
-      token: env.token,
-      listingSlug: s.slug,
-      subject: "Your site",
-      body: "Hi! Claim it: {claimLink}",
-      confirm: true,
-    });
-    expect(asked).toMatchObject({ sent: false, to: "hello@studio.example", status: "waiting for approval in Studio" });
-    expect(asked.message).toMatch(/waiting for approval in Studio/);
+    const args = { token: env.token, listingSlug: s.slug, subject: "Your site", body: "Hi! Claim it: {claimLink}" };
+
+    // Without confirm: only the preview, nothing sent or recorded.
+    const preview = await env.t.action(api.mcp.sendEmail, { ...args, confirm: false });
+    expect(preview).toMatchObject({ sent: false, to: "hello@studio.example", subject: "Your site" });
+    expect(preview.text).toMatch(/\/claim\//);
     await drain(env);
     expect(calls("api.resend.com")).toHaveLength(0);
-    expect(await emailLog(env)).toHaveLength(0);
+    expect(await pending(env)).toHaveLength(0);
 
-    // What the admin sees is exactly what goes out.
-    const [row] = await env.admin.query(api.pendingActions.list, {});
-    expect(row).toMatchObject({ kind: "send_email", status: "pending", requestedBy: "Giorgi Admin" });
-    expect(row.payload).toMatchObject({ to: "hello@studio.example", subject: "Your site", text: asked.text });
-    expect(describePending(row).facts).toContainEqual({ label: "To", value: "hello@studio.example" });
-
-    // Only a Clerk-session admin can approve: not a member, not anonymous.
-    await expect(env.member.mutation(api.pendingActions.approve, { id: row.id })).rejects.toThrow(/admin/);
-    await expect(env.t.mutation(api.pendingActions.approve, { id: row.id })).rejects.toThrow();
-
-    expect(await env.admin.mutation(api.pendingActions.approve, { id: row.id })).toMatchObject({ status: "approved", executed: true });
+    // With confirm (Giorgi said yes in chat): sent once, right away.
+    const sent = await env.t.action(api.mcp.sendEmail, { ...args, confirm: true });
+    expect(sent).toMatchObject({ sent: true, status: "sent", to: "hello@studio.example" });
     await drain(env);
     expect(calls("api.resend.com/emails")).toHaveLength(1);
     const log = await emailLog(env);
     expect(log).toHaveLength(1);
     expect(log[0]).toMatchObject({ to: "hello@studio.example", subject: "Your site", status: "sent" });
 
-    // A second approval (another tap, another device) does nothing.
-    expect(await env.admin.mutation(api.pendingActions.approve, { id: row.id })).toMatchObject({ status: "approved", executed: false });
+    // Recorded as approved in chat, with exactly what went out.
+    const [row] = await pending(env);
+    expect(row).toMatchObject({ _id: sent.pendingActionId, kind: "send_email", status: "approved" });
+    expect(row.payload).toMatchObject({ to: "hello@studio.example", subject: "Your site", text: sent.text });
+    expect(row.result).toMatchObject({ status: "sent", approvedIn: "chat" });
+
+    // An admin approving that row again sends nothing more; a member can't touch it.
+    await expect(env.member.mutation(api.pendingActions.approve, { id: row._id })).rejects.toThrow(/admin/);
+    expect(await env.admin.mutation(api.pendingActions.approve, { id: row._id })).toMatchObject({ executed: false });
     await drain(env);
     expect(calls("api.resend.com/emails")).toHaveLength(1);
-    expect((await pending(env))[0]).toMatchObject({ status: "approved", result: { status: "sent" } });
   });
 
   it("send_broadcast creates a pending action; approval starts the broadcast once", async () => {
@@ -230,17 +227,16 @@ describe("MCP send and publish only ask", () => {
 });
 
 describe("daily caps", () => {
-  it("caps the emails Claude can ask for in 24 hours", async () => {
+  it("caps the emails Claude can send in 24 hours", async () => {
     const env = await setup();
     let token = env.token;
     const send = () => env.t.action(api.mcp.sendEmail, { token, to: "someone@studio.example", subject: "Hi", body: "Hello", confirm: true });
     for (let i = 0; i < MCP_DAILY_CAPS.emails; i++) await send();
     await expect(send()).rejects.toThrow(/Daily limit reached/);
+    await drain(env);
+    expect(calls("api.resend.com/emails")).toHaveLength(MCP_DAILY_CAPS.emails);
     expect(await pending(env)).toHaveLength(MCP_DAILY_CAPS.emails);
-    // Rejected requests free their place; a day later the cap starts again.
-    const [first] = await env.admin.query(api.pendingActions.list, {});
-    await env.admin.mutation(api.pendingActions.reject, { id: first.id });
-    await send();
+    // A day later the cap starts again.
     vi.setSystemTime(Date.now() + 25 * 60 * 60 * 1000);
     token = (await mintServiceCredential("admin"))!; // the agent's credential lives a minute
     await send();

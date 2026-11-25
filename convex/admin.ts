@@ -13,7 +13,7 @@ import { normalizePillars, type Pillars } from "./lib/scoring";
 import { batchVotingEnds, tbilisiDay, tbilisiMonth, tbilisiYear, weekOf } from "./lib/time";
 import { checkDomain, domainKey, listingsOnDomain } from "./lib/domains";
 import { getConfig } from "./lib/config";
-import { grantAward, syncListingAwards } from "./lib/awards";
+import { audit, grantAward, syncListingAwards } from "./lib/awards";
 import {
   EMPTY_SCORES,
   assertMedia,
@@ -101,6 +101,9 @@ export const createListing = mutation({
     // A significant redesign of this earlier listing (same website).
     redesignOf: v.optional(v.id("listings")),
     isClaimed: v.boolean(),
+    // The account that owns the site, picked by the admin: owned and claimed
+    // from the start, no claim link needed (claimLinks.setListingOwner later).
+    ownerId: v.optional(v.id("users")),
     isStartup: v.optional(v.boolean()),
     // Pre-created for this juror: their claim link claims this listing too.
     jurorId: v.optional(v.id("jurors")),
@@ -137,6 +140,7 @@ export const createListing = mutation({
     });
     if (!domain.ok) fail(domain.reason);
     if (args.jurorId && !(await ctx.db.get(args.jurorId))) fail("That juror no longer exists.");
+    if (args.ownerId && !(await ctx.db.get(args.ownerId))) fail("That account no longer exists.");
 
     const creatorId = await findOrCreateCreator(ctx, {
       name: creditName,
@@ -191,12 +195,21 @@ export const createListing = mutation({
       editorialScores,
       ...scoreFields(editorialScores, EMPTY_SCORES.communityTotals, 0),
       awards: [],
-      isClaimed: args.isClaimed,
+      isClaimed: args.isClaimed || args.ownerId !== undefined,
+      ownerId: args.ownerId,
       isStartup: args.isStartup || undefined,
       jurorId: args.jurorId,
       createdAt: now,
       updatedAt: now,
     });
+    if (args.ownerId) {
+      await audit(ctx, {
+        kind: "owner_assigned",
+        listingId: id,
+        actorId: admin._id,
+        details: { previousOwner: null, owner: args.ownerId },
+      });
+    }
     if (args.briefId) {
       const brief = await ctx.db.get(args.briefId);
       if (brief && !brief.listingId) await ctx.db.patch(brief._id, { listingId: id, updatedAt: now });

@@ -38,6 +38,7 @@ import type * as lib_email from "../lib/email.js";
 import type * as lib_georgian from "../lib/georgian.js";
 import type * as lib_imagekitServer from "../lib/imagekitServer.js";
 import type * as lib_imagekitSign from "../lib/imagekitSign.js";
+import type * as lib_juryProfile from "../lib/juryProfile.js";
 import type * as lib_listingHelpers from "../lib/listingHelpers.js";
 import type * as lib_mcpAudit from "../lib/mcpAudit.js";
 import type * as lib_mcpAuth from "../lib/mcpAuth.js";
@@ -116,6 +117,7 @@ declare const fullApi: ApiFromModules<{
   "lib/georgian": typeof lib_georgian;
   "lib/imagekitServer": typeof lib_imagekitServer;
   "lib/imagekitSign": typeof lib_imagekitSign;
+  "lib/juryProfile": typeof lib_juryProfile;
   "lib/listingHelpers": typeof lib_listingHelpers;
   "lib/mcpAudit": typeof lib_mcpAudit;
   "lib/mcpAuth": typeof lib_mcpAuth;
