@@ -100,11 +100,105 @@ describe("admin assigns a listing's owner", () => {
     expect((await detail(env, id))!.owner).toBeNull();
   });
 
+  it("the creator profile goes with the owner, moves on a change and is released on removal", async () => {
+    const env = await setup();
+    const { id } = await env.listing();
+    const ninoId = await env.userId("nino");
+    const lukaId = await env.userId("luka");
+    const creator = async () => (await detail(env, id))!.creator!;
+    expect(await creator()).toMatchObject({ isClaimed: false, claimedBy: null });
+
+    const out = await env.admin.mutation(api.claimLinks.setListingOwner, { listingId: id, userId: ninoId });
+    expect(out.creatorProfile).toBe(true);
+    expect(await creator()).toMatchObject({ isClaimed: true, claimedBy: { id: ninoId, name: "Nino Studio" } });
+    // The public profile is claimed now: no "Claim this profile".
+    const slug = (await creator()).slug;
+    expect((await env.t.query(api.creators.getBySlug, { slug }))!.creator.isClaimed).toBe(true);
+
+    await env.admin.mutation(api.claimLinks.setListingOwner, { listingId: id, userId: lukaId });
+    expect((await creator()).claimedBy!.id).toBe(lukaId);
+
+    await env.admin.mutation(api.claimLinks.setListingOwner, { listingId: id, userId: null });
+    expect(await creator()).toMatchObject({ isClaimed: false, claimedBy: null });
+  });
+
+  it("assigning the same owner again hands over a profile left behind (listings assigned before)", async () => {
+    const env = await setup();
+    const { id } = await env.listing();
+    const ninoId = await env.userId("nino");
+    await env.admin.mutation(api.claimLinks.setListingOwner, { listingId: id, userId: ninoId });
+    // As it was before profiles moved with owners: owned listing, unclaimed profile.
+    const creatorId = await env.t.run(async (ctx) => {
+      const l = await ctx.db.get(id);
+      await ctx.db.patch(l!.creatorId!, { isClaimed: false, claimedBy: undefined });
+      return l!.creatorId!;
+    });
+    const out = await env.admin.mutation(api.claimLinks.setListingOwner, { listingId: id, userId: ninoId });
+    expect(out.creatorProfile).toBe(true);
+    const row = await env.t.run((ctx) => ctx.db.get(creatorId));
+    expect(row).toMatchObject({ isClaimed: true, claimedBy: ninoId });
+  });
+
+  it("never takes a creator profile another account holds", async () => {
+    const env = await setup();
+    const { id } = await env.listing();
+    const ninoId = await env.userId("nino");
+    const lukaId = await env.userId("luka");
+    await env.t.run(async (ctx) => {
+      const l = await ctx.db.get(id);
+      await ctx.db.patch(l!.creatorId!, { isClaimed: true, claimedBy: lukaId });
+    });
+    const out = await env.admin.mutation(api.claimLinks.setListingOwner, { listingId: id, userId: ninoId });
+    expect(out.creatorProfile).toBe(false);
+    expect((await detail(env, id))!.creator!.claimedBy!.id).toBe(lukaId);
+    // Taking the listing from Nino leaves Luka's profile alone too.
+    await env.admin.mutation(api.claimLinks.setListingOwner, { listingId: id, userId: null });
+    expect((await detail(env, id))!.creator!.claimedBy!.id).toBe(lukaId);
+  });
+
+  it("removing an owner keeps the profile when they own another site credited to it", async () => {
+    const env = await setup();
+    const ninoId = await env.userId("nino");
+    const first = await env.listing();
+    const second = await env.listing();
+    await env.admin.mutation(api.claimLinks.setListingOwner, { listingId: first.id, userId: ninoId });
+    await env.admin.mutation(api.claimLinks.setListingOwner, { listingId: second.id, userId: ninoId });
+    await env.admin.mutation(api.claimLinks.setListingOwner, { listingId: first.id, userId: null });
+    expect((await detail(env, second.id))!.creator!.claimedBy!.id).toBe(ninoId);
+  });
+
+  it("the creator profile shows the owner's jury photo when they have no account photo", async () => {
+    const env = await setup();
+    const { id } = await env.listing();
+    const lukaId = await env.userId("luka");
+    await env.t.run(async (ctx) => {
+      const avatarId = await ctx.storage.store(new Blob(["jpg"], { type: "image/jpeg" }));
+      await ctx.db.insert("jurors", {
+        userId: lukaId,
+        status: "claimed",
+        slug: "luka-agency",
+        name: "Luka Agency",
+        title: "Designer",
+        avatarId,
+        active: true,
+        joinedAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    });
+    await env.admin.mutation(api.claimLinks.setListingOwner, { listingId: id, userId: lukaId });
+    const slug = (await detail(env, id))!.creator!.slug;
+    const page = await env.t.query(api.creators.getBySlug, { slug });
+    expect(page!.creator.photoUrl).toMatch(/^https?:\/\//);
+    // Their own account photo still wins.
+    await env.t.run((ctx) => ctx.db.patch(lukaId, { hasImage: true, profilePicture: "https://img.clerk.com/luka.png" }));
+    expect((await env.t.query(api.creators.getBySlug, { slug }))!.creator.photoUrl).toBe("https://img.clerk.com/luka.png");
+  });
+
   it("a listing can be created with its owner already set", async () => {
     const env = await setup();
     const ninoId = await env.userId("nino");
     const { id } = await env.listing({ ownerId: ninoId });
-    expect(await detail(env, id)).toMatchObject({ isClaimed: true, owner: { id: ninoId } });
+    expect(await detail(env, id)).toMatchObject({ isClaimed: true, owner: { id: ninoId }, creator: { isClaimed: true, claimedBy: { id: ninoId } } });
     const missing = await env.t.run(async (ctx) => {
       const gone = await ctx.db.insert("users", { externalId: "gone", name: "Gone", email: "gone@example.com", createdAt: 0, updatedAt: 0 });
       await ctx.db.delete(gone);

@@ -5,12 +5,21 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { showAlert, showError } from "./Alerts";
+import { storefrontCreatorUrl } from "./format";
 
 // Pick a listing's owner straight from the admin: search any signed-up account
 // by name or email and make it the owner, no claim link needed
 // (claimLinks.setListingOwner). People without an account still get a claim link.
 
 export type OwnerRef = { id: Id<"users">; name: string; email: string };
+
+/** The listing's creator profile ("Made by") and the account holding it. */
+export type CreatorRef = {
+  slug: string;
+  name: string;
+  isClaimed: boolean;
+  claimedBy: { id: Id<"users">; name: string } | null;
+};
 
 /** Search box with matching accounts; `onPick` gets the chosen one. */
 export function OwnerSearch({
@@ -89,15 +98,21 @@ export function OwnerSearch({
   );
 }
 
-/** The listing page's Owner panel: who owns it, assign or change the owner, remove them. */
+/**
+ * The listing page's Owner panel: who owns it, assign or change the owner,
+ * remove them. The listing's creator profile goes with the owner; a profile
+ * left behind (listings assigned before that) is handed over from here.
+ */
 export function ListingOwnerPanel({
   listingId,
   owner,
   isClaimed,
+  creator,
 }: {
   listingId: Id<"listings">;
   owner: OwnerRef | null;
   isClaimed: boolean;
+  creator: CreatorRef | null;
 }) {
   const setOwner = useMutation(api.claimLinks.setListingOwner);
   const [busy, setBusy] = useState(false);
@@ -105,16 +120,36 @@ export function ListingOwnerPanel({
 
   async function assign(user: OwnerRef) {
     const replacing = owner ? ` It replaces ${owner.name} (${owner.email}).` : "";
+    const profile = creator ? ` The creator profile "${creator.name}" becomes theirs too.` : "";
     const reason = prompt(
-      `Make ${user.name} (${user.email}) the owner of this site? It becomes claimed and its links followed.${replacing} Reason (optional, for the audit log):`,
+      `Make ${user.name} (${user.email}) the owner of this site? It becomes claimed and its links followed.${profile}${replacing} Reason (optional, for the audit log):`,
       "",
     );
     if (reason === null) return;
     setBusy(true);
     try {
-      await setOwner({ listingId, userId: user.id, reason: reason || undefined });
-      showAlert(`${user.name} now owns this site.`, "success");
+      const out = await setOwner({ listingId, userId: user.id, reason: reason || undefined });
+      showAlert(
+        creator && !out.creatorProfile
+          ? `${user.name} now owns this site. The creator profile "${creator.name}" stays with ${creator.claimedBy?.name ?? "its current holder"}.`
+          : `${user.name} now owns this site${creator ? ` and the creator profile "${creator.name}"` : ""}.`,
+        "success",
+      );
       setChanging(false);
+    } catch (err) {
+      showError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function giveProfile() {
+    if (!owner || !creator) return;
+    setBusy(true);
+    try {
+      const out = await setOwner({ listingId, userId: owner.id });
+      if (out.creatorProfile) showAlert(`The creator profile "${creator.name}" now belongs to ${owner.name}.`, "success");
+      else showAlert(`"${creator.name}" belongs to another account (${creator.claimedBy?.name ?? "unknown"}). Change it on that account first.`, "error");
     } catch (err) {
       showError(err);
     } finally {
@@ -155,6 +190,7 @@ export function ListingOwnerPanel({
           {isClaimed ? "Marked claimed, but no account owns it." : "Nobody owns this site yet."}
         </p>
       )}
+      {creator && <CreatorStatus creator={creator} owner={owner} busy={busy} onGive={giveProfile} />}
       <p className="text-xs leading-relaxed text-black/55">
         Give the site to an account directly, no claim link needed: it is claimed at once, its links are followed and
         the owner can edit it from their account. Owners never vote on or judge their own site. Every change is written
@@ -187,5 +223,39 @@ export function ListingOwnerPanel({
         </>
       )}
     </section>
+  );
+}
+
+/** Whose the listing's creator profile is, and a button to hand it to the owner when it isn't theirs. */
+function CreatorStatus({
+  creator,
+  owner,
+  busy,
+  onGive,
+}: {
+  creator: CreatorRef;
+  owner: OwnerRef | null;
+  busy: boolean;
+  onGive: () => void;
+}) {
+  const theirs = owner && creator.claimedBy?.id === owner.id;
+  const holder = creator.claimedBy ? creator.claimedBy.name : creator.isClaimed ? "marked claimed, no account" : "nobody yet";
+  return (
+    <div className="grid gap-2 rounded-xl border border-black/10 px-3 py-2">
+      <p className="text-sm">
+        <span className="text-black/55">Creator profile </span>
+        <a href={storefrontCreatorUrl(creator.slug)} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-4">
+          {creator.name}
+        </a>
+        <span className="text-black/55">: {theirs ? `${owner.name}'s` : holder}</span>
+      </p>
+      {owner && !theirs && (
+        <div>
+          <button type="button" className="admin-button admin-button-secondary" disabled={busy} onClick={onGive}>
+            {busy ? "Working…" : `Give the profile to ${owner.name}`}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

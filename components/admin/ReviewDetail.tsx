@@ -135,7 +135,12 @@ export function ReviewDetail({ id }: { id: Id<"listings"> }) {
             awards={listing.awards}
           />
 
-          <ListingOwnerPanel listingId={listing.id} owner={listing.owner} isClaimed={listing.isClaimed} />
+          <ListingOwnerPanel
+            listingId={listing.id}
+            owner={listing.owner}
+            isClaimed={listing.isClaimed}
+            creator={listing.creator}
+          />
 
           {!listing.isClaimed && (
             <section className="admin-panel grid gap-4" aria-labelledby="claim-link-heading">

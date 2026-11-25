@@ -25,6 +25,7 @@ import {
   deleteListing,
   fail,
   findOrCreateCreator,
+  giveCreatorProfile,
   isPublicStatus,
   listingSlugTaken,
   normalizeUrl,
@@ -203,11 +204,13 @@ export const createListing = mutation({
       updatedAt: now,
     });
     if (args.ownerId) {
+      // Their creator profile ("Made by") is theirs too, unless another account holds it.
+      const creatorProfile = await giveCreatorProfile(ctx, { creatorId }, args.ownerId, undefined, now);
       await audit(ctx, {
         kind: "owner_assigned",
         listingId: id,
         actorId: admin._id,
-        details: { previousOwner: null, owner: args.ownerId },
+        details: { previousOwner: null, owner: args.ownerId, ...(creatorProfile && creatorId ? { creator: creatorId } : {}) },
       });
     }
     if (args.briefId) {

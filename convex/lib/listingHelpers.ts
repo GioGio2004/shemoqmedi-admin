@@ -620,6 +620,51 @@ export function claimedListingPatch(listing: Doc<"listings">, ownerId: Id<"users
 }
 
 /**
+ * An admin gave a listing to `userId`: its creator profile (the "Made by"
+ * credit, /creators/<slug>) goes to them too, so the profile shows their name,
+ * photo and "Edit" instead of "Claim this profile". A profile another account
+ * already holds is left alone; one the listing's previous owner held moves
+ * with the listing. Returns whether the profile is now the owner's.
+ */
+export async function giveCreatorProfile(
+  ctx: MutationCtx,
+  listing: Pick<Doc<"listings">, "creatorId">,
+  userId: Id<"users">,
+  previousOwner: Id<"users"> | undefined,
+  now: number,
+) {
+  const creator = listing.creatorId ? await ctx.db.get(listing.creatorId) : null;
+  if (!creator) return false;
+  if (creator.claimedBy === userId) {
+    if (!creator.isClaimed) await ctx.db.patch(creator._id, { isClaimed: true, updatedAt: now });
+    return true;
+  }
+  if (creator.claimedBy && creator.claimedBy !== previousOwner) return false;
+  await ctx.db.patch(creator._id, { claimedBy: userId, isClaimed: true, updatedAt: now });
+  return true;
+}
+
+/**
+ * An admin took a listing from `previousOwner`: their creator profile is
+ * released too, unless they still own another site credited to it.
+ */
+export async function releaseCreatorProfile(
+  ctx: MutationCtx,
+  listing: Pick<Doc<"listings">, "_id" | "creatorId">,
+  previousOwner: Id<"users"> | undefined,
+  now: number,
+) {
+  const creator = listing.creatorId ? await ctx.db.get(listing.creatorId) : null;
+  if (!creator || !previousOwner || creator.claimedBy !== previousOwner) return;
+  const credited = await ctx.db
+    .query("listings")
+    .withIndex("by_creator", (q) => q.eq("creatorId", creator._id))
+    .take(200);
+  if (credited.some((l) => l._id !== listing._id && l.ownerId === previousOwner)) return;
+  await ctx.db.patch(creator._id, { claimedBy: undefined, isClaimed: false, updatedAt: now });
+}
+
+/**
  * Removal requests used to be ordinary claims whose message started with
  * this. Those rows have no `intent`, so the prefix is how we still tell them
  * apart: approving one must never hand over ownership.

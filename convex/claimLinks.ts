@@ -28,7 +28,14 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin, requireUser } from "./authHelpers";
 import { juryCategory, juryEducation, juryExperience, juryWork } from "./schema";
 import { mediaUrl } from "./lib/media";
-import { claimIntent, claimedListingPatch, fail, isPublicStatus } from "./lib/listingHelpers";
+import {
+  claimIntent,
+  claimedListingPatch,
+  fail,
+  giveCreatorProfile,
+  isPublicStatus,
+  releaseCreatorProfile,
+} from "./lib/listingHelpers";
 import { DAY_MS } from "./lib/time";
 import { audit } from "./lib/awards";
 import { isClaimedJuror, isPublicJuror, jurorOf, jurorPhoto } from "./jury";
@@ -647,6 +654,8 @@ async function unclaimListing(
     updatedAt: now,
   });
   await revokeClaimLinks(ctx, { kind: "listing", id: listing._id }, now);
+  // Their creator profile goes with it, unless they own another site credited to it.
+  await releaseCreatorProfile(ctx, listing, listing.ownerId, now);
   await audit(ctx, {
     kind: "unclaimed",
     listingId: listing._id,
@@ -661,12 +670,18 @@ async function unclaimListing(
  * Admin: make an account a listing's owner directly, with no claim link: the
  * same result as the person claiming it (owned, claimed, followed links, open
  * claim links and competing claim requests closed). Replaces a current owner.
- * `userId: null` takes the listing from its owner (as `unclaim`). Logged to
- * the audit log either way.
+ * The listing's creator profile ("Made by", /creators/<slug>) goes to the owner
+ * too, unless another account holds it; assigning the same owner again hands
+ * over a profile left behind. `userId: null` takes the listing (and that
+ * profile) from its owner, as `unclaim`. Logged to the audit log either way.
  */
 export const setListingOwner = mutation({
   args: { listingId: v.id("listings"), userId: v.union(v.id("users"), v.null()), reason: v.optional(v.string()) },
-  returns: v.object({ owner: v.union(v.object({ id: v.id("users"), name: v.string(), email: v.string() }), v.null()) }),
+  returns: v.object({
+    owner: v.union(v.object({ id: v.id("users"), name: v.string(), email: v.string() }), v.null()),
+    /** The listing's creator profile now belongs to the owner. */
+    creatorProfile: v.boolean(),
+  }),
   handler: async (ctx, { listingId, userId, reason }) => {
     const admin = await requireAdmin(ctx);
     const now = Date.now();
@@ -675,22 +690,43 @@ export const setListingOwner = mutation({
     if (!listing) fail("Listing not found.");
     if (userId === null) {
       if (listing.isClaimed || listing.ownerId) await unclaimListing(ctx, listing, admin._id, now, why);
-      return { owner: null };
+      return { owner: null, creatorProfile: false };
     }
     const user = await ctx.db.get(userId);
     if (!user) fail("That account no longer exists.");
     const owner = { id: user._id, name: user.name, email: user.email };
-    if (listing.ownerId === userId && listing.isClaimed) return { owner };
+    const creatorBefore = listing.creatorId ? await ctx.db.get(listing.creatorId) : null;
+    if (listing.ownerId === userId && listing.isClaimed) {
+      // Already the owner: only hand over a creator profile left behind
+      // (listings assigned before profiles moved with them).
+      const creatorProfile = await giveCreatorProfile(ctx, listing, userId, undefined, now);
+      if (creatorProfile && creatorBefore && creatorBefore.claimedBy !== userId) {
+        await audit(ctx, {
+          kind: "owner_assigned",
+          listingId,
+          actorId: admin._id,
+          reason: why,
+          details: { previousOwner: userId, owner: userId, creator: creatorBefore._id },
+        });
+        if (isPublicStatus(listing.status)) await scheduleIndexNow(ctx, [`/creators/${creatorBefore.slug}`]);
+      }
+      return { owner, creatorProfile };
+    }
     await claimListing(ctx, listing, userId, now);
+    const creatorProfile = await giveCreatorProfile(ctx, listing, userId, listing.ownerId, now);
     await audit(ctx, {
       kind: "owner_assigned",
       listingId,
       actorId: admin._id,
       reason: why,
-      details: { previousOwner: listing.ownerId ?? null, owner: userId },
+      details: {
+        previousOwner: listing.ownerId ?? null,
+        owner: userId,
+        ...(creatorProfile && creatorBefore ? { creator: creatorBefore._id } : {}),
+      },
     });
     if (isPublicStatus(listing.status)) await scheduleIndexNow(ctx, await listingPaths(ctx, listing));
-    return { owner };
+    return { owner, creatorProfile };
   },
 });
 

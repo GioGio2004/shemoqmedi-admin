@@ -15,6 +15,7 @@ import { isEmail, normalizeEmail } from "./lib/contacts";
 import { requireUser } from "./authHelpers";
 import { publicAward, toPublicAward } from "./awards";
 import { creatorPath, scheduleIndexNow } from "./seo";
+import { jurorOf, jurorPhoto } from "./jury";
 
 /** Most a bio may hold; paragraphs are kept. */
 export const CREATOR_BIO_MAX = 800;
@@ -42,8 +43,9 @@ const publicCreator = v.object({
 /**
  * The picture for a creator. The claiming owner's own photo (a real one, not
  * Clerk's generated default) always shows, unless they picked a Shemoqmedi
- * avatar instead (users.avatar "01"…"24"). Without a photo: the avatar they
- * picked, or (null) the one the site picks from the creator's slug.
+ * avatar instead (users.avatar "01"…"24"). An owner on the jury without an
+ * account photo gets their jury photo. Otherwise (null) the site picks an
+ * avatar from the creator's slug.
  */
 async function pictureOf(ctx: QueryCtx, creator: Doc<"creators">) {
   if (!creator.claimedBy) return { photoUrl: null, avatar: null };
@@ -51,7 +53,9 @@ async function pictureOf(ctx: QueryCtx, creator: Doc<"creators">) {
   const choice = user?.avatar;
   if (choice && choice !== "photo") return { photoUrl: null, avatar: choice };
   const photo = user?.profilePicture && user.hasImage !== false ? user.profilePicture : null;
-  return { photoUrl: photo, avatar: null };
+  if (photo || !user) return { photoUrl: photo, avatar: null };
+  const juror = await jurorOf(ctx, user._id);
+  return { photoUrl: juror ? await jurorPhoto(ctx, juror) : null, avatar: null };
 }
 
 /** A creator profile with their public listings and every active award, newest first. */

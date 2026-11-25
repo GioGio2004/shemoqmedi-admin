@@ -465,7 +465,13 @@ const reviewListing = v.object({
   creditName: v.string(),
   creditUrl: v.union(v.string(), v.null()),
   creator: v.union(
-    v.object({ slug: v.string(), name: v.string(), isClaimed: v.boolean() }),
+    v.object({
+      slug: v.string(),
+      name: v.string(),
+      isClaimed: v.boolean(),
+      /** The account holding the profile, if any (the Owner panel compares it with the owner). */
+      claimedBy: v.union(v.object({ id: v.id("users"), name: v.string() }), v.null()),
+    }),
     v.null(),
   ),
   /**
@@ -532,6 +538,7 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
   const submitter = listing.submittedBy ? await ctx.db.get(listing.submittedBy) : owner;
   const creator = listing.creatorId ? await ctx.db.get(listing.creatorId) : null;
   const match = creator ? null : await creatorByName(ctx, listing.creditName);
+  const creatorHolder = creator?.claimedBy ? await ctx.db.get(creator.claimedBy) : null;
   return {
     id: listing._id,
     slug: listing.slug,
@@ -547,7 +554,14 @@ async function toReview(ctx: Parameters<typeof mediaUrls>[0], listing: Doc<"list
     creatorTier: listing.creatorTier,
     creditName: listing.creditName,
     creditUrl: listing.creditUrl ?? null,
-    creator: creator ? { slug: creator.slug, name: creator.name, isClaimed: creator.isClaimed } : null,
+    creator: creator
+      ? {
+          slug: creator.slug,
+          name: creator.name,
+          isClaimed: creator.isClaimed,
+          claimedBy: creatorHolder ? { id: creatorHolder._id, name: creatorHolder.name } : null,
+        }
+      : null,
     creditMatch: match ? { slug: match.slug, name: match.name, isClaimed: match.isClaimed } : null,
     source: listing.source,
     status: listing.status,
