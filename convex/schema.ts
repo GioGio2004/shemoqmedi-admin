@@ -1057,6 +1057,7 @@ export default defineSchema({
     tokenHash: v.string(), // the submitting browser's secret
     emailTokenHash: v.optional(v.string()), // the secret in the confirmation email's link
     extraTokenHashes: v.optional(v.array(v.string())), // other browsers that resubmitted it with the same email (view + link only)
+    termsAcceptedAt: v.optional(v.number()), // ticked "I agree to the Terms" and the submission guidelines
     status: v.union(v.literal("received"), v.literal("preparing"), v.literal("listed"), v.literal("rejected")),
     userId: v.optional(v.id("users")),
     linkedAt: v.optional(v.number()),

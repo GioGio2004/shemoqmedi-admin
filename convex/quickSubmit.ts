@@ -137,6 +137,9 @@ export const submit = mutation({
     token: v.string(), // 64 hex chars made by the browser, kept for linking
     website: v.optional(v.string()), // honeypot: hidden from people
     attribution: v.optional(vAttribution),
+    // Ticked "I agree to the Terms" and the submission guidelines (optional only
+    // so a site build older than the popup keeps working during a deploy).
+    acceptedTerms: v.optional(v.boolean()),
   },
   returns: v.object({ id: v.id("quickSubmissions"), linked: v.boolean() }),
   handler: async (ctx, args) => {
@@ -188,7 +191,11 @@ export const submit = mutation({
       if (open.email !== email) throw new ConvexError(ALREADY_SUBMITTED);
       // The same email from another browser: it can view and link it too (never correct the email).
       const extra = [...new Set([...(open.extraTokenHashes ?? []), tokenHash])].slice(-5);
-      await ctx.db.patch(open._id, { extraTokenHashes: extra, updatedAt: now });
+      await ctx.db.patch(open._id, {
+        extraTokenHashes: extra,
+        ...(args.acceptedTerms && !open.termsAcceptedAt ? { termsAcceptedAt: now } : {}),
+        updatedAt: now,
+      });
       const linkNow = !!user && !open.userId && accountEmail(user) === email;
       if (linkNow) await ctx.db.patch(open._id, { userId: user!._id, linkedAt: now });
       return { id: open._id, linked: (!!open.userId && open.userId === user?._id) || linkNow };
@@ -206,6 +213,7 @@ export const submit = mutation({
       status: "received",
       ...(linked ? { userId: user!._id, linkedAt: now } : {}),
       ...attribution,
+      ...(args.acceptedTerms ? { termsAcceptedAt: now } : {}),
       createdAt: now,
       updatedAt: now,
     });
@@ -397,7 +405,8 @@ export const confirm = internalAction({
     const text = [
       "Hi,",
       `Thanks for submitting ${r.name} (${r.url.replace(/^https?:\/\//, "").replace(/\/$/, "")}). Your project is in.`,
-      "Our editorial team reviews every site by hand and prepares its listing if it's accepted. If it goes live, we'll email you when its week of jury voting starts, and again with the jury's scores and reviews.",
+      "Our editorial team reviews every site by hand and prepares its listing if it's accepted. Shemoqmedi is a creative space: we list original, creative work, and awards and recognition here are earned, never bought.",
+      "If it goes live, we'll email you when its week of jury voting starts, and again with the jury's scores and reviews.",
       r.linked
         ? "You can follow it in your account."
         : "Want to follow its progress and see your jury scores? Create a free account or sign in. It takes about 30 seconds, and it's optional: your submission stays with us either way.",
@@ -440,6 +449,7 @@ const adminRow = v.object({
   device: v.union(v.string(), v.null()),
   referrer: v.union(v.string(), v.null()),
   utmCampaign: v.union(v.string(), v.null()),
+  agreedToTerms: v.boolean(),
   createdAt: v.number(),
 });
 
@@ -470,6 +480,7 @@ export const adminList = query({
           device: r.device ?? null,
           referrer: r.referrer ?? null,
           utmCampaign: r.utmCampaign ?? null,
+          agreedToTerms: !!r.termsAcceptedAt,
           createdAt: r.createdAt,
         };
       }),

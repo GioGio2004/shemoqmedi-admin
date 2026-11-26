@@ -193,6 +193,7 @@ export function QuickSubmissions({ status }: { status: Status }) {
                       Guest · email not verified
                     </span>
                   )}
+                  <span className="opacity-60">{r.agreedToTerms ? "Agreed to the terms" : "Sent before the terms checkbox"}</span>
                   {r.utmCampaign && <span className="opacity-60">campaign {r.utmCampaign}</span>}
                   {r.referrer && <span className="opacity-60">from {r.referrer}</span>}
                 </p>

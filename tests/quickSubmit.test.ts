@@ -53,6 +53,15 @@ describe("submit", () => {
     expect(await saved(t)).toBe(1);
   });
 
+  it("records when the Terms were accepted", async () => {
+    const { t } = await setup();
+    await t.mutation(api.quickSubmit.submit, { ...site, token: A, acceptedTerms: true });
+    await t.mutation(api.quickSubmit.submit, { ...site, url: "other.example.com", token: B });
+    const all = await rows(t);
+    expect(all.find((r) => r.domain.startsWith("studionord"))?.termsAcceptedAt).toBeTypeOf("number");
+    expect(all.find((r) => r.domain.startsWith("other"))?.termsAcceptedAt).toBeUndefined();
+  });
+
   it("records attribution without personal data", async () => {
     const { t } = await setup();
     await t.mutation(api.quickSubmit.submit, {
