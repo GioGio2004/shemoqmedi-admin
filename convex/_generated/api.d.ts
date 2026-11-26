@@ -46,6 +46,7 @@ import type * as lib_media from "../lib/media.js";
 import type * as lib_mediaEntry from "../lib/mediaEntry.js";
 import type * as lib_publicRules from "../lib/publicRules.js";
 import type * as lib_push from "../lib/push.js";
+import type * as lib_quickSubmissions from "../lib/quickSubmissions.js";
 import type * as lib_r2 from "../lib/r2.js";
 import type * as lib_rateLimit from "../lib/rateLimit.js";
 import type * as lib_reel from "../lib/reel.js";
@@ -126,6 +127,7 @@ declare const fullApi: ApiFromModules<{
   "lib/mediaEntry": typeof lib_mediaEntry;
   "lib/publicRules": typeof lib_publicRules;
   "lib/push": typeof lib_push;
+  "lib/quickSubmissions": typeof lib_quickSubmissions;
   "lib/r2": typeof lib_r2;
   "lib/rateLimit": typeof lib_rateLimit;
   "lib/reel": typeof lib_reel;

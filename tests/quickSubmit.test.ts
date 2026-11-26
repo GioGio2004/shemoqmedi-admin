@@ -197,3 +197,92 @@ describe("admin", () => {
     expect(l?.ownerId).toBeUndefined();
   });
 });
+
+// The site's full form (/submit/full, listings.submit) and the 30-second
+// submissions: one entry per website, whichever form it came through.
+describe("full form", () => {
+  const full = (coverId: Id<"_storage">, url = "https://www.studionord.example.com/") => ({
+    title: "Studio Nord",
+    tagline: "Architecture studio from Tbilisi.",
+    url,
+    categories: ["architecture"],
+    technologies: ["React"],
+    creatorTier: "solo" as const,
+    region: "georgia" as const,
+    creditName: "Studio Nord",
+    submissionTier: "standard" as const,
+    coverId,
+  });
+  const cover = (t: Awaited<ReturnType<typeof setup>>["t"]) =>
+    t.run((ctx) => ctx.storage.store(new Blob(["img"], { type: "image/png" })));
+  const listings = (t: Awaited<ReturnType<typeof setup>>["t"]) => t.run((ctx) => ctx.db.query("listings").collect());
+
+  it("completes the account's own open submission instead of adding a second entry", async () => {
+    const { t, admin, nino } = await setup();
+    const { id } = await nino.mutation(api.quickSubmit.submit, { ...site, token: A });
+    expect(await nino.query(api.listings.precheckSubmission, { url: site.url })).toEqual({ ok: true });
+    await nino.mutation(api.listings.submit, full(await cover(t)));
+
+    const [listing] = await listings(t);
+    expect(await listings(t)).toHaveLength(1);
+    expect(listing).toMatchObject({ status: "pending", source: "submission" });
+    expect(await rows(t)).toMatchObject([{ status: "listed", listingId: listing._id }]);
+    expect(await admin.query(api.quickSubmit.adminOpenCount, {})).toBe(0);
+    expect(await nino.query(api.quickSubmit.mine, {})).toMatchObject([{ id, status: "listed", listing: { status: "pending" } }]);
+  });
+
+  it("links and completes a guest submission sent with the account's email", async () => {
+    const { t, nino } = await setup();
+    await t.mutation(api.quickSubmit.submit, { ...site, token: A });
+    expect((await rows(t))[0].userId).toBeUndefined();
+    await nino.mutation(api.listings.submit, full(await cover(t)));
+    const [row] = await rows(t);
+    expect(row.status).toBe("listed");
+    expect(row.userId).toBeDefined();
+    expect(row.listingId).toBeDefined();
+    expect(await nino.query(api.quickSubmit.mine, {})).toHaveLength(1);
+  });
+
+  it("refuses a site someone else already sent, before any upload", async () => {
+    const { t, other } = await setup();
+    await t.mutation(api.quickSubmit.submit, { ...site, token: A });
+    expect(await other.query(api.listings.precheckSubmission, { url: site.url })).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/already been submitted/),
+    });
+    await expect(other.mutation(api.listings.submit, full(await cover(t)))).rejects.toThrow(/already been submitted/);
+    expect(await listings(t)).toHaveLength(0);
+    expect(await rows(t)).toMatchObject([{ status: "received" }]);
+  });
+
+  it("leaves another website's submission alone", async () => {
+    const { t, nino } = await setup();
+    await nino.mutation(api.quickSubmit.submit, { ...site, token: A });
+    await nino.mutation(api.listings.submit, full(await cover(t), "https://another-site.example.com"));
+    expect(await rows(t)).toMatchObject([{ status: "received" }]);
+    expect((await rows(t))[0].listingId).toBeUndefined();
+  });
+
+  it("withdrawing the listing takes the creator's submission with it", async () => {
+    const { t, nino } = await setup();
+    await nino.mutation(api.quickSubmit.submit, { ...site, token: A });
+    await nino.mutation(api.listings.submit, full(await cover(t)));
+    const [mine] = await nino.query(api.listings.myListings, {});
+    expect(await nino.mutation(api.listings.withdraw, { id: mine.id })).toEqual({ result: "deleted" });
+    expect(await rows(t)).toHaveLength(0);
+    expect(await nino.query(api.quickSubmit.mine, {})).toEqual([]);
+  });
+
+  it("an editor deleting the listing closes the submission, which can be reopened", async () => {
+    const { t, admin, nino } = await setup();
+    const { id } = await nino.mutation(api.quickSubmit.submit, { ...site, token: A });
+    await nino.mutation(api.listings.submit, full(await cover(t)));
+    const [listing] = await listings(t);
+    await admin.mutation(api.listings.remove, { id: listing._id });
+    const [row] = await rows(t);
+    expect(row.status).toBe("rejected");
+    expect(row.listingId).toBeUndefined();
+    await admin.mutation(api.quickSubmit.setStatus, { id: id as Id<"quickSubmissions">, status: "received" });
+    expect(await admin.query(api.quickSubmit.adminOpenCount, {})).toBe(1);
+  });
+});

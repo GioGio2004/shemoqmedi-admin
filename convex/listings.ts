@@ -12,6 +12,7 @@ import { normalizePillars, readPillars } from "./lib/scoring";
 import { batchVotingEnds, weekOf } from "./lib/time";
 import { getConfig } from "./lib/config";
 import { checkDomain, domainKey } from "./lib/domains";
+import { ALREADY_SUBMITTED, completeSubmission, openSubmissionFor } from "./lib/quickSubmissions";
 import { closeVoting } from "./lib/awards";
 import {
   EMPTY_SCORES,
@@ -185,7 +186,10 @@ export const precheckSubmission = query({
     if (args.redesignOf && !previous) return { ok: false as const, reason: "The earlier listing for this redesign was not found." };
     const config = await getConfig(ctx);
     const domain = await checkDomain(ctx, url, { redesignOf: previous?._id, resubmitMonths: config.resubmitMonths, now: Date.now() });
-    return domain.ok ? { ok: true as const } : { ok: false as const, reason: domain.reason };
+    if (!domain.ok) return { ok: false as const, reason: domain.reason };
+    // Someone else's 30-second submission of this site is still with the editors.
+    if ((await openSubmissionFor(ctx, url, user)).taken) return { ok: false as const, reason: ALREADY_SUBMITTED };
+    return { ok: true as const };
   },
 });
 
@@ -195,6 +199,10 @@ export const precheckSubmission = query({
  * creator profile until an admin approves it and chooses to hand ownership to
  * the submitter (approve with grantOwnership). The submitter can still see and
  * withdraw it (myListings / withdraw read submittedBy).
+ *
+ * This is the site's full form (/submit/full). Someone who already sent the
+ * same website through the 30-second form (/submit, quickSubmit.ts) completes
+ * that submission here: it is marked listed and points at this listing.
  */
 export const submit = mutation({
   args: {
@@ -269,6 +277,12 @@ export const submit = mutation({
     });
     if (!domain.ok) fail(domain.reason);
 
+    // The 30-second form (/submit) may already hold this website. Their own
+    // submission: this form completes it, so the site stays one entry.
+    // Someone else's: it is already with the editors.
+    const quick = await openSubmissionFor(ctx, url, user);
+    if (quick.taken) fail(ALREADY_SUBMITTED);
+
     // Unclaimed (new) or the submitter's own profile; unlinked when the name
     // belongs to someone else's claimed profile (lib/listingHelpers.ts).
     const creatorId = await creatorForSubmission(
@@ -308,8 +322,9 @@ export const submit = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    if (quick.own) await completeSubmission(ctx, quick.own, id, user, now);
     await pushAdmins(ctx, {
-      title: "New submission",
+      title: quick.own ? "Submission completed by its creator" : "New submission",
       body: `${title} by ${creditName}`,
       url: adminUrl(`/review/${id}`),
       tag: `submission-${id}`,

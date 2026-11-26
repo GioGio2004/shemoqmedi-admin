@@ -14,6 +14,12 @@
 //
 // Linking proves the contact email, nothing more: ownership of the site still
 // goes through claims and approval, and editors decide what gets listed.
+//
+// A submission becomes a listing two ways: an editor makes it (Add site,
+// admin.createListing with quickId), or its signed-in creator fills in the
+// site's full form (/submit/full, listings.submit), which completes their open
+// submission of the same website instead of adding a second entry
+// (lib/quickSubmissions.ts).
 
 import { ConvexError, v } from "convex/values";
 import { internalAction, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
@@ -23,6 +29,7 @@ import { requireAdmin, requireUser } from "./authHelpers";
 import { getUserByExternalId } from "./users";
 import { cleanText, normalizeUrl } from "./lib/listingHelpers";
 import { checkDomain, domainKey } from "./lib/domains";
+import { ALREADY_SUBMITTED, isOpenSubmission } from "./lib/quickSubmissions";
 import { isEmail } from "./lib/contacts";
 import { getConfig } from "./lib/config";
 import { limitKey } from "./lib/rateLimit";
@@ -176,11 +183,9 @@ export const submit = mutation({
         .query("quickSubmissions")
         .withIndex("by_domain", (q) => q.eq("domain", domain))
         .collect()
-    ).find((r) => r.status === "received" || r.status === "preparing");
+    ).find(isOpenSubmission);
     if (open) {
-      if (open.email !== email) {
-        throw new ConvexError("This site has already been submitted and is with our editors. We'll be in touch with whoever sent it.");
-      }
+      if (open.email !== email) throw new ConvexError(ALREADY_SUBMITTED);
       // The same email from another browser: it can view and link it too (never correct the email).
       const extra = [...new Set([...(open.extraTokenHashes ?? []), tokenHash])].slice(-5);
       await ctx.db.patch(open._id, { extraTokenHashes: extra, updatedAt: now });

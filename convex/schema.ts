@@ -1041,8 +1041,9 @@ export default defineSchema({
   // Website submissions from the site's 30-second form (convex/quickSubmit.ts):
   // name, link and contact email, saved permanently whether or not the person
   // ever signs in. Kept apart on purpose:
-  //   status        editorial progress, set by the team: received → preparing →
-  //                 listed (an editor made it a listing, listingId) or rejected
+  //   status        editorial progress: received → preparing → listed (an editor
+  //                 made it a listing, or its creator did with the full form:
+  //                 listingId) or rejected
   //   userId        the account it's linked to: set only when that account's
   //                 verified email is the submitted one (contact verified).
   //                 Not ownership of the site: claims and approval decide that.

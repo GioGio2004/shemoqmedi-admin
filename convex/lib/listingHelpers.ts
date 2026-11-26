@@ -6,6 +6,7 @@ import { deleteMediaMany, isAdminUser, mediaInfo, mediaStillUsed, mediaUrl, type
 import { CATEGORIES, LIMITS, isCategory, isTechnology, type CategorySlug, type CreatorTier, type RegionSlug } from "./taxonomy";
 import { ZERO_PILLARS, readPillars, round2, summarize, type Pillars, type StoredPillars } from "./scoring";
 import { latinizeGeorgian } from "./georgian";
+import { releaseSubmissions } from "./quickSubmissions";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Validation
@@ -410,6 +411,9 @@ export async function deleteListing(
 
   const emails = await ctx.db.query("emailLog").withIndex("by_listing_kind", (q) => q.eq("listingId", id)).collect();
   for (const row of emails) await ctx.db.patch(row._id, { listingId: undefined });
+
+  // The site submission it was made from (lib/quickSubmissions.ts).
+  await releaseSubmissions(ctx, id, by, Date.now());
 
   const audit = await ctx.db.query("awardAudit").withIndex("by_listing", (q) => q.eq("listingId", id)).collect();
   for (const row of audit) await ctx.db.patch(row._id, { listingId: undefined, awardId: keepAward(row.awardId) });

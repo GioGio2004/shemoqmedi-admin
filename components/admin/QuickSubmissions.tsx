@@ -14,7 +14,11 @@ type Status = "received" | "preparing" | "listed" | "rejected";
 const TABS: { status: Status; label: string; empty: string }[] = [
   { status: "received", label: "Received", empty: "No new submissions. Everything sent from the site's form lands here first." },
   { status: "preparing", label: "Preparing", empty: "Nothing in preparation. Move a submission here while you make its screenshots and copy." },
-  { status: "listed", label: "Listed", empty: "Submissions you've turned into listings show here." },
+  {
+    status: "listed",
+    label: "Listed",
+    empty: "Submissions that became listings show here: the ones you made, and the ones creators completed with the full form.",
+  },
   { status: "rejected", label: "Rejected", empty: "Nothing rejected." },
 ];
 
@@ -138,6 +142,10 @@ export function QuickSubmissions({ status }: { status: Status }) {
             Name, link and email from the site&apos;s 30-second form, saved the moment they press submit. Guests never
             signed in, so check the site is real and the email plausibly theirs first. Then make the listing with your own
             screenshots, video and copy, and approve it as usual.
+          </p>
+          <p>
+            A signed-in creator can also fill in the full form themselves. Their submission then moves to Listed here and
+            the listing they wrote waits under All listings, as one entry.
           </p>
         </div>
         <nav className="admin-tabs" aria-label="Filter by status">
