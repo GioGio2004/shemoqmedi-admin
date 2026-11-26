@@ -271,7 +271,9 @@ export function ListingCreateForm() {
           <h1>New listing.</h1>
           <p>
             {fromQuick
-              ? `From a quick submission by ${fromQuick.owner ? `${fromQuick.owner.name} (${fromQuick.owner.email})` : "a verified account"}: they become its submitter and get the emails. Add the screenshots and details, then create it.`
+              ? fromQuick.owner
+                ? `From a submission by ${fromQuick.owner.name} (${fromQuick.owner.email}, signed in): they become its submitter and get the emails. Add the screenshots and details, then create it.`
+                : `From a guest submission (${fromQuick.email}, no account yet): the voting and results emails go to that address. Check the site is real and theirs, add the screenshots and details, then create it.`
               : fromBrief
               ? "Filled in from the agent's approved draft. Add the screenshots and video, check the details, then create it."
               : "List a site by hand with your own screenshots, in any state of the lifecycle."}

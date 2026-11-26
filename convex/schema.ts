@@ -109,6 +109,7 @@ export const emailKind = v.union(
   v.literal("results"), // contestant: jury scores and reviews at close
   v.literal("juryReminder"), // juror: sites closing within 24 h they haven't scored
   v.literal("lowVotes"), // admins: sites closing short of jury votes
+  v.literal("submission"), // submitter: "we got your project" (quickSubmit.ts)
 );
 
 /**
@@ -1037,34 +1038,50 @@ export default defineSchema({
     desktop: v.optional(auditReport),
   }).index("by_listing", ["listingId"]),
 
-  // Quick submissions (convex/quickSubmit.ts): name, link and email, saved
-  // before email verification ("unverified"), then tied to the account that
-  // verified ("confirmed"). The editorial team turns a confirmed one into a
-  // listing from the Add site form ("listed"), or dismisses it. Unverified
-  // ones expire and are deleted after QUICK_TTL.
+  // Website submissions from the site's 30-second form (convex/quickSubmit.ts):
+  // name, link and contact email, saved permanently whether or not the person
+  // ever signs in. Kept apart on purpose:
+  //   status        editorial progress, set by the team: received → preparing →
+  //                 listed (an editor made it a listing, listingId) or rejected
+  //   userId        the account it's linked to: set only when that account's
+  //                 verified email is the submitted one (contact verified).
+  //                 Not ownership of the site: claims and approval decide that.
+  //   tokenHash     sha256 of a secret the submitting browser keeps: needed to
+  //                 link it, and makes retries of the same submit idempotent.
   quickSubmissions: defineTable({
     name: v.string(),
     url: v.string(),
     domain: v.string(), // lib/domains.ts domainKey
-    email: v.string(), // lowercased
-    tokenHash: v.string(), // sha256 of the browser's secret: only that browser can finalize it
-    status: v.union(v.literal("unverified"), v.literal("confirmed"), v.literal("listed"), v.literal("dismissed")),
+    email: v.string(), // contact email, lowercased; never returned by a public query
+    tokenHash: v.string(), // the submitting browser's secret
+    emailTokenHash: v.optional(v.string()), // the secret in the confirmation email's link
+    extraTokenHashes: v.optional(v.array(v.string())), // other browsers that resubmitted it with the same email (view + link only)
+    status: v.union(v.literal("received"), v.literal("preparing"), v.literal("listed"), v.literal("rejected")),
     userId: v.optional(v.id("users")),
+    linkedAt: v.optional(v.number()),
     listingId: v.optional(v.id("listings")),
-    source: v.optional(v.string()), // utm_source / in-app browser, for the funnel
+    // Acquisition: no personal data.
+    utmSource: v.optional(v.string()),
+    utmMedium: v.optional(v.string()),
+    utmCampaign: v.optional(v.string()),
+    referrer: v.optional(v.string()), // host only
+    device: v.optional(v.union(v.literal("mobile"), v.literal("tablet"), v.literal("desktop"))),
+    inApp: v.optional(v.string()), // instagram, facebook… when opened in an app's browser
     createdAt: v.number(),
-    confirmedAt: v.optional(v.number()),
-    expiresAt: v.number(), // unverified rows are deleted after this
+    updatedAt: v.number(),
   })
     .index("by_status", ["status", "createdAt"])
     .index("by_domain", ["domain"])
     .index("by_email", ["email"])
-    .index("by_expires", ["status", "expiresAt"]),
+    .index("by_tokenHash", ["tokenHash"])
+    .index("by_user", ["userId"])
+    .index("by_listing", ["listingId"]),
 
-  // Daily counts of each step of the quick submission funnel (quickSubmit.ts).
+  // Daily counts of the submission funnel (quickSubmit.ts), by acquisition source. No personal data.
   funnelCounts: defineTable({
     day: v.string(), // Tbilisi day, "2026-11-26"
     event: v.string(),
+    source: v.string(), // utm_source, in-app browser or "direct"
     count: v.number(),
-  }).index("by_day_event", ["day", "event"]),
+  }).index("by_day_event", ["day", "event", "source"]),
 });

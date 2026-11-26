@@ -12,8 +12,6 @@ crons.interval("awards tick", { minutes: 15 }, internal.awards.tick, {});
 crons.interval("jury digest", { minutes: 30 }, internal.digest.run, {});
 // Jurors: sites closing within 24 h they haven't scored. Admins: sites closing short of jury votes.
 crons.interval("voting reminders", { hours: 1 }, internal.votingEmails.remind, {});
-// Quick submissions never verified: deleted after two days (the funnel counts stay).
-crons.daily("quick submissions: expire", { hourUTC: 3, minuteUTC: 15 }, internal.quickSubmit.expire, {});
 
 // The social desk (social.ts). Times are UTC; Tbilisi is UTC+4.
 // Sites that just went public get a "new listing" post (idempotent).

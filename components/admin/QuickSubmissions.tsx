@@ -9,31 +9,40 @@ import { formatDate } from "@/lib/storefront";
 import { showError } from "./Alerts";
 import { shortUrl } from "./format";
 
-type Status = "confirmed" | "unverified" | "listed" | "dismissed";
+type Status = "received" | "preparing" | "listed" | "rejected";
 
 const TABS: { status: Status; label: string; empty: string }[] = [
-  { status: "confirmed", label: "Confirmed", empty: "No confirmed submissions waiting. Verified ones land here." },
-  {
-    status: "unverified",
-    label: "Unverified",
-    empty: "Nobody is stuck at the email code. People who started but didn't verify show here for two days.",
-  },
+  { status: "received", label: "Received", empty: "No new submissions. Everything sent from the site's form lands here first." },
+  { status: "preparing", label: "Preparing", empty: "Nothing in preparation. Move a submission here while you make its screenshots and copy." },
   { status: "listed", label: "Listed", empty: "Submissions you've turned into listings show here." },
-  { status: "dismissed", label: "Dismissed", empty: "Nothing dismissed." },
+  { status: "rejected", label: "Rejected", empty: "Nothing rejected." },
 ];
 
-const FUNNEL: { event: string; label: string }[] = [
-  { event: "form_start", label: "Started the form" },
-  { event: "presubmit", label: "Pre-submissions" },
-  { event: "verify_start", label: "Code sent / Google" },
-  { event: "verify_success", label: "Verified" },
-  { event: "finalized", label: "Submitted" },
+const FUNNEL: { event: string | string[]; label: string }[] = [
+  { event: "submission_page_viewed", label: "Opened /submit" },
+  { event: "submission_form_started", label: "Started the form" },
+  { event: "submission_form_completed", label: "Pressed submit" },
+  { event: ["guest_submission_saved", "account_submission_saved"], label: "Saved (the KPI)" },
+  { event: "post_submission_auth_viewed", label: "Saw the sign-in offer" },
+  { event: "post_submission_auth_started", label: "Started sign-in" },
+  { event: "post_submission_auth_completed", label: "Signed in" },
+  { event: "submission_linked_to_account", label: "Linked to an account" },
+];
+
+const ASIDES: { event: string; label: string }[] = [
+  { event: "guest_submission_saved", label: "Saved as guests" },
+  { event: "account_submission_saved", label: "Saved while signed in" },
+  { event: "post_submission_auth_skipped", label: "Chose “Maybe later”" },
+  { event: "submission_validation_failed", label: "Hit a form error" },
+  { event: "post_submission_auth_failed", label: "Sign-in errors" },
+  { event: "submission_dashboard_viewed", label: "Viewed their submissions" },
 ];
 
 function Funnel() {
   const [days, setDays] = useState(7);
   const data = useQuery(api.quickSubmit.funnel, { days });
-  const top = data?.totals.form_start || data?.totals.presubmit || 0;
+  const total = (e: string | string[]) => [e].flat().reduce((n, k) => n + (data?.totals[k] ?? 0), 0);
+  const top = total("submission_page_viewed") || total("submission_form_started");
   return (
     <section className="admin-panel grid gap-4" aria-labelledby="funnel-heading">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -56,48 +65,79 @@ function Funnel() {
       {!data ? (
         <p className="admin-eyebrow">Loading…</p>
       ) : (
-        <dl className="grid gap-2">
-          {FUNNEL.map((f) => {
-            const n = data.totals[f.event] ?? 0;
-            const pct = top ? Math.round((n / top) * 100) : 0;
-            return (
-              <div key={f.event} className="grid grid-cols-[11rem_minmax(0,1fr)_4.5rem] items-center gap-3">
-                <dt className="text-sm">{f.label}</dt>
-                <dd className="h-2 overflow-hidden rounded-full bg-black/10">
-                  <span className="block h-full rounded-full bg-black" style={{ width: `${pct}%` }} />
-                </dd>
-                <dd className="admin-mono text-right text-sm tabular-nums">
-                  {n}
-                  {f.event !== "form_start" && top ? <span className="opacity-50"> · {pct}%</span> : null}
-                </dd>
+        <>
+          <dl className="grid gap-2">
+            {FUNNEL.map((f, i) => {
+              const n = total(f.event);
+              const pct = top ? Math.round((n / top) * 100) : 0;
+              return (
+                <div key={f.label} className="grid grid-cols-[11rem_minmax(0,1fr)_4.5rem] items-center gap-3">
+                  <dt className="text-sm">{f.label}</dt>
+                  <dd className="h-2 overflow-hidden rounded-full bg-black/10">
+                    <span className="block h-full rounded-full bg-black" style={{ width: `${pct}%` }} />
+                  </dd>
+                  <dd className="admin-mono text-right text-sm tabular-nums">
+                    {n}
+                    {i > 0 && top ? <span className="opacity-50"> · {pct}%</span> : null}
+                  </dd>
+                </div>
+              );
+            })}
+          </dl>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 border-t border-black/10 pt-3 text-sm">
+            {ASIDES.map((a) => (
+              <div key={a.event} className="flex justify-between gap-2">
+                <dt className="opacity-70">{a.label}</dt>
+                <dd className="admin-mono tabular-nums">{data.totals[a.event] ?? 0}</dd>
               </div>
-            );
-          })}
-        </dl>
+            ))}
+          </dl>
+          {data.savedBySource.length > 0 && (
+            <div className="grid gap-1 border-t border-black/10 pt-3">
+              <p className="admin-eyebrow">Saved submissions by source</p>
+              {data.savedBySource.map((s) => (
+                <p key={s.source} className="flex justify-between text-sm">
+                  <span>{s.source}</span>
+                  <span className="admin-mono tabular-nums">{s.count}</span>
+                </p>
+              ))}
+            </div>
+          )}
+        </>
       )}
       <p className="text-xs opacity-60">
-        Submitted (verified and confirmed) is the number that counts. The gap between pre-submissions and verified shows
-        how many people drop off at the email code.
+        Saved is the number that counts: the submission is in, signed in or not. Signing in afterwards is optional and only
+        lets them follow it. Counts only, never emails. Source is the utm_source tag, else the in-app browser, else direct.
       </p>
     </section>
   );
 }
 
-/** Quick submissions from the site's 30-second form, by status, with the funnel. */
+/** Website submissions from the site's 30-second form, by editorial status, with the funnel. */
 export function QuickSubmissions({ status }: { status: Status }) {
   const rows = useQuery(api.quickSubmit.adminList, { status });
-  const dismiss = useMutation(api.quickSubmit.dismiss);
+  const setStatus = useMutation(api.quickSubmit.setStatus);
   const tab = TABS.find((t) => t.status === status)!;
+
+  const move = async (id: string, next: "received" | "preparing" | "rejected", question?: string) => {
+    if (question && !confirm(question)) return;
+    try {
+      await setStatus({ id: id as Id<"quickSubmissions">, status: next });
+    } catch (err) {
+      showError(err);
+    }
+  };
 
   return (
     <>
       <div className="admin-page-heading">
         <div>
           <p className="admin-eyebrow">Review</p>
-          <h1>Quick submissions.</h1>
+          <h1>Submissions.</h1>
           <p>
-            Name, link and email from the site&apos;s 30-second form. Confirmed ones verified their email: make each one a
-            listing with your own screenshots. Unverified ones never entered the code and are deleted after two days.
+            Name, link and email from the site&apos;s 30-second form, saved the moment they press submit. Guests never
+            signed in, so check the site is real and the email plausibly theirs first. Then make the listing with your own
+            screenshots, video and copy, and approve it as usual.
           </p>
         </div>
         <nav className="admin-tabs" aria-label="Filter by status">
@@ -125,38 +165,62 @@ export function QuickSubmissions({ status }: { status: Status }) {
                 <div className="flex flex-wrap items-baseline justify-between gap-3">
                   <h2 className="text-xl font-semibold tracking-[-0.02em]">{r.name}</h2>
                   <span className="admin-eyebrow">
-                    {formatDate(r.confirmedAt ?? r.createdAt)}
-                    {r.source ? ` · ${r.source}` : ""}
+                    {formatDate(r.createdAt)} · {r.source}
+                    {r.device ? ` · ${r.device}` : ""}
                   </span>
                 </div>
                 <p className="text-sm">
                   <a href={r.url} target="_blank" rel="noopener noreferrer" className="admin-text-link">
                     {shortUrl(r.url)}
                   </a>
-                  <span className="opacity-60">
-                    {" "}
-                    · {r.userName ? `${r.userName}, ` : ""}
-                    {r.email}
-                  </span>
+                  <span className="opacity-60"> · {r.email}</span>
                 </p>
-                {r.status === "confirmed" && (
+                <p className="flex flex-wrap items-center gap-2 text-xs">
+                  {r.linked ? (
+                    <span className="rounded-full border border-black px-2.5 py-1 font-semibold">
+                      Account{r.userName ? `: ${r.userName}` : ""} · email verified
+                    </span>
+                  ) : (
+                    <span className="rounded-full border border-dashed border-black/50 px-2.5 py-1 font-semibold">
+                      Guest · email not verified
+                    </span>
+                  )}
+                  {r.utmCampaign && <span className="opacity-60">campaign {r.utmCampaign}</span>}
+                  {r.referrer && <span className="opacity-60">from {r.referrer}</span>}
+                </p>
+                {!r.linked && (r.status === "received" || r.status === "preparing") && (
+                  <p className="text-xs opacity-70">
+                    Legitimacy check first: does the site exist, is it a real project, and does the email look like the
+                    team&apos;s (same domain, the site&apos;s contact page, a known studio)?
+                  </p>
+                )}
+                {(r.status === "received" || r.status === "preparing") && (
                   <div className="flex flex-wrap gap-3">
                     <Link href={`/listings/new?quick=${r.id}`} className="admin-button">
                       Make listing
                     </Link>
+                    {r.status === "received" ? (
+                      <button type="button" className="admin-button admin-button-secondary" onClick={() => move(r.id, "preparing")}>
+                        Start preparing
+                      </button>
+                    ) : (
+                      <button type="button" className="admin-button admin-button-secondary" onClick={() => move(r.id, "received")}>
+                        Back to received
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="admin-button admin-button-secondary"
-                      onClick={async () => {
-                        if (!confirm(`Dismiss “${r.name}”? It won't be listed.`)) return;
-                        try {
-                          await dismiss({ id: r.id as Id<"quickSubmissions"> });
-                        } catch (err) {
-                          showError(err);
-                        }
-                      }}
+                      onClick={() => move(r.id, "rejected", `Reject “${r.name}”? It won't be listed. No email is sent.`)}
                     >
-                      Dismiss
+                      Reject
+                    </button>
+                  </div>
+                )}
+                {r.status === "rejected" && (
+                  <div>
+                    <button type="button" className="admin-button admin-button-secondary" onClick={() => move(r.id, "received")}>
+                      Reopen
                     </button>
                   </div>
                 )}

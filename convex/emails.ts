@@ -26,7 +26,8 @@ export type EmailKind =
   | "voting"
   | "results"
   | "juryReminder"
-  | "lowVotes";
+  | "lowVotes"
+  | "submission";
 
 /** Resend's batch endpoint takes at most this many emails per request. */
 export const BATCH_SIZE = 100;

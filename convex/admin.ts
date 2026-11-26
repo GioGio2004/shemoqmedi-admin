@@ -111,8 +111,9 @@ export const createListing = mutation({
     jurorId: v.optional(v.id("jurors")),
     // Created from an approved agent-desk draft for a new site: the brief gets linked to it.
     briefId: v.optional(v.id("listingBriefs")),
-    // Created from a confirmed quick submission: its account becomes the
-    // submitter (emails, and ownership on approval), and it is marked listed.
+    // Made from a site submission (/submit): its linked account, if any, becomes
+    // the submitter (emails; ownership still goes through claims), and it is
+    // marked listed. Guests are emailed at the address they submitted.
     quickId: v.optional(v.id("quickSubmissions")),
   },
   returns: v.object({ id: v.id("listings"), slug: v.string() }),
@@ -167,7 +168,9 @@ export const createListing = mutation({
     }
 
     const quick = args.quickId ? await ctx.db.get(args.quickId) : null;
-    if (args.quickId && (!quick || quick.status !== "confirmed")) fail("That quick submission is no longer waiting.");
+    if (args.quickId && (!quick || (quick.status !== "received" && quick.status !== "preparing"))) {
+      fail("That submission is no longer open.");
+    }
     const slug = await uniqueSlug(ctx, "listings", listingSlugBase(title, url));
     const id = await ctx.db.insert("listings", {
       creatorId,
@@ -206,7 +209,7 @@ export const createListing = mutation({
       ownerId: args.ownerId,
       isStartup: args.isStartup || undefined,
       jurorId: args.jurorId,
-      // The account behind a quick submission is its submitter.
+      // The account linked to the submission is its submitter.
       submittedBy: quick?.userId,
       createdAt: now,
       updatedAt: now,
@@ -222,7 +225,7 @@ export const createListing = mutation({
       });
     }
     if (quick) {
-      await ctx.db.patch(quick._id, { status: "listed", listingId: id });
+      await ctx.db.patch(quick._id, { status: "listed", listingId: id, updatedAt: now });
       // Published straight away: tell the submitter it's live (approve() does this for pending ones).
       if (args.status === "in_voting") await ctx.scheduler.runAfter(0, internal.votingEmails.live, { listingId: id });
     }

@@ -56,7 +56,14 @@ async function contestant(ctx: QueryCtx, listing: Doc<"listings">) {
   const creator = listing.creatorId ? await ctx.db.get(listing.creatorId) : null;
   const userId = listing.ownerId ?? listing.submittedBy ?? creator?.claimedBy;
   const user = userId ? await ctx.db.get(userId) : null;
-  const email = user?.email ?? creator?.contactEmail;
+  // Made from a site submission nobody linked to an account: the address it was submitted with.
+  const submission = user
+    ? null
+    : await ctx.db
+        .query("quickSubmissions")
+        .withIndex("by_listing", (q) => q.eq("listingId", listing._id))
+        .first();
+  const email = user?.email ?? creator?.contactEmail ?? submission?.email;
   if (!email) return null;
   const name = user?.name ?? creator?.name ?? listing.creditName;
   return { email, first: name.split(" ")[0] || "there" };
