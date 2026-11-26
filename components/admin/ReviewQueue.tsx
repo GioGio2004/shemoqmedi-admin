@@ -69,6 +69,7 @@ export function AwardBadges({ awards }: { awards: AwardSlug[] }) {
 }
 
 export function ReviewQueue({ status }: { status: ReviewStatus }) {
+  const quickCount = useQuery(api.quickSubmit.adminList, { status: "confirmed" })?.length;
   const counts = useQuery(api.listings.reviewCounts, {});
   const rows = useQuery(api.listings.reviewQueue, { status });
 
@@ -94,6 +95,11 @@ export function ReviewQueue({ status }: { status: ReviewStatus }) {
               <span>{counts ? counts[tab.status] : "·"}</span>
             </Link>
           ))}
+          {/* Name, link and email from the site's quick form, before they become listings. */}
+          <Link href="/review/quick">
+            Quick submissions
+            <span>{quickCount ?? "·"}</span>
+          </Link>
         </nav>
       </div>
 

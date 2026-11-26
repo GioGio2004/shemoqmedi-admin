@@ -5,6 +5,7 @@
 import { v } from "convex/values";
 import { deleteMedia, mediaUrl, vMediaId } from "./lib/media";
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireAdmin } from "./authHelpers";
 import { award, creatorTier, listingStatus, pillars, region } from "./schema";
@@ -110,6 +111,9 @@ export const createListing = mutation({
     jurorId: v.optional(v.id("jurors")),
     // Created from an approved agent-desk draft for a new site: the brief gets linked to it.
     briefId: v.optional(v.id("listingBriefs")),
+    // Created from a confirmed quick submission: its account becomes the
+    // submitter (emails, and ownership on approval), and it is marked listed.
+    quickId: v.optional(v.id("quickSubmissions")),
   },
   returns: v.object({ id: v.id("listings"), slug: v.string() }),
   handler: async (ctx, args) => {
@@ -162,6 +166,8 @@ export const createListing = mutation({
       publishedAt = votingEndsAt - VOTING_DAYS * DAY_MS;
     }
 
+    const quick = args.quickId ? await ctx.db.get(args.quickId) : null;
+    if (args.quickId && (!quick || quick.status !== "confirmed")) fail("That quick submission is no longer waiting.");
     const slug = await uniqueSlug(ctx, "listings", listingSlugBase(title, url));
     const id = await ctx.db.insert("listings", {
       creatorId,
@@ -200,6 +206,8 @@ export const createListing = mutation({
       ownerId: args.ownerId,
       isStartup: args.isStartup || undefined,
       jurorId: args.jurorId,
+      // The account behind a quick submission is its submitter.
+      submittedBy: quick?.userId,
       createdAt: now,
       updatedAt: now,
     });
@@ -212,6 +220,11 @@ export const createListing = mutation({
         actorId: admin._id,
         details: { previousOwner: null, owner: args.ownerId, ...(creatorProfile && creatorId ? { creator: creatorId } : {}) },
       });
+    }
+    if (quick) {
+      await ctx.db.patch(quick._id, { status: "listed", listingId: id });
+      // Published straight away: tell the submitter it's live (approve() does this for pending ones).
+      if (args.status === "in_voting") await ctx.scheduler.runAfter(0, internal.votingEmails.live, { listingId: id });
     }
     if (args.briefId) {
       const brief = await ctx.db.get(args.briefId);

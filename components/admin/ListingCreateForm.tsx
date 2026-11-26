@@ -118,6 +118,16 @@ export function ListingCreateForm() {
     if (d.region) setRegion(d.region);
   }
 
+  // /listings/new?quick=<id> (from Review → Quick submissions): a confirmed
+  // 30-second submission fills the name and link; its account becomes the submitter.
+  const quickParam = searchParams.get("quick");
+  const fromQuick = useQuery(api.quickSubmit.forListing, quickParam ? { id: quickParam } : "skip");
+  if (fromQuick && prefilledFrom !== fromQuick.id) {
+    setPrefilledFrom(fromQuick.id);
+    setTitle(fromQuick.name);
+    setUrl(fromQuick.url);
+  }
+
   const [cover, setCover] = useState<MediaState>(NO_MEDIA);
   const [extras, setExtras] = useState<File[]>([]);
   const [extrasError, setExtrasError] = useState<string | null>(null);
@@ -243,6 +253,7 @@ export function ListingCreateForm() {
         isStartup,
         jurorId: jurorId ? (jurorId as Id<"jurors">) : undefined,
         briefId: fromBrief?.id,
+        quickId: fromQuick?.id,
       });
       router.push(`/review/${id}`);
     } catch (err) {
@@ -259,7 +270,9 @@ export function ListingCreateForm() {
           <p className="admin-eyebrow">Add a site</p>
           <h1>New listing.</h1>
           <p>
-            {fromBrief
+            {fromQuick
+              ? `From a quick submission by ${fromQuick.owner ? `${fromQuick.owner.name} (${fromQuick.owner.email})` : "a verified account"}: they become its submitter and get the emails. Add the screenshots and details, then create it.`
+              : fromBrief
               ? "Filled in from the agent's approved draft. Add the screenshots and video, check the details, then create it."
               : "List a site by hand with your own screenshots, in any state of the lifecycle."}
           </p>

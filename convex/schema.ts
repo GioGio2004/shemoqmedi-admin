@@ -1036,4 +1036,35 @@ export default defineSchema({
     mobile: v.optional(auditReport),
     desktop: v.optional(auditReport),
   }).index("by_listing", ["listingId"]),
+
+  // Quick submissions (convex/quickSubmit.ts): name, link and email, saved
+  // before email verification ("unverified"), then tied to the account that
+  // verified ("confirmed"). The editorial team turns a confirmed one into a
+  // listing from the Add site form ("listed"), or dismisses it. Unverified
+  // ones expire and are deleted after QUICK_TTL.
+  quickSubmissions: defineTable({
+    name: v.string(),
+    url: v.string(),
+    domain: v.string(), // lib/domains.ts domainKey
+    email: v.string(), // lowercased
+    tokenHash: v.string(), // sha256 of the browser's secret: only that browser can finalize it
+    status: v.union(v.literal("unverified"), v.literal("confirmed"), v.literal("listed"), v.literal("dismissed")),
+    userId: v.optional(v.id("users")),
+    listingId: v.optional(v.id("listings")),
+    source: v.optional(v.string()), // utm_source / in-app browser, for the funnel
+    createdAt: v.number(),
+    confirmedAt: v.optional(v.number()),
+    expiresAt: v.number(), // unverified rows are deleted after this
+  })
+    .index("by_status", ["status", "createdAt"])
+    .index("by_domain", ["domain"])
+    .index("by_email", ["email"])
+    .index("by_expires", ["status", "expiresAt"]),
+
+  // Daily counts of each step of the quick submission funnel (quickSubmit.ts).
+  funnelCounts: defineTable({
+    day: v.string(), // Tbilisi day, "2026-11-26"
+    event: v.string(),
+    count: v.number(),
+  }).index("by_day_event", ["day", "event"]),
 });

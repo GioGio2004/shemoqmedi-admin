@@ -39,3 +39,28 @@ export async function rateLimit(ctx: MutationCtx, name: RateLimitName, user: Doc
   if (row.count >= max) throw new ConvexError(message);
   await ctx.db.patch(row._id, { count: row.count + 1 });
 }
+
+/**
+ * A fixed-window limit on any key, for callers that have no account yet (the
+ * quick submission before email verification). Same rateLimits table.
+ */
+export async function limitKey(
+  ctx: MutationCtx,
+  key: string,
+  max: number,
+  windowMs: number,
+  message: string,
+  now = Date.now(),
+) {
+  const row = await ctx.db
+    .query("rateLimits")
+    .withIndex("by_key", (q) => q.eq("key", key))
+    .unique();
+  if (!row || now - row.windowStart >= windowMs) {
+    if (row) await ctx.db.patch(row._id, { windowStart: now, count: 1 });
+    else await ctx.db.insert("rateLimits", { key, windowStart: now, count: 1 });
+    return;
+  }
+  if (row.count >= max) throw new ConvexError(message);
+  await ctx.db.patch(row._id, { count: row.count + 1 });
+}

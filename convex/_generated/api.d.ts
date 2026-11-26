@@ -67,6 +67,7 @@ import type * as pendingActions from "../pendingActions.js";
 import type * as publish from "../publish.js";
 import type * as push from "../push.js";
 import type * as pushSend from "../pushSend.js";
+import type * as quickSubmit from "../quickSubmit.js";
 import type * as rateLimits from "../rateLimits.js";
 import type * as reels from "../reels.js";
 import type * as reminders from "../reminders.js";
@@ -146,6 +147,7 @@ declare const fullApi: ApiFromModules<{
   publish: typeof publish;
   push: typeof push;
   pushSend: typeof pushSend;
+  quickSubmit: typeof quickSubmit;
   rateLimits: typeof rateLimits;
   reels: typeof reels;
   reminders: typeof reminders;
