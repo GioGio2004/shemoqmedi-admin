@@ -33,7 +33,7 @@ A listing can be linked to a juror with `jurorId`. Claiming that juror's link th
 
 `listings.submit` runs when someone uses the `/submit` page. It needs a signed-in user (`requireUser`).
 
-- "Express Fast-Track" is refused for now. Only `standard` is accepted.
+- There is no paid tier: only `standard` is accepted, and `express` is refused. Listings are earned, not bought.
 - A user can have at most 5 listings waiting in `pending` at once (`LIMITS.pendingPerUser`).
 - The submitter becomes the owner (`ownerId`), and the listing starts as claimed.
 - If no creator profile exists for the "Made by" name, a new one is created and marked as claimed by the submitter.
@@ -61,7 +61,7 @@ From `convex/schema.ts` → `listings`. Grouped by purpose.
 | `ownerId` | The verified owner (a `users` id). Empty for admin imports until claimed |
 | `creatorId` | The creator profile credited for the site |
 | `source` | `submission`, `import` or `seed` |
-| `submissionTier` | `standard` or `express` (express is not open yet) |
+| `submissionTier` | Always `standard` (`express` is a retired paid idea; the backend refuses it) |
 | `isClaimed` | Whether someone owns it |
 | `claimToken` / `claimTokenUsed` | The secret claim link token while unclaimed, and the burned one after |
 | `jurorId` | Pre-created for this juror; claimed together with the juror profile |

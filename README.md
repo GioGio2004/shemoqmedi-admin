@@ -16,8 +16,8 @@ pending ──approve──▶ in_voting (7 days) ──close──▶ awarded |
 1. A signed-in user submits a site on the public site's `/submit` (title, URL, tagline,
    category, technologies, creator tier, region, credit, desktop screenshot + optional mobile
    screenshot and hover video). Files go to Convex storage. It lands as `pending`.
-   Express Fast-Track is shown on the site but disabled: the backend rejects
-   `submissionTier: "express"`.
+   There is no paid tier (listings are earned, not bought): the site offers only the free
+   review, and the backend rejects `submissionTier: "express"`.
 2. An admin reviews it under **Review** (`/review`) and either approves it (status
    `in_voting`, `publishedAt = now`, `votingEndsAt = now + 7 days`) or rejects it with a reason
    the owner sees on their account page.
