@@ -67,9 +67,17 @@ export function DocsHome({ guides = [] }: { guides?: { slug: string; title: stri
         ))}
         <div className="docs-section-cell">
           <p className="docs-section-num">{pad(SECTIONS.length + 1)}</p>
-          <h2>Team guides</h2>
-          <p className="docs-section-blurb">How-tos for daily work, written in the admin: what to send, where to click.</p>
+          <h2>Team</h2>
+          <p className="docs-section-blurb">Your tasks, and the how-tos for daily work: what to send, where to click.</p>
           <ul>
+            <li>
+              <Link href="/tasks">
+                <span>Tasks</span>
+                <span className="docs-arrow" aria-hidden="true">
+                  →
+                </span>
+              </Link>
+            </li>
             {guides.map((g) => (
               <li key={g.slug}>
                 <Link href={`/guides/${g.slug}`}>

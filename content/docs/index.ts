@@ -108,13 +108,14 @@ export function docsIndex() {
 }
 export type DocsIndex = ReturnType<typeof docsIndex>;
 
-/** The sidebar and search entry for the team guides (edited in the admin, read here): "All guides", then each ready guide. */
+/** The sidebar and search entries for the team (edited in the admin, used here): Tasks, "All guides", then each ready guide. */
 export function guidesIndexSection(guides: { slug: string; title: string; summary?: string; area: string; roles: string[] }[]) {
   return {
     id: "guides",
     number: pad(SECTIONS.length + 1),
-    title: "Team guides",
+    title: "Team",
     pages: [
+      { slug: "tasks", title: "Tasks", summary: "Who does what: the team's board, and your own tasks.", keywords: ["tasks", "board", "assigned", "todo", "my tasks", "jira"] },
       { slug: "guides", title: "All guides", summary: "How-tos for daily work: what to send, where to click.", keywords: ["guides", "how to", "templates", "messages"] },
       ...guides.map((g) => ({
         slug: `guides/${g.slug}`,

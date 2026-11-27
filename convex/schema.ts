@@ -320,6 +320,13 @@ export const guideArea = v.union(
   v.literal("jury"),
   v.literal("operations"),
 );
+/** Team tasks: where a task is on the board. */
+export const taskStatus = v.union(v.literal("todo"), v.literal("in_progress"), v.literal("review"), v.literal("done"));
+/** Team tasks: how urgent it is. */
+export const taskPriority = v.union(v.literal("low"), v.literal("normal"), v.literal("high"), v.literal("urgent"));
+/** Team members: what they do (a label for the board). */
+export const memberRole = v.union(v.literal("owner"), v.literal("developer"), v.literal("ops"));
+
 /** Team guides: who a guide is for. */
 export const guideRole = v.union(v.literal("everyone"), v.literal("owner"), v.literal("developer"), v.literal("ops"));
 
@@ -1129,4 +1136,44 @@ export default defineSchema({
     images: v.array(v.object({ mediaId: v.id("media"), caption: v.optional(v.string()) })),
     updatedAt: v.number(),
   }).index("by_guide_position", ["guideId", "position"]),
+
+  // Team tasks (convex/tasks.ts): a Jira-style board the owner runs in the
+  // admin (/tasks); the team sees theirs on the docs. Admin-only.
+  //
+  // People on the team, by name. `email` ties a member to their account, so
+  // the docs can show "My tasks" to the person signed in.
+  teamMembers: defineTable({
+    name: v.string(),
+    role: memberRole,
+    email: v.optional(v.string()), // lowercased
+    active: v.boolean(),
+    createdAt: v.number(),
+  }).index("by_email", ["email"]),
+
+  // One task: SHQ-<number>, assigned to team members, optionally following a guide.
+  tasks: defineTable({
+    number: v.number(),
+    title: v.string(),
+    description: v.string(), // the guide text format (lib/guideText.ts)
+    status: taskStatus,
+    priority: taskPriority,
+    assigneeIds: v.array(v.id("teamMembers")),
+    guideId: v.optional(v.id("guides")), // the how-to to follow
+    dueDate: v.optional(v.string()), // "2026-12-01", Tbilisi day
+    checklist: v.array(v.object({ id: v.string(), text: v.string(), done: v.boolean() })),
+    createdBy: v.optional(v.id("users")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_number", ["number"])
+    .index("by_status", ["status", "updatedAt"])
+    .index("by_guide", ["guideId"]),
+
+  taskComments: defineTable({
+    taskId: v.id("tasks"),
+    authorId: v.id("users"),
+    body: v.string(),
+    createdAt: v.number(),
+  }).index("by_task", ["taskId", "createdAt"]),
 });

@@ -79,6 +79,7 @@ import type * as rounds from "../rounds.js";
 import type * as seed from "../seed.js";
 import type * as seo from "../seo.js";
 import type * as social from "../social.js";
+import type * as tasks from "../tasks.js";
 import type * as users from "../users.js";
 import type * as voiceover from "../voiceover.js";
 import type * as votes from "../votes.js";
@@ -162,6 +163,7 @@ declare const fullApi: ApiFromModules<{
   seed: typeof seed;
   seo: typeof seo;
   social: typeof social;
+  tasks: typeof tasks;
   users: typeof users;
   voiceover: typeof voiceover;
   votes: typeof votes;

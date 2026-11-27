@@ -1275,3 +1275,51 @@ html[data-docs-locked] {
 .docs-guides-empty {
   margin-top: 40px;
 }
+
+/* ── Team tasks on the docs (components/tasks, styled in globals.css) ──────
+   The shared task components read the admin's colour names; here they get
+   the docs' inks, and the Tailwind black/white utilities swap like the
+   admin's dark theme. */
+.docs .tk-scope {
+  --background: var(--ink);
+  --foreground: var(--paper);
+  --muted-ink: var(--mute);
+  --line: var(--hair-strong);
+  --panel: rgb(255 255 255 / 0.02);
+  --surface-raised: rgb(255 255 255 / 0.06);
+  --orange: var(--accent);
+  --color-white: var(--ink);
+  --color-black: var(--paper);
+  --popover: #232323;
+  --popover-foreground: var(--paper);
+  color: var(--text);
+  font-size: 14px;
+}
+.docs .tk-scope .tk-head h1 {
+  color: var(--paper);
+}
+.docs-wide .tk-scope {
+  margin-top: clamp(28px, 4vw, 48px);
+  padding-bottom: 80px;
+}
+.docs-wide .tk-scope.grid.gap-8 {
+  margin-top: clamp(40px, 6vw, 88px);
+}
+.docs .tk-scope .admin-toggle[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.docs .tk-scope .admin-button {
+  border-color: var(--paper);
+  background: var(--paper);
+  color: var(--ink);
+}
+.docs .tk-scope .admin-input {
+  background: transparent;
+}
+.docs .tk-scope .tk-guide-link:hover,
+.docs .tk-scope .tk-card:hover {
+  border-color: var(--accent);
+  color: var(--paper);
+}

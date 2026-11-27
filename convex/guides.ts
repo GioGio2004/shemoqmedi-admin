@@ -260,6 +260,12 @@ export const remove = mutation({
     const sections = await sectionsOf(ctx, guideId);
     const media = sections.flatMap((s) => s.images.map((i) => i.mediaId));
     for (const s of sections) await ctx.db.delete(s._id);
+    // Tasks that followed this guide keep going, without the link.
+    for (const t of await ctx.db
+      .query("tasks")
+      .withIndex("by_guide", (q) => q.eq("guideId", guideId))
+      .take(1000))
+      await ctx.db.patch(t._id, { guideId: undefined });
     await ctx.db.delete(guideId);
     await deleteMediaMany(ctx, media, user);
     return null;

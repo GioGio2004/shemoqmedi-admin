@@ -466,6 +466,11 @@ export function GuideDetail({ slug, startEditing }: { slug: string; startEditing
               {guide.status === "draft" ? "Mark ready" : "Back to draft"}
             </button>
           )}
+          {!editing && (
+            <Link href={`/tasks?guide=${encodeURIComponent(guide.slug)}`} className="admin-button admin-button-secondary">
+              Make a task from it
+            </Link>
+          )}
           <button type="button" className={editing ? "admin-button" : "admin-button admin-button-secondary"} onClick={() => (setEditing(!editing), setMeta(false))}>
             {editing ? "Done editing" : "Edit guide"}
           </button>
