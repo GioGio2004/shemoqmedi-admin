@@ -1,10 +1,11 @@
 /// <reference types="vite/client" />
 // Team tasks (convex/tasks.ts): admin-only, numbered SHQ-1.., assigned to
 // team members, "my tasks" by account email, checklist, comments, done dates.
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "../convex/schema";
 import { api } from "../convex/_generated/api";
+import { mintServiceCredential } from "../convex/lib/tokens";
 
 const modules = import.meta.glob("../convex/**/*.{ts,js}");
 
@@ -121,5 +122,26 @@ describe("tasks", () => {
     await giorgi.mutation(api.tasks.removeComment, { commentId: c });
     await giorgi.mutation(api.tasks.remove, { taskId: id });
     expect(await giorgi.query(api.tasks.get, { number: n })).toBeNull();
+  });
+});
+
+describe("guides and tasks through the MCP connector's credential", () => {
+  beforeEach(() => vi.stubEnv("MCP_SERVICE_SECRET", "test-secret-test-secret-test-secret"));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("works with an admin's credential and refuses anyone else's or a forged one", async () => {
+    const { t } = await setup(); // no session identity: the token alone decides
+    const admin = (await mintServiceCredential("giorgi"))!;
+    const guest = (await mintServiceCredential("guest"))!;
+
+    const slug = await t.mutation(api.guides.create, { token: admin, title: "Call prep", area: "networking", roles: ["owner"] });
+    const guide = (await t.query(api.guides.get, { token: admin, slug }))!;
+    expect(guide).toMatchObject({ status: "draft", updatedByName: "Giorgi" });
+    const n = await t.mutation(api.tasks.create, { token: admin, title: "Prepare the call", guideId: guide.id });
+    expect((await t.query(api.tasks.board, { token: admin })).tasks.map((x) => x.number)).toEqual([n]);
+
+    await expect(t.query(api.guides.list, { token: guest })).rejects.toThrow(/Not signed in to Shemoqmedi as an admin/);
+    await expect(t.mutation(api.tasks.create, { token: "forged", title: "x" })).rejects.toThrow(/Not signed in/);
+    await expect(t.query(api.tasks.board, {})).rejects.toThrow(/Unauthenticated/);
   });
 });

@@ -1,7 +1,7 @@
 import { v, type Infer } from "convex/values";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { requireAdmin } from "./authHelpers";
+import { teamAdmin } from "./lib/teamAuth";
 import { memberRole, taskPriority, taskStatus } from "./schema";
 import { fail } from "./lib/listingHelpers";
 import { cleanBody } from "./guides";
@@ -109,10 +109,10 @@ const memberOut = v.object({
 
 /** Everyone on the team, active first, with how many open tasks each has. */
 export const members = query({
-  args: {},
+  args: { token: v.optional(v.string()) },
   returns: v.array(memberOut),
-  handler: async (ctx) => {
-    await requireAdmin(ctx);
+  handler: async (ctx, { token }) => {
+    await teamAdmin(ctx, token);
     const all = await allMembers(ctx);
     const open = await openTasks(ctx);
     return all
@@ -129,10 +129,10 @@ export const members = query({
 });
 
 export const addMember = mutation({
-  args: { name: v.string(), role: memberRole, email: v.optional(v.string()) },
+  args: { token: v.optional(v.string()), name: v.string(), role: memberRole, email: v.optional(v.string()) },
   returns: v.id("teamMembers"),
-  handler: async (ctx, args) => {
-    await requireAdmin(ctx);
+  handler: async (ctx, { token, ...args }) => {
+    await teamAdmin(ctx, token);
     const email = cleanEmail(args.email);
     if (email && (await ctx.db.query("teamMembers").withIndex("by_email", (q) => q.eq("email", email)).first())) {
       fail("Someone on the team already has that email.");
@@ -148,7 +148,7 @@ export const addMember = mutation({
 });
 
 export const updateMember = mutation({
-  args: {
+  args: { token: v.optional(v.string()),
     memberId: v.id("teamMembers"),
     name: v.optional(v.string()),
     role: v.optional(memberRole),
@@ -156,8 +156,8 @@ export const updateMember = mutation({
     active: v.optional(v.boolean()),
   },
   returns: v.null(),
-  handler: async (ctx, { memberId, ...args }) => {
-    await requireAdmin(ctx);
+  handler: async (ctx, { token, memberId, ...args }) => {
+    await teamAdmin(ctx, token);
     const member = await ctx.db.get(memberId);
     if (!member) fail("That person was removed from the team.");
     const patch: Partial<Doc<"teamMembers">> = {};
@@ -177,10 +177,10 @@ export const updateMember = mutation({
 
 /** Remove someone from the team; they are taken off every task they were on. */
 export const removeMember = mutation({
-  args: { memberId: v.id("teamMembers") },
+  args: { token: v.optional(v.string()), memberId: v.id("teamMembers") },
   returns: v.null(),
-  handler: async (ctx, { memberId }) => {
-    await requireAdmin(ctx);
+  handler: async (ctx, { token, memberId }) => {
+    await teamAdmin(ctx, token);
     for (const t of [...(await openTasks(ctx)), ...(await doneSince(ctx, 0, 2000))]) {
       if (t.assigneeIds.includes(memberId)) await ctx.db.patch(t._id, { assigneeIds: t.assigneeIds.filter((id) => id !== memberId) });
     }
@@ -239,10 +239,10 @@ async function memberNames(ctx: QueryCtx) {
  * keeps only the tasks of the team member whose email is the viewer's.
  */
 export const board = query({
-  args: { mine: v.optional(v.boolean()) },
+  args: { token: v.optional(v.string()), mine: v.optional(v.boolean()) },
   returns: v.object({ tasks: v.array(taskCard), me: v.union(v.null(), v.object({ id: v.id("teamMembers"), name: v.string() })) }),
-  handler: async (ctx, { mine }) => {
-    const user = await requireAdmin(ctx);
+  handler: async (ctx, { token, mine }) => {
+    const user = await teamAdmin(ctx, token);
     const email = user.email?.trim().toLowerCase();
     const member = email ? await ctx.db.query("teamMembers").withIndex("by_email", (q) => q.eq("email", email)).first() : null;
     const names = await memberNames(ctx);
@@ -258,7 +258,7 @@ export const board = query({
 
 /** One task by its number (SHQ-<number>), with its description, checklist and comments; null if there is none. */
 export const get = query({
-  args: { number: v.number() },
+  args: { token: v.optional(v.string()), number: v.number() },
   returns: v.union(
     v.null(),
     v.object({
@@ -271,8 +271,8 @@ export const get = query({
       comments: v.array(v.object({ id: v.id("taskComments"), author: v.string(), mine: v.boolean(), body: v.string(), createdAt: v.number() })),
     }),
   ),
-  handler: async (ctx, { number }) => {
-    const user = await requireAdmin(ctx);
+  handler: async (ctx, { token, number }) => {
+    const user = await teamAdmin(ctx, token);
     const t = await ctx.db
       .query("tasks")
       .withIndex("by_number", (q) => q.eq("number", number))
@@ -313,10 +313,10 @@ const taskFields = {
 
 /** A new task in To do; returns its number. */
 export const create = mutation({
-  args: taskFields,
+  args: { token: v.optional(v.string()), ...taskFields },
   returns: v.number(),
-  handler: async (ctx, args) => {
-    const user = await requireAdmin(ctx);
+  handler: async (ctx, { token, ...args }) => {
+    const user = await teamAdmin(ctx, token);
     if (args.guideId && !(await ctx.db.get(args.guideId))) fail("That guide was deleted.");
     const last = await ctx.db.query("tasks").withIndex("by_number").order("desc").first();
     const number = (last?.number ?? 0) + 1;
@@ -341,10 +341,10 @@ export const create = mutation({
 
 /** Change any of a task's fields. `guideId: null` unlinks the guide, `dueDate: ""` clears the date. */
 export const update = mutation({
-  args: { taskId: v.id("tasks"), ...taskFields, title: v.optional(v.string()), status: v.optional(taskStatus) },
+  args: { token: v.optional(v.string()), taskId: v.id("tasks"), ...taskFields, title: v.optional(v.string()), status: v.optional(taskStatus) },
   returns: v.null(),
-  handler: async (ctx, { taskId, ...args }) => {
-    await requireAdmin(ctx);
+  handler: async (ctx, { token, taskId, ...args }) => {
+    await teamAdmin(ctx, token);
     const task = await getTask(ctx, taskId);
     const patch: Partial<Doc<"tasks">> = {};
     if (args.title !== undefined) patch.title = line(args.title, "Title", TASK_LIMITS.title);
@@ -365,10 +365,10 @@ export const update = mutation({
 
 /** Tick or untick one checklist item (what the team does from the docs). */
 export const toggleItem = mutation({
-  args: { taskId: v.id("tasks"), itemId: v.string(), done: v.boolean() },
+  args: { token: v.optional(v.string()), taskId: v.id("tasks"), itemId: v.string(), done: v.boolean() },
   returns: v.null(),
-  handler: async (ctx, { taskId, itemId, done }) => {
-    await requireAdmin(ctx);
+  handler: async (ctx, { token, taskId, itemId, done }) => {
+    await teamAdmin(ctx, token);
     const task = await getTask(ctx, taskId);
     if (!task.checklist.some((i) => i.id === itemId)) fail("That checklist item was removed.");
     await touch(ctx, task, { checklist: task.checklist.map((i) => (i.id === itemId ? { ...i, done } : i)) });
@@ -377,10 +377,10 @@ export const toggleItem = mutation({
 });
 
 export const remove = mutation({
-  args: { taskId: v.id("tasks") },
+  args: { token: v.optional(v.string()), taskId: v.id("tasks") },
   returns: v.null(),
-  handler: async (ctx, { taskId }) => {
-    await requireAdmin(ctx);
+  handler: async (ctx, { token, taskId }) => {
+    await teamAdmin(ctx, token);
     await getTask(ctx, taskId);
     for (const c of await ctx.db
       .query("taskComments")
@@ -393,10 +393,10 @@ export const remove = mutation({
 });
 
 export const addComment = mutation({
-  args: { taskId: v.id("tasks"), body: v.string() },
+  args: { token: v.optional(v.string()), taskId: v.id("tasks"), body: v.string() },
   returns: v.id("taskComments"),
-  handler: async (ctx, { taskId, body }) => {
-    const user = await requireAdmin(ctx);
+  handler: async (ctx, { token, taskId, body }) => {
+    const user = await teamAdmin(ctx, token);
     const task = await getTask(ctx, taskId);
     const text = cleanBody(body);
     if (!text) fail("Write something first.");
@@ -409,10 +409,10 @@ export const addComment = mutation({
 
 /** Delete a comment: your own, or any for a super admin. */
 export const removeComment = mutation({
-  args: { commentId: v.id("taskComments") },
+  args: { token: v.optional(v.string()), commentId: v.id("taskComments") },
   returns: v.null(),
-  handler: async (ctx, { commentId }) => {
-    const user = await requireAdmin(ctx);
+  handler: async (ctx, { token, commentId }) => {
+    const user = await teamAdmin(ctx, token);
     const c = await ctx.db.get(commentId);
     if (!c) return null;
     if (c.authorId !== user._id && user.role !== "super_admin") fail("You can only delete your own comments.");

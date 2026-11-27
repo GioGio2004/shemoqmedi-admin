@@ -19,6 +19,7 @@ import {
   TRANSITIONS,
 } from "@/lib/reel/recipe";
 import { auditTools } from "./audit";
+import { TEAM_INSTRUCTIONS, registerTeamTools } from "./teamTools";
 import { publicOrigin, serviceCredential, verifyOAuthToken } from "./oauth";
 import {
   FORMAT_ENUM,
@@ -164,7 +165,9 @@ The listing desk (writing listing pages): Giorgi hands listings, or new sites, t
 5. Show him the whole draft (every field, the write-up in full) and ask. approve_draft with confirm: true only after he says yes to that draft; if he wants changes, submit_draft again and show it again. listing_history and undo_change (confirm: true only when he asks) take a change back.
 6. For a new site, approval doesn't create the listing: tell him to add the screenshots on the link approve_draft returns.
 
-Times are Tbilisi time (UTC+4) unless Giorgi says otherwise.`;
+Times are Tbilisi time (UTC+4) unless Giorgi says otherwise.
+
+${TEAM_INSTRUCTIONS}`;
 
 const slug = z.string().min(1).max(80);
 const postId = z.string().describe("Post id from social_queue");
@@ -929,6 +932,9 @@ const handler = createMcpHandler(
       async (args, ctx) =>
         run(() => convex.mutation(api.mcp.rejectPost, { ...auth(ctx), id: args.id as Id<"socialPosts">, note: args.note })),
     );
+
+    // Team guides and tasks (lib/mcp/teamTools.ts)
+    registerTeamTools(server, convex, run, (ctx) => auth(ctx as ToolContext));
 
     // Email
 

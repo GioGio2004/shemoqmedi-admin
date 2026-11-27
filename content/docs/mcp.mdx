@@ -121,6 +121,22 @@ Claude cannot render video. The reel renders in the admin's browser when they op
 
 The admin's **Emails** page shows the same Resend log.
 
+### Team guides and tasks
+
+The same Convex functions as the admin's **Guides** and **Tasks** pages (`lib/mcp/teamTools.ts`): each takes the connector's admin credential instead of a browser session (`convex/lib/teamAuth.ts`). New guides start as drafts; only Giorgi decides when one is ready for the team.
+
+| Tool | What it does | Effect |
+| --- | --- | --- |
+| `list_guides`, `get_guide` | Every guide; one guide with its sections and links | reads |
+| `create_guide` | A new draft guide with its sections | writes |
+| `update_guide` | Title, summary, area, who it is for, draft or ready | writes |
+| `add_guide_section`, `update_guide_section`, `move_guide_section` | Add, edit, reorder a section (screenshots are added in the admin) | writes |
+| `remove_guide_section`, `delete_guide` | Delete a section or a whole guide; need `confirm: true` | **deletes** |
+| `list_team`, `add_team_member`, `update_team_member` | The people tasks go to | reads / writes |
+| `list_tasks`, `get_task` | The board, one task with checklist and comments | reads |
+| `create_task`, `update_task`, `tick_task_item`, `comment_on_task` | Create and move tasks, assign by name, link a guide | writes |
+| `delete_task` | Delete a task and its comments; needs `confirm: true` | **deletes** |
+
 ## The human gate
 
 `send_email` is the one exception (Giorgi's choice, 24 Nov 2026): it sends straight away, but only after he said yes in chat to the exact preview. It is recorded in `pendingActions` as approved in chat and counts against the daily email cap.

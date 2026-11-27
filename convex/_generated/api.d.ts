@@ -57,6 +57,7 @@ import type * as lib_revisions from "../lib/revisions.js";
 import type * as lib_scoring from "../lib/scoring.js";
 import type * as lib_socialApi from "../lib/socialApi.js";
 import type * as lib_taxonomy from "../lib/taxonomy.js";
+import type * as lib_teamAuth from "../lib/teamAuth.js";
 import type * as lib_time from "../lib/time.js";
 import type * as lib_tokens from "../lib/tokens.js";
 import type * as lib_utils from "../lib/utils.js";
@@ -141,6 +142,7 @@ declare const fullApi: ApiFromModules<{
   "lib/scoring": typeof lib_scoring;
   "lib/socialApi": typeof lib_socialApi;
   "lib/taxonomy": typeof lib_taxonomy;
+  "lib/teamAuth": typeof lib_teamAuth;
   "lib/time": typeof lib_time;
   "lib/tokens": typeof lib_tokens;
   "lib/utils": typeof lib_utils;

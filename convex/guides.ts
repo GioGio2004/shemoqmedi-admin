@@ -1,7 +1,7 @@
 import { ConvexError, v, type Infer } from "convex/values";
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { requireAdmin } from "./authHelpers";
+import { teamAdmin } from "./lib/teamAuth";
 import { guideArea, guideRole } from "./schema";
 import { fail, slugify } from "./lib/listingHelpers";
 import { deleteMediaMany, mediaUrl } from "./lib/media";
@@ -108,10 +108,10 @@ const guideSummary = v.object({
 
 /** Every guide, newest change first, with how many sections it has. */
 export const list = query({
-  args: {},
+  args: { token: v.optional(v.string()) },
   returns: v.array(guideSummary),
-  handler: async (ctx) => {
-    await requireAdmin(ctx);
+  handler: async (ctx, { token }) => {
+    await teamAdmin(ctx, token);
     const guides = await ctx.db.query("guides").withIndex("by_updated").order("desc").take(500);
     return await Promise.all(
       guides.map(async (g) => ({
@@ -136,7 +136,7 @@ export const list = query({
 
 /** One guide with its sections in order and each screenshot's URL; null when there is no such guide. */
 export const get = query({
-  args: { slug: v.string() },
+  args: { token: v.optional(v.string()), slug: v.string() },
   returns: v.union(
     v.null(),
     v.object({
@@ -161,8 +161,8 @@ export const get = query({
       ),
     }),
   ),
-  handler: async (ctx, { slug }) => {
-    await requireAdmin(ctx);
+  handler: async (ctx, { token, slug }) => {
+    await teamAdmin(ctx, token);
     const guide = await ctx.db
       .query("guides")
       .withIndex("by_slug", (q) => q.eq("slug", slug))
@@ -201,10 +201,10 @@ export const get = query({
 
 /** A new, empty guide (a draft); returns its slug. */
 export const create = mutation({
-  args: { title: v.string(), area: guideArea, roles: v.array(guideRole), summary: v.optional(v.string()) },
+  args: { token: v.optional(v.string()), title: v.string(), area: guideArea, roles: v.array(guideRole), summary: v.optional(v.string()) },
   returns: v.string(),
-  handler: async (ctx, args) => {
-    const user = await requireAdmin(ctx);
+  handler: async (ctx, { token, ...args }) => {
+    const user = await teamAdmin(ctx, token);
     const title = line(args.title, "Title", GUIDE_LIMITS.title);
     const summary = args.summary === undefined ? undefined : line(args.summary, "Summary", GUIDE_LIMITS.summary, false) || undefined;
     const slug = await uniqueSlug(ctx, title);
@@ -227,7 +227,7 @@ export const create = mutation({
 
 /** Change a guide's title, summary, area, roles or status. The slug (its address) stays. */
 export const update = mutation({
-  args: {
+  args: { token: v.optional(v.string()),
     guideId: v.id("guides"),
     title: v.optional(v.string()),
     summary: v.optional(v.string()),
@@ -236,8 +236,8 @@ export const update = mutation({
     status: v.optional(v.union(v.literal("draft"), v.literal("ready"))),
   },
   returns: v.null(),
-  handler: async (ctx, { guideId, ...args }) => {
-    const user = await requireAdmin(ctx);
+  handler: async (ctx, { token, guideId, ...args }) => {
+    const user = await teamAdmin(ctx, token);
     await getGuide(ctx, guideId);
     const patch: Partial<Doc<"guides">> = { updatedAt: Date.now(), updatedBy: user._id };
     if (args.title !== undefined) patch.title = line(args.title, "Title", GUIDE_LIMITS.title);
@@ -252,10 +252,10 @@ export const update = mutation({
 
 /** Delete a guide, its sections and their screenshots. */
 export const remove = mutation({
-  args: { guideId: v.id("guides") },
+  args: { token: v.optional(v.string()), guideId: v.id("guides") },
   returns: v.null(),
-  handler: async (ctx, { guideId }) => {
-    const user = await requireAdmin(ctx);
+  handler: async (ctx, { token, guideId }) => {
+    const user = await teamAdmin(ctx, token);
     await getGuide(ctx, guideId);
     const sections = await sectionsOf(ctx, guideId);
     const media = sections.flatMap((s) => s.images.map((i) => i.mediaId));
@@ -274,10 +274,10 @@ export const remove = mutation({
 
 /** Add an empty section at the end of a guide; returns its id. */
 export const addSection = mutation({
-  args: { guideId: v.id("guides"), kind: v.optional(sectionKind) },
+  args: { token: v.optional(v.string()), guideId: v.id("guides"), kind: v.optional(sectionKind) },
   returns: v.id("guideSections"),
-  handler: async (ctx, { guideId, kind = "steps" }) => {
-    const user = await requireAdmin(ctx);
+  handler: async (ctx, { token, guideId, kind = "steps" }) => {
+    const user = await teamAdmin(ctx, token);
     await getGuide(ctx, guideId);
     const sections = await sectionsOf(ctx, guideId);
     if (sections.length >= GUIDE_LIMITS.sections) fail(`A guide can have up to ${GUIDE_LIMITS.sections} sections.`);
@@ -302,7 +302,7 @@ export const addSection = mutation({
  * ImageKit. New ones must be guide screenshots (media.registerGuide).
  */
 export const updateSection = mutation({
-  args: {
+  args: { token: v.optional(v.string()),
     sectionId: v.id("guideSections"),
     kind: sectionKind,
     heading: v.string(),
@@ -311,8 +311,8 @@ export const updateSection = mutation({
     images: v.array(sectionImage),
   },
   returns: v.null(),
-  handler: async (ctx, { sectionId, ...args }) => {
-    const user = await requireAdmin(ctx);
+  handler: async (ctx, { token, sectionId, ...args }) => {
+    const user = await teamAdmin(ctx, token);
     const section = await getSection(ctx, sectionId);
     if (args.images.length > GUIDE_LIMITS.images) fail(`A section can have up to ${GUIDE_LIMITS.images} screenshots.`);
     const before = new Set<string>(section.images.map((i) => i.mediaId));
@@ -347,10 +347,10 @@ export const updateSection = mutation({
 
 /** Move a section one place up or down. */
 export const moveSection = mutation({
-  args: { sectionId: v.id("guideSections"), direction: v.union(v.literal("up"), v.literal("down")) },
+  args: { token: v.optional(v.string()), sectionId: v.id("guideSections"), direction: v.union(v.literal("up"), v.literal("down")) },
   returns: v.null(),
-  handler: async (ctx, { sectionId, direction }) => {
-    const user = await requireAdmin(ctx);
+  handler: async (ctx, { token, sectionId, direction }) => {
+    const user = await teamAdmin(ctx, token);
     const section = await getSection(ctx, sectionId);
     const sections = await sectionsOf(ctx, section.guideId);
     const i = sections.findIndex((s) => s._id === sectionId);
@@ -370,10 +370,10 @@ export const moveSection = mutation({
 
 /** Delete a section and its screenshots. */
 export const removeSection = mutation({
-  args: { sectionId: v.id("guideSections") },
+  args: { token: v.optional(v.string()), sectionId: v.id("guideSections") },
   returns: v.null(),
-  handler: async (ctx, { sectionId }) => {
-    const user = await requireAdmin(ctx);
+  handler: async (ctx, { token, sectionId }) => {
+    const user = await teamAdmin(ctx, token);
     const section = await getSection(ctx, sectionId);
     await ctx.db.delete(sectionId);
     await deleteMediaMany(
@@ -388,10 +388,10 @@ export const removeSection = mutation({
 
 /** The starter guides (convex/lib/guideStarters.ts) not in the database yet, by slug. */
 export const missingStarters = query({
-  args: {},
+  args: { token: v.optional(v.string()) },
   returns: v.array(v.object({ slug: v.string(), title: v.string() })),
-  handler: async (ctx) => {
-    await requireAdmin(ctx);
+  handler: async (ctx, { token }) => {
+    await teamAdmin(ctx, token);
     const missing = [];
     for (const g of GUIDE_STARTERS) {
       const found = await ctx.db
@@ -410,10 +410,10 @@ export const missingStarters = query({
  * Returns how many were added.
  */
 export const addStarters = mutation({
-  args: {},
+  args: { token: v.optional(v.string()) },
   returns: v.number(),
-  handler: async (ctx) => {
-    const user = await requireAdmin(ctx);
+  handler: async (ctx, { token }) => {
+    const user = await teamAdmin(ctx, token);
     let added = 0;
     const now = Date.now();
     for (const [n, g] of GUIDE_STARTERS.entries()) {
