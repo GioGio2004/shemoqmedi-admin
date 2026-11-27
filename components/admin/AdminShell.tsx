@@ -63,6 +63,7 @@ const NAV = [
   { href: "/creators", label: "Creators", count: null },
   { href: "/jury", label: "Jury", count: null },
   { href: "/outreach", label: "Outreach", count: null },
+  { href: "/guides", label: "Guides", count: null },
   { href: "/emails", label: "Emails", count: null },
   { href: "/users", label: "Users", count: null },
   { href: "/claims", label: "Claims", count: ClaimsCount },
@@ -301,7 +302,7 @@ function AdminHeader() {
         <Wordmark />
         <span className="admin-brand-label">Admin</span>
       </Link>
-      {/* Thirteen items: the bar scrolls sideways (no scrollbar) when the window
+      {/* Every section: the bar scrolls sideways (no scrollbar) when the window
           is narrow, and the button at its end lists every section at once. */}
       <div className="admin-nav-wrap">
         <nav className="admin-navigation" aria-label="Admin navigation">

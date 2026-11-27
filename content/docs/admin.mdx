@@ -113,6 +113,10 @@ Create, edit, deactivate and delete jurors. A juror can be created before the pe
 
 Every pre-created jury profile and listing that nobody has claimed yet, each with its claim link, ready to send in a DM or email. A link works once. Claiming a listing makes its links followed (dofollow).
 
+### Guides (`/guides`)
+
+The team's how-tos for daily work: what to send, where to click, step by step. Unlike these docs, guides are edited in the admin and change at once, with no deploy. Each guide has an area (Networking, Social, Listings, Jury, Operations), says who it is for (Owner, Developer, Ops assistant or Everyone), and is made of sections in order: text with bullets and numbered steps, up to 8 screenshots each (ImageKit, `/guides/<slug>/`), or a message to copy with a Copy button. Press **Edit guide** to add, edit, delete and move sections. The first networking guides (jury invitations, listing invitations, finding leads) come from `convex/lib/guideStarters.ts` through **Add starter guides** on an empty list; after that the admin is the source of truth. Backend: `convex/guides.ts`.
+
 ### Users (`/users`)
 
 Everyone who signed up, with their number of listings and votes. Grant or remove admin here (see Roles above).

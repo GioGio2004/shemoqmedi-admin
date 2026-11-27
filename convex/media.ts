@@ -211,13 +211,67 @@ export const registerSocial = mutation({
   },
 });
 
+/** Where team guide screenshots live on ImageKit: /guides/<guide-slug>/. */
+export const GUIDES_FOLDER = "/guides/";
+
+/** The file name and folder a guide screenshot gets: /guides/<guide>/<guide>-<label>.<ext>. */
+export function guideUploadTarget(guide: string, label: string, contentType: string) {
+  const ext = EXTENSIONS[contentType];
+  if (!ext) throw new ConvexError("Screenshots must be WebP, PNG or JPEG images.");
+  const slug = safeSegment(guide, "guide");
+  return { fileName: `${slug}-${safeSegment(label, "screenshot", 40)}.${ext}`, folder: `${GUIDES_FOLDER}${slug}`, tags: `guide,${slug},image` };
+}
+
+/** Admin: signed parameters for one browser → ImageKit upload of a guide screenshot (valid 10 minutes). */
+export const guideUploadAuth = action({
+  args: { site: v.string(), label: v.string(), contentType: v.string() },
+  returns: vUploadAuth,
+  handler: async (ctx, { site, label, contentType }) => {
+    await ctx.runQuery(internal.users.assertAdmin, {});
+    await ctx.runMutation(internal.rateLimits.hit, { name: "imageUpload" });
+    return await signUpload({ ...guideUploadTarget(site, label, contentType), types: IMAGE_TYPES });
+  },
+});
+
+/** Admin: record a guide screenshot uploaded to /guides/ (then verified against ImageKit like any upload). */
+export const registerGuide = mutation({
+  args: {
+    fileId: v.string(),
+    url: v.string(),
+    filePath: v.string(),
+    kind: v.literal("image"),
+    contentType: v.string(),
+    size: v.number(),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
+  },
+  returns: v.id("media"),
+  handler: async (ctx, args) => {
+    const user = await requireAdmin(ctx);
+    const endpoint = env("IMAGEKIT_URL_ENDPOINT");
+    if (!args.url.startsWith(`${endpoint}${GUIDES_FOLDER}`) || !args.filePath.startsWith(GUIDES_FOLDER)) {
+      throw new ConvexError("That file is not in the guides folder. Upload it again.");
+    }
+    if (!/^[A-Za-z0-9_-]{6,64}$/.test(args.fileId)) throw new ConvexError("Invalid upload.");
+    checkLimits("image", args.contentType, args.size);
+    const existing = await ctx.db
+      .query("media")
+      .withIndex("by_fileId", (q) => q.eq("fileId", args.fileId))
+      .first();
+    if (existing) return existing._id;
+    const id = await ctx.db.insert("media", { ...args, uploadedBy: user._id, createdAt: Date.now() });
+    await ctx.scheduler.runAfter(0, internal.media.verify, { id, fileId: args.fileId, kind: "image", folder: GUIDES_FOLDER });
+    return id;
+  },
+});
+
 /** Double-check a registered file against ImageKit (real size, type, path; listings unless `folder` says otherwise). */
 export const verify = internalAction({
   args: {
     id: v.id("media"),
     fileId: v.string(),
     kind: v.union(v.literal("image"), v.literal("video")),
-    folder: v.optional(v.union(v.literal("/listings/"), v.literal(SOCIAL_FOLDER))),
+    folder: v.optional(v.union(v.literal("/listings/"), v.literal(SOCIAL_FOLDER), v.literal(GUIDES_FOLDER))),
   },
   returns: v.null(),
   handler: async (ctx, { id, fileId, kind, folder = "/listings/" }) => {

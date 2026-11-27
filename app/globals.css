@@ -225,6 +225,42 @@
 .score-summary dd.admin-mono { font-size: 20px; font-weight: 600; letter-spacing: .02em; }
 .score-votes { display: block; margin-top: 2px; color: var(--muted-ink); font-size: 10px; font-weight: 500; letter-spacing: .06em; }
 
+/* ── Team guides (/guides) ─────────────────────────────────────────────── */
+.guide-card { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 22px 24px; border: 1px solid var(--line); border-radius: 22px; background: var(--panel); }
+.guide-card:hover { border-color: var(--foreground); }
+.guide-card h2 { font-size: 22px; line-height: 1.25; font-weight: 500; }
+.guide-card p:not(.admin-eyebrow) { max-width: 70ch; color: var(--muted-ink); font-size: 13px; line-height: 1.7; }
+.guide-card-end { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 12px 18px; flex-shrink: 0; }
+@media (max-width: 700px) { .guide-card { flex-direction: column; align-items: stretch; } .guide-card-end { justify-content: space-between; } }
+.guide-layout { display: grid; grid-template-columns: 15rem minmax(0, 1fr); align-items: start; gap: clamp(24px, 4vw, 56px); }
+.guide-layout > :only-child { grid-column: 1 / -1; max-width: 880px; }
+.guide-toc { position: sticky; top: 132px; display: grid; gap: 12px; max-height: calc(100dvh - 160px); overflow-y: auto; scrollbar-width: none; }
+.guide-toc ol { display: grid; gap: 2px; counter-reset: toc; }
+.guide-toc li { counter-increment: toc; }
+.guide-toc a { display: block; padding: 6px 0; color: var(--muted-ink); font-size: 12px; line-height: 1.45; }
+.guide-toc a::before { content: counter(toc) "  "; font-family: var(--font-mono, ui-monospace, monospace); font-size: 10px; }
+.guide-toc a:hover { color: var(--foreground); }
+@media (max-width: 1000px) { .guide-layout { grid-template-columns: 1fr; } .guide-toc { position: static; max-height: none; } }
+.guide-section { display: grid; gap: 18px; max-width: 880px; padding: clamp(22px, 3vw, 34px); border: 1px solid var(--line); border-radius: 24px; background: var(--panel); scroll-margin-top: 132px; }
+.guide-section-head { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; }
+.guide-section h2 { font-size: clamp(20px, 2vw, 26px); line-height: 1.25; font-weight: 500; }
+.guide-text { display: grid; gap: 12px; font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; }
+.guide-text p { white-space: pre-line; }
+.guide-text ul { display: grid; gap: 6px; padding-left: 20px; list-style: disc; }
+.guide-text ol { display: grid; gap: 6px; padding-left: 22px; list-style: decimal; }
+.guide-text li { white-space: pre-line; padding-left: 4px; }
+.guide-message { padding: 20px 22px; border-radius: 16px; background: var(--surface-raised); font-size: 14px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+.guide-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+.guide-images figure { display: grid; gap: 8px; }
+.guide-images img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 14px; }
+.guide-images figcaption { color: var(--muted-ink); font-size: 12px; line-height: 1.6; }
+.guide-image-missing { display: grid; place-items: center; min-height: 96px; border: 1px dashed var(--line); border-radius: 14px; color: var(--muted-ink); font-size: 12px; }
+.guide-image-edit { display: grid; grid-template-columns: 140px minmax(0, 1fr); align-items: start; gap: 16px; }
+.guide-image-edit img { width: 140px; max-height: 120px; object-fit: cover; object-position: top; border: 1px solid var(--line); border-radius: 12px; }
+.guide-textarea { min-height: 160px; resize: vertical; font-size: 14px; }
+.guide-drop { display: grid; gap: 4px; justify-items: center; padding: 22px; border: 1px dashed var(--line); border-radius: 16px; font-size: 13px; font-weight: 500; text-align: center; cursor: pointer; }
+.guide-drop:hover, .guide-drop:focus-within { border-color: var(--foreground); }
+
 /* ── Claims ────────────────────────────────────────────────────────────── */
 .claim-card { display: grid; gap: 24px; padding: clamp(20px, 3vw, 32px); border: 1px solid var(--line); border-radius: 22px; background: var(--panel); }
 .claim-card-main { display: flex; justify-content: space-between; align-items: start; gap: 16px; }

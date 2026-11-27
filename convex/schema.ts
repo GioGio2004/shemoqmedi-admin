@@ -312,6 +312,17 @@ export const auditReport = v.object({
   lighthouseVersion: v.string(),
 });
 
+/** Team guides: which part of the work a guide is about. */
+export const guideArea = v.union(
+  v.literal("networking"),
+  v.literal("social"),
+  v.literal("listings"),
+  v.literal("jury"),
+  v.literal("operations"),
+);
+/** Team guides: who a guide is for. */
+export const guideRole = v.union(v.literal("everyone"), v.literal("owner"), v.literal("developer"), v.literal("ops"));
+
 export default defineSchema({
   // Files uploaded to ImageKit (convex/media.ts). WebP screenshots and
   // MP4/WebM previews under /listings/<slug>/ with SEO-friendly names.
@@ -1086,4 +1097,36 @@ export default defineSchema({
     source: v.string(), // utm_source, in-app browser or "direct"
     count: v.number(),
   }).index("by_day_event", ["day", "event", "source"]),
+
+  // Team guides (convex/guides.ts): how-tos the owner writes for the team in
+  // the admin (/guides), editable without a deploy. Admin-only. The MDX docs
+  // site (content/docs) is for how the platform works; guides are for daily
+  // work: what to send, where to click.
+  guides: defineTable({
+    slug: v.string(), // stable key: URL /guides/<slug>, starter guides, image folder
+    title: v.string(),
+    summary: v.optional(v.string()), // one line: when to use it
+    area: guideArea,
+    roles: v.array(guideRole), // who it is for (a label; every admin can read every guide)
+    status: v.union(v.literal("draft"), v.literal("ready")),
+    createdBy: v.optional(v.id("users")),
+    updatedBy: v.optional(v.id("users")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_slug", ["slug"])
+    .index("by_updated", ["updatedAt"]),
+
+  // One section of a guide, in `position` order: a heading, text and screenshots.
+  // "template" sections are copy-ready messages (a Copy button in the admin).
+  guideSections: defineTable({
+    guideId: v.id("guides"),
+    position: v.number(),
+    kind: v.union(v.literal("steps"), v.literal("template")),
+    heading: v.string(),
+    body: v.string(), // plain text: blank line = paragraph, "- " bullets, "1. " steps, URLs link
+    language: v.optional(v.union(v.literal("ka"), v.literal("en"))), // templates: the message's language
+    images: v.array(v.object({ mediaId: v.id("media"), caption: v.optional(v.string()) })),
+    updatedAt: v.number(),
+  }).index("by_guide_position", ["guideId", "position"]),
 });
