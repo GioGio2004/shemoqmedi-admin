@@ -107,3 +107,21 @@ export function docsIndex() {
   }));
 }
 export type DocsIndex = ReturnType<typeof docsIndex>;
+
+/** The sidebar and search entry for the team guides (edited in the admin, read here): "All guides", then each ready guide. */
+export function guidesIndexSection(guides: { slug: string; title: string; summary?: string; area: string; roles: string[] }[]) {
+  return {
+    id: "guides",
+    number: pad(SECTIONS.length + 1),
+    title: "Team guides",
+    pages: [
+      { slug: "guides", title: "All guides", summary: "How-tos for daily work: what to send, where to click.", keywords: ["guides", "how to", "templates", "messages"] },
+      ...guides.map((g) => ({
+        slug: `guides/${g.slug}`,
+        title: g.title,
+        summary: g.summary ?? "",
+        keywords: ["guide", g.area, ...g.roles],
+      })),
+    ],
+  };
+}

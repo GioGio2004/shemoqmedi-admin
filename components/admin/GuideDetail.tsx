@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Fragment, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { FunctionReturnType } from "convex/server";
 import { formatDate } from "@/lib/storefront";
-import { linkify, parseGuideText, placeholders } from "@/lib/guideText";
+import { placeholders } from "@/lib/guideText";
+import { CopyButton } from "@/components/guides/CopyButton";
+import { GuideText } from "@/components/guides/GuideText";
 import { MAX_IMAGE_INPUT_BYTES, uploadToImageKit } from "@/lib/imagekitUpload";
 import { showAlert, showError } from "./Alerts";
 import { Select } from "./Select";
@@ -23,77 +25,9 @@ const MAX_IMAGES = 8;
 
 // ─── Reading ────────────────────────────────────────────────────────────────
 
-function Inline({ text }: { text: string }) {
-  return (
-    <>
-      {linkify(text).map((p, i) =>
-        p.type === "link" ? (
-          <a key={i} href={p.href} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">
-            {p.text}
-          </a>
-        ) : (
-          <Fragment key={i}>{p.text}</Fragment>
-        ),
-      )}
-    </>
-  );
-}
-
-/** Section text: paragraphs, bullets and numbered steps (lib/guideText.ts). */
-export function GuideText({ text }: { text: string }) {
+function Text({ text }: { text: string }) {
   if (!text.trim()) return <p className="opacity-50">No text yet.</p>;
-  return (
-    <div className="guide-text">
-      {parseGuideText(text).map((b, i) =>
-        b.type === "paragraph" ? (
-          <p key={i}>
-            <Inline text={b.lines.join("\n")} />
-          </p>
-        ) : b.type === "bullets" ? (
-          <ul key={i}>
-            {b.items.map((item, j) => (
-              <li key={j}>
-                <Inline text={item} />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <ol key={i} start={b.start}>
-            {b.items.map((item, j) => (
-              <li key={j}>
-                <Inline text={item} />
-              </li>
-            ))}
-          </ol>
-        ),
-      )}
-    </div>
-  );
-}
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(false), 1800);
-    return () => clearTimeout(t);
-  }, [copied]);
-  return (
-    <button
-      type="button"
-      className="admin-button"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(text);
-          setCopied(true);
-        } catch {
-          showAlert("Couldn't copy. Select the text and copy it by hand.");
-        }
-      }}
-    >
-      {copied ? "Copied" : "Copy message"}
-    </button>
-  );
+  return <GuideText text={text} className="guide-text" />;
 }
 
 function Images({ images }: { images: Section["images"] }) {
@@ -124,12 +58,12 @@ function SectionView({ section }: { section: Section }) {
         <>
           <div className="guide-message">{section.body || <span className="opacity-50">No message yet.</span>}</div>
           <div className="flex flex-wrap items-center gap-3">
-            {section.body && <CopyButton text={section.body} />}
+            {section.body && <CopyButton text={section.body} className="admin-button" />}
             {blanks.length > 0 && <span className="text-xs opacity-60">Fill in before sending: {blanks.map((b) => `{${b}}`).join(", ")}</span>}
           </div>
         </>
       ) : (
-        <GuideText text={section.body} />
+        <Text text={section.body} />
       )}
       <Images images={section.images} />
     </div>

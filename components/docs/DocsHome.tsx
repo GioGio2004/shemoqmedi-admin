@@ -5,7 +5,7 @@ import { PAGES, SECTIONS, pad } from "@/content/docs";
 // portfolio's silhouette block), a strip of facts, then every section as a
 // cell of the grid with its pages.
 
-export function DocsHome() {
+export function DocsHome({ guides = [] }: { guides?: { slug: string; title: string }[] }) {
   return (
     <div className="docs-home">
       <section className="docs-hero">
@@ -65,6 +65,31 @@ export function DocsHome() {
             </ul>
           </div>
         ))}
+        <div className="docs-section-cell">
+          <p className="docs-section-num">{pad(SECTIONS.length + 1)}</p>
+          <h2>Team guides</h2>
+          <p className="docs-section-blurb">How-tos for daily work, written in the admin: what to send, where to click.</p>
+          <ul>
+            {guides.map((g) => (
+              <li key={g.slug}>
+                <Link href={`/guides/${g.slug}`}>
+                  <span>{g.title}</span>
+                  <span className="docs-arrow" aria-hidden="true">
+                    →
+                  </span>
+                </Link>
+              </li>
+            ))}
+            <li>
+              <Link href="/guides">
+                <span>All guides</span>
+                <span className="docs-arrow" aria-hidden="true">
+                  →
+                </span>
+              </Link>
+            </li>
+          </ul>
+        </div>
       </section>
     </div>
   );

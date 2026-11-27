@@ -2,8 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { connection } from "next/server";
 import { DocsShell } from "@/components/docs/DocsShell";
 import { NoAccess } from "@/components/docs/NoAccess";
-import { docsIndex } from "@/content/docs";
+import { docsIndex, guidesIndexSection } from "@/content/docs";
 import { getDocsViewer } from "@/lib/docsAccess";
+import { getDocsGuides } from "@/lib/docsGuides";
 import "./docs.css";
 
 // The team docs (docs.shemoqmedi.space): proxy.ts rewrites /x on the docs
@@ -22,10 +23,12 @@ export const viewport: Viewport = { themeColor: "#1c1c1c" };
 export default async function DocsLayout({ children }: { children: React.ReactNode }) {
   await connection();
   const viewer = await getDocsViewer();
+  // The team guides live in Convex (edited in the admin); ready ones join the sidebar and search.
+  const guides = viewer.status === "ok" ? await getDocsGuides() : [];
   return (
     <div className="docs">
       {viewer.status === "ok" ? (
-        <DocsShell index={docsIndex()} viewerName={viewer.name}>
+        <DocsShell index={[...docsIndex(), guidesIndexSection(guides)]} viewerName={viewer.name}>
           {children}
         </DocsShell>
       ) : (

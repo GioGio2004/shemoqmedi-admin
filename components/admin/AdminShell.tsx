@@ -7,9 +7,10 @@ import { UserButton } from "@clerk/nextjs";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { STOREFRONT_URL } from "@/lib/storefront";
-import { STUDIO_ORIGIN } from "@/lib/hosts";
+import { DOCS_ORIGIN, STUDIO_ORIGIN } from "@/lib/hosts";
 import { Wordmark } from "./Wordmark";
 import { useAdmin } from "./useAdmin";
+import { ThemeToggle } from "./ThemeToggle";
 
 function CountBubble({
   value,
@@ -86,6 +87,17 @@ function studioOriginHere() {
 
 function useStudioOrigin() {
   return useSyncExternalStore(noSubscribe, studioOriginHere, () => STUDIO_ORIGIN);
+}
+
+/** The team docs from here: docs.localhost next to a local admin, else production. */
+function docsOriginHere() {
+  const { hostname, port } = window.location;
+  const local = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  return local ? `http://docs.localhost${port ? `:${port}` : ""}` : DOCS_ORIGIN;
+}
+
+export function useDocsOrigin() {
+  return useSyncExternalStore(noSubscribe, docsOriginHere, () => DOCS_ORIGIN);
 }
 
 /** The Studio (social queue, design, reels) opens as its own app in a new tab, with the waiting posts count. */
@@ -226,6 +238,7 @@ function MobileTabBar({
   const { open, wrap, setOpen } = usePageMenu(pathname);
   const tab = (href: string) => (isCurrent(pathname, href) ? "page" : undefined);
   const studio = useStudioOrigin();
+  const docs = useDocsOrigin();
 
   // The page under the open sheet doesn't scroll (globals.css .admin-sheet-open).
   useEffect(() => {
@@ -250,6 +263,9 @@ function MobileTabBar({
             <SectionLinks pathname={pathname} showCounts={showCounts} onNavigate={() => setOpen(false)} />
             <a href={STOREFRONT_URL} target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}>
               Storefront <span aria-hidden="true">↗</span>
+            </a>
+            <a href={docs} target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}>
+              Docs <span aria-hidden="true">↗</span>
             </a>
           </div>
         </div>
@@ -295,6 +311,7 @@ function TabIcon({ d }: { d: string }) {
 function AdminHeader() {
   const pathname = usePathname();
   const admin = useAdmin();
+  const docs = useDocsOrigin();
 
   return (
     <header className="admin-header">
@@ -326,6 +343,9 @@ function AdminHeader() {
       </div>
       <div className="admin-header-actions">
         <StudioLink className="admin-storefront-link" showCounts={admin.kind === "admin"} />
+        <a href={docs} className="admin-storefront-link" target="_blank" rel="noopener noreferrer">
+          Docs <span aria-hidden="true">↗</span>
+        </a>
         <a
           href={STOREFRONT_URL}
           className="admin-storefront-link"
@@ -334,6 +354,7 @@ function AdminHeader() {
         >
           Storefront <span aria-hidden="true">↗</span>
         </a>
+        <ThemeToggle />
         <UserButton />
       </div>
     </header>

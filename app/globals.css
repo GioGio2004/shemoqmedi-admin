@@ -333,3 +333,76 @@
   .admin-button { min-height: 50px; }
   .admin-check input { width: 22px; height: 22px; }
 }
+
+/* ── Theme switch button (header) ─────────────────────────────────────── */
+.admin-theme-toggle { display: grid; place-items: center; width: 40px; height: 40px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 999px; color: var(--foreground); transition: border-color .2s, color .2s; }
+.admin-theme-toggle:hover { border-color: var(--foreground); }
+.guide-text a { text-decoration: underline; text-underline-offset: 4px; }
+.guide-lines { white-space: pre-line; }
+
+/* ── Dark theme: the team docs' look (lib/adminTheme.ts) ───────────────────
+   Charcoal #1c1c1c with the docs' pale grain, white type, hairlines at low
+   opacity, and orange #ff4d00 as the one accent (~10%): the current page,
+   the page's kicker, focus, selection and award marks. Everything else in
+   the admin is drawn from the variables below, and the Tailwind black/white
+   utilities (text-black/60, bg-black, border-black/10…) follow by swapping
+   --color-black and --color-white, as the storefront's dark theme does.
+   Last in the file and unlayered, so it wins. Screenshots are untouched. */
+html[data-admin-theme="dark"] {
+  color-scheme: dark;
+  --orange: #ff4d00;
+  --background: #1c1c1c;
+  --foreground: #ffffff;
+  --muted-ink: rgb(255 255 255 / 0.5);
+  --panel: rgb(255 255 255 / 0.02);
+  --surface-raised: rgb(255 255 255 / 0.06);
+  --line: rgb(255 255 255 / 0.1);
+  --header: rgb(28 28 28 / 0.82);
+  --color-white: #1c1c1c;
+  --color-black: #ffffff;
+  --card: #1c1c1c;
+  --card-foreground: #ffffff;
+  --popover: #232323;
+  --popover-foreground: #ffffff;
+  --primary: #ffffff;
+  --primary-foreground: #1c1c1c;
+  --secondary: #1c1c1c;
+  --secondary-foreground: #ffffff;
+  --muted: #1c1c1c;
+  --muted-foreground: rgb(255 255 255 / 0.5);
+  --accent: rgb(255 255 255 / 0.06);
+  --accent-foreground: #ffffff;
+  --destructive: #ffffff;
+  --border: rgb(255 255 255 / 0.1);
+  --input: rgb(255 255 255 / 0.16);
+  --ring: #ff4d00;
+  --grain-pale: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.17 -0.05'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background: #1c1c1c;
+}
+html[data-admin-theme="dark"] body { background: var(--grain-pale) #1c1c1c; background-attachment: fixed; }
+html[data-admin-theme="dark"] ::selection { background: var(--orange); color: #1c1c1c; }
+html[data-admin-theme="dark"] :where(a, button, input, textarea, select, summary, [tabindex]):focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
+
+/* The current page: orange, like the docs' sidebar. */
+html[data-admin-theme="dark"] .admin-navigation a[aria-current="page"],
+html[data-admin-theme="dark"] .admin-all-panel a[aria-current="page"],
+html[data-admin-theme="dark"] .admin-sheet-links a[aria-current="page"],
+html[data-admin-theme="dark"] .admin-tabs a[aria-current="page"] { background: var(--orange); color: #1c1c1c; }
+html[data-admin-theme="dark"] .admin-navigation a[aria-current="page"] .admin-count > span,
+html[data-admin-theme="dark"] .admin-all-panel a[aria-current="page"] .admin-count > span,
+html[data-admin-theme="dark"] .admin-sheet-links a[aria-current="page"] .admin-count > span { color: var(--orange); }
+@media (max-width: 900px) {
+  html[data-admin-theme="dark"] .admin-tabbar > [aria-current="page"] { color: var(--orange); }
+}
+/* The page's kicker, like the docs' section number. */
+html[data-admin-theme="dark"] .admin-page-heading .admin-eyebrow,
+html[data-admin-theme="dark"] .workspace-hero .admin-eyebrow { color: var(--orange); }
+/* Awards and live states. */
+html[data-admin-theme="dark"] .admin-award,
+html[data-admin-theme="dark"] .admin-status[data-status="in_voting"],
+html[data-admin-theme="dark"] .admin-status[data-status="awarded"] { background: var(--orange); border-color: var(--orange); color: #1c1c1c; }
+html[data-admin-theme="dark"] .admin-text-link:hover,
+html[data-admin-theme="dark"] .admin-storefront-link:hover { color: var(--orange); }
+html[data-admin-theme="dark"] .workspace-card:hover,
+html[data-admin-theme="dark"] .request-list-card:hover,
+html[data-admin-theme="dark"] .guide-card:hover { border-color: var(--orange); }

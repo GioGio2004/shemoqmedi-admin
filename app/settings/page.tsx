@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { NotificationsPanel } from "@/components/pwa/NotificationsPanel";
+import { ThemePanel } from "@/components/admin/ThemeToggle";
 
 export const metadata: Metadata = { title: "Settings | Shemoqmedi Admin" };
 
@@ -12,10 +13,13 @@ export default function SettingsPage() {
         <div>
           <p className="admin-eyebrow">Settings</p>
           <h1>This device</h1>
-          <p>Install the admin as an app and choose whether it may send you notifications.</p>
+          <p>The theme, installing the admin as an app, and whether it may send you notifications.</p>
         </div>
       </div>
-      <NotificationsPanel />
+      <div className="grid gap-6">
+        <ThemePanel />
+        <NotificationsPanel />
+      </div>
     </AdminShell>
   );
 }

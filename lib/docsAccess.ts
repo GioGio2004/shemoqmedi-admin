@@ -18,16 +18,25 @@ export type DocsViewer =
   | { status: "signed-out" }
   | { status: "forbidden"; name: string | null };
 
-/** The current viewer's access to the docs (once per request). */
-export const getDocsViewer = cache(async (): Promise<DocsViewer> => {
+/**
+ * A Convex client signed in as the current viewer (once per request), or null
+ * when signed out. A client per request: a shared one would carry one user's
+ * token into another's request.
+ */
+export const getDocsConvex = cache(async (): Promise<ConvexHttpClient | null> => {
   const { userId, getToken } = await auth();
-  if (!userId) return { status: "signed-out" };
+  if (!userId) return null;
   const token = await getToken({ template: "convex" });
-  if (!token) return { status: "signed-out" };
-
-  // A client per request: a shared one would carry one user's token into another's request.
+  if (!token) return null;
   const client = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
   client.setAuth(token);
+  return client;
+});
+
+/** The current viewer's access to the docs (once per request). */
+export const getDocsViewer = cache(async (): Promise<DocsViewer> => {
+  const client = await getDocsConvex();
+  if (!client) return { status: "signed-out" };
   const user = await client.query(api.users.getCurrentUser, {}).catch(() => null);
   const name = user?.name ?? null;
   const role = user?.role;

@@ -5,6 +5,7 @@ import { ClerkProvider } from "@/components/clerk-provider";
 import ConvexClientProvider from "@/components/ConvexProviderWithClerk";
 import { AlertViewport } from "@/components/admin/Alerts";
 import { ServiceWorkerRegister } from "@/components/pwa/ServiceWorkerRegister";
+import { ADMIN_THEME_SCRIPT } from "@/lib/adminTheme";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -45,7 +46,11 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       {/* The Studio sets data-studio-theme on <html> before hydration (app/studio/layout.tsx). */}
+      {/* The admin's light / dark choice goes on <html> before the first paint (lib/adminTheme.ts). */}
       <html lang="en" suppressHydrationWarning>
+        <head>
+          <script dangerouslySetInnerHTML={{ __html: ADMIN_THEME_SCRIPT }} />
+        </head>
         <body className={inter.variable}>
           <ConvexClientProvider>{children}</ConvexClientProvider>
           <AlertViewport />

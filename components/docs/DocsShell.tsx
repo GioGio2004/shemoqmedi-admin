@@ -14,7 +14,8 @@ import { DocsSearch } from "./DocsSearch";
 
 export function DocsShell({ index, viewerName, children }: { index: DocsIndex; viewerName: string | null; children: ReactNode }) {
   const pathname = usePathname();
-  const slug = pathname.replace(/^\/(docs\/?)?/, "").split("/")[0] ?? "";
+  // "awards", or "guides/jury-invitations" for a team guide.
+  const slug = pathname.replace(/^\/(docs\/?)?/, "").replace(/\/+$/, "");
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
 
